@@ -62,6 +62,31 @@ namespace Z
     | internal.currentEnvironment md        => internal.currentEnvironment (f md)
     | internal.provideEnvironment e r md    => internal.provideEnvironment e r (f md)
 
+  def showHead : Z R E A -> String
+    | internal.done _ _                 => "done"
+    | internal.sync _ _                 => "sync"
+    | internal.async _ _                => "async"
+    | internal.onSuccess _ _ _          => "onSuccess"
+    | internal.fork ..                  => "fork"
+    | internal.onSuccessAndFailure ..   => "onSuccessAndFailure"
+    | internal.setInterruptStatus _ _ _ => "setInterruptStatus"
+    | internal.contramap _ _ _          => "widenEnv"
+    | internal.currentEnvironment _     => "currentEnvironment"
+    | internal.provideEnvironment _ _ _ => "provideEnvironment"
+
+  def metadata : Z R E A -> Metadata
+    | internal.done _ md                    => md
+    | internal.sync _ md                    => md
+    | internal.async _ md                   => md
+    | internal.onSuccess _ _ md             => md
+    | internal.fork _ _ md                  => md
+    | internal.onSuccessAndFailure _ _ _ md => md
+    | internal.setInterruptStatus _ _ md    => md
+    | internal.contramap _ _ md             => md
+    | internal.currentEnvironment md        => md
+    | internal.provideEnvironment _ _ md    => md
+
+
   def withLabel (self : Z R E A) (label : String) : Z R E A :=
     self.updateMetadata fun md => {md with label := label }
 
@@ -70,7 +95,6 @@ namespace Z
 
   def succeedNow (a : A): Z Unit Empty A := 
     Z.succeedNow' a
-
 
   def map (f : A -> B) (self : Z R E A) : (Z R E B) :=
     internal.onSuccess self (fun a => succeedNow' <| f a) |>.withLabel "map"
@@ -86,22 +110,13 @@ namespace Z
 
   def mapError (f : E₀ -> E) (self : Z R E₀ A) : Z R E A := by
       apply internal.onSuccessAndFailure self
-      case md => exact mempty
+      case md => 
+        exact mempty
       case errorHandler => 
         intro e0
         exact done' <| Exit.failure <| e0.map f
       case next => 
         exact done' ∘ Exit.success  
-
-  /-- Simulate contravariant R -/
-  instance [inst : R₀ <: R₁] : (Z R₁ E A) <: (Z R₀ E A) := ⟨contramap inst.coe⟩
-    
-  /-- Simulate covariant A -/
-  instance [inst: A <: B] : (Z R E A) <: (Z R E B) := ⟨map inst.coe⟩
-
-  /-- Simulate covariant E -/
-  instance [inst: E₀ <: E] : (Z R E₀ A) <: (Z R E A) := ⟨mapError inst.coe⟩
-
 
   def succeed' (io : IO A) (md := Metadata.withLabel "succeed"): Z R E A := 
     internal.sync io md
@@ -114,15 +129,6 @@ namespace Z
 
   def async (registerCallback : Observer E A -> IO Unit) (md := mempty) : Z R E A := 
     internal.async registerCallback md
-
-    
-  def errorHandlerCause (errorHandler : E -> Z R E₁ A₁): Cause E -> Z R E₁ A₁ := fun
-    | .fail  e   => errorHandler e
-    | .die ioe   => done' <| .failure <| .die ioe
-    | .interrupt => done' <| .failure .interrupt
-
-
-  def widenError (self : Z R Empty A): Z R E A := self
 
   def flatMap (effect : Z R E A) (next : A -> Z R E A₁) (md := Metadata.withLabel "flatMap") := 
     internal.onSuccess effect next md
@@ -143,7 +149,18 @@ namespace Z
   def withIO (io : IO A) (f : A -> Z R E B) : Z R E B :=
     internal.onSuccess (Z.internal.sync io) f
 
+  /- ------------ Co/Contravariance -------------- -/
 
+  /-- Simulate contravariant R -/
+  instance [inst : R₀ <: R₁] : (Z R₁ E A) <: (Z R₀ E A) := ⟨contramap inst.coe⟩
+    
+  /-- Simulate covariant A -/
+  instance [inst : A <: B] : (Z R E A) <: (Z R E B) := ⟨map inst.coe⟩
+
+  /-- Simulate covariant E -/
+  instance [inst : E₀ <: E] : (Z R E₀ A) <: (Z R E A) := ⟨mapError inst.coe⟩
+
+  def widenError (self : Z R Empty A): Z R E A := self
 
 end Z
 
@@ -151,69 +168,4 @@ end Z
 /-- Plays better with the rest of the library in many cases. -/
 def ioThrow : IO.Error -> IO Empty := 
   @throw IO.Error IO _ Empty
-
-
-namespace Z
-
-  def showHead : Z R E A -> String
-    | internal.done _ _        => "done"
-    | internal.sync _ _        => "sync"
-    | internal.async _ _       => "async"
-    | internal.onSuccess _ _ _ => "onSuccess"
-    | internal.fork ..         => "fork"
-    | internal.onSuccessAndFailure ..   => "onSuccessAndFailure"
-    | internal.setInterruptStatus _ _ _ => "setInterruptStatus"
-    | internal.contramap _ _ _          => "widenEnv"
-    | internal.currentEnvironment _     => "currentEnvironment"
-    | internal.provideEnvironment _ _ _ => "provideEnvironment"
-
-
-  def metadata : Z R E A -> Metadata
-    | internal.done _ md     => md
-    | internal.sync _ md     => md
-    | internal.async _ md    => md
-    | internal.onSuccess _ _ md => md
-    | internal.fork _ _ md      => md
-    | internal.onSuccessAndFailure _ _ _ md => md
-    | internal.setInterruptStatus _ _ md => md
-    | internal.contramap _ _ md             => md
-    | internal.currentEnvironment md     => md
-    | internal.provideEnvironment _ _ md => md
-
-  def nodeId (self : Z R E A) : NodeId :=
-    self.metadata.nodeId
-
-  def setNodeId (self : Z R E A) (nodeId : NodeId) : Z R E A :=
-    self.updateMetadata fun md => {md with nodeId := nodeId}
-
-  def resetNodeId (self : Z R E A) : Z R E A :=
-    self.setNodeId ""
-
-  def label (self : Z R E A) : String :=
-    self.metadata.label
-
-  def ensureNodeId (self : Z R E A) (nodeId : NodeId) : NodeId × (Z R E A) :=
-    if self.metadata.nodeId.isEmpty then
-      (nodeId, self.setNodeId nodeId)
-    else
-      (self.metadata.nodeId, self)
-
-
-  
-  instance : Monad (Z R E) where
-    pure a := (succeedNow' a).withLabel "pure"
-    bind z f := (z.flatMap f).withLabel "do"
-
-  -- instance : Monad (Z Unit E) where
-  --   pure a := (succeedNow' a).withLabel "pure"
-  --   bind z f := (z.flatMap f).withLabel "do"
-
-  instance : ToString (Z R E A) := ⟨(·.showHead)⟩
-  instance : ToString (URIO R A) := inferInstanceAs (ToString (Z R Empty A))
-
-  instance : Monad ZTask    := inferInstanceAs (Monad (Z Unit IO.Error))
-  instance : Monad UIO      := inferInstanceAs (Monad (Z Unit Empty))
-  instance : Monad (URIO R) := inferInstanceAs (Monad (Z R Empty))
-
-end Z
 
