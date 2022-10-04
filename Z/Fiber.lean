@@ -21,7 +21,6 @@ def FiberState.isRunning (self: FiberState E A) : IO Bool := do
   | .done _         => return false
     
 
-
 /-- A `Fiber` is the immutable handle to the mutable FiberState -/
 structure Fiber (E A: Type) where
   fiberId    : FiberId
@@ -103,13 +102,13 @@ namespace Fiber
           throw $ userError "Internal defect: Fiber being completed multiple times"
 
 
-  /- Contains some data needed to interact with Fibers without exposing the types E A  -/
-  structure FiberRef where
+  /-- Contains some data needed to interact with Fibers without exposing the types `E`, `A`  -/
+  structure FiberInfo where
     fiberId    : FiberId
     interrupt  : IO Unit
     interrupted: IO Bool
 
-  def toFiberRef: FiberRef where 
+  def toFiberRef: FiberInfo where 
     fiberId     := self.fiberId
     interrupt   := self.interrupted.set true
     interrupted := self.interrupted.get

@@ -7,7 +7,6 @@ open IO (userError)
 open Fiber
 open Function (const)
 
-universe u
 /-- 
 Execution stack.  `Stack E A E₁ A₁`.
 
@@ -37,7 +36,7 @@ def Stack.size : Stack E A E₁ A₁ -> Nat
 /-- State needed to execute a Fiber  -/
 structure RunState (Rprov) (E A E₁ A₁: Type) where
   interruption : Interruption
-  fiberRefs    : IO.Ref (List FiberRef)
+  fiberInfos   : IO.Ref (List FiberInfo)
   stack        : Stack E A E₁ A₁
   environment  : Environment Rprov
   fiberId      : FiberId
@@ -203,7 +202,7 @@ mutual
           let fiber <- Z.unsafeRunFiber effect state.environment state.fiberId name state.initialTime
           /- -------------------------- -/
           diagram.fork fiber.fiberId currentEffectId effectId currentTime state.initialTime newFiberBoxId
-          state.fiberRefs.modify (fiber.toFiberRef :: ·)
+          state.fiberInfos.modify (fiber.toFiberRef :: ·)
           continueOrComplete fiber state
 
 
@@ -246,13 +245,10 @@ mutual
   /-- Runs the given effect in IO and returns a Fiber  -/
   partial def Z.unsafeRunFiber (self: Z Rexp E A) (env: Environment Rprov) [Rexp ⊂ Rprov] (parentFiberId: FiberId) (name: String) (startTime: Nat) : IO (Fiber E A) := do
     let fiberId := s!"{parentFiberId}-{name}-{<- IO.rand 0 100000}"
-    log "" s!"(parent: {parentFiberId}) Z.unsafeRunFiber (new fiberId: {fiberId})"
     let fiber <- Fiber.empty fiberId
-    let interruption <- fiber.toInterruption
-    let fiberRefs <- IO.mkRef []
     let state: RunState .. := {
-        interruption := interruption
-        fiberRefs    := fiberRefs
+        interruption := (<- fiber.toInterruption)
+        fiberInfos   := (<- IO.mkRef [])
         stack        := .done fiber.complete
         environment  := env
         fiberId      := fiberId
@@ -263,7 +259,7 @@ mutual
       log fiberId s!"-->  Z.unsafeRunFiber -- starting run loop in a new task"
       runLoop self state
       -- TODO: restore this later!
-      -- for fiberRef in (<- fiberRefs.get) do
+      -- for fiberRef in (<- fiberInfos.get) do
       --   log fiberId s!" finishing, interrupting child: {fiberRef.fiberId}"
       --   fiberRef.interrupt
       log fiberId s!"<-- Z.unsafeRunFiber -- finishing execution\n"
