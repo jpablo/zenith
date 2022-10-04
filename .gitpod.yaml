@@ -1,0 +1,4 @@
+# Commands to start on workspace startup
+tasks:
+  - init: curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
+    command: elan default leanprover/lean4:nightly
