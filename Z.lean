@@ -6,13 +6,10 @@ import Z.Layer
 namespace Fiber
   
   def join  (self: Fiber E A): Z Unit E A := 
-    dbg_trace s!"[{self.fiberId}] -----> Fiber.join <----------"
-    (Z.async self.awaitAsync).withLabel s!"⌛ ⑂ Fiber.join ({self.fiberId})"
-
+    Z.async self.awaitAsync |>.withLabel s!"⌛ ⑂ Fiber.join ({self.fiberId})"
 
   def interrupt (self: Fiber E A): Z Unit Empty (Exit E A) := do
-    dbg_trace s!"[{self.fiberId}] -----> Fiber.interrupt <----------"
-    (Z.succeed (self.interrupted.set true)).withLabel s!"⌛ 🛑 Fiber.interrupted ← true ({self.fiberId})"
+    Z.succeed (self.interrupted.set true) |>.withLabel s!"⌛ 🛑 Fiber.interrupted ← true ({self.fiberId})"
     self.join.foldCauseZ (pure ∘ Exit.failure) (pure ∘ Exit.success)
 
 end Fiber

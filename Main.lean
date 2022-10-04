@@ -1,9 +1,4 @@
 import Examples
--- import Lean.Data.HashMap
-
-
--- def main': IO Unit := taskExample 
-
 
 
 
@@ -14,16 +9,6 @@ def main: IO Unit := do
   IO.println s!"---- exiting main ----"
   IO.println s!"{r}"
     
-
-
--- #check IO.getStdin
-
--- def main: IO Unit := do
---   let stdin <- IO.getStdin
---   let line <- stdin.getLine
---   IO.println s!"hello: {line}"
---   stdin.flush
-
 
 
 -- lake build >& /dev/null; ./build/bin/z

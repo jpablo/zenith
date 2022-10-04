@@ -3,8 +3,6 @@
 /- TODO: remove duplicates?  -/
 
 
--- def Environment' (H: Type u) (T: Type v) := H × T
-
 def Environment (R: Type u) := R
 
 infixr:67 " *: " => Prod.mk
