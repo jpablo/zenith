@@ -13,12 +13,12 @@ def errorHandling1b := do
   try
     throw <| IO.userError "Failed!"
   catch
-    | e => consoleLive.printLine s!"Recovered from error: {e}" |>.widenError
+    | e => consoleLive.printLine s!"Recovered from error: {e}"
 
 def errorHandling1c :=
   tryCatch
     (throw <| IO.userError "Failed!")
-    (fun e => consoleLive.printLine s!"Recovered from error: {e}" |>.widenError)
+    (fun e => consoleLive.printLine s!"Recovered from error: {e}" )
 
 
 

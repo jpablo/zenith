@@ -2,6 +2,7 @@ import Z.Combinators
 
 
 inductive Layer : Type -> Type -> Type -> Type 1
+
   | internal.apply (self : Z A E (Environment B)) : Layer A E B
   
   | internal.fold  

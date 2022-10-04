@@ -20,9 +20,6 @@ namespace Z
     section
       variable (self :  Z R E A)
 
-      def map (f : A -> A₁) : Z R E A₁ :=
-        (self.flatMap (pure ∘ f)).withLabel "map"
-
 
       /-- Error handling -/
 
@@ -44,7 +41,7 @@ namespace Z
         (self.foldZ errorHandler (pure .)).withLabel "catchAll"
 
       def mapFailure [ToString E₁] (f : E -> E₁) : Z R E₁ A :=
-        self.catchAll fun e => widenEnv (.fail (f e))
+        self.catchAll fun e => .fail (f e)
 
       /-- more combinators  -/
 
@@ -86,7 +83,6 @@ namespace Z
           | ioError => return .inl ioError
 
       Z.succeed' infallible md
-        |>.widenError
         |>.flatMap fun
         | .inr a => Z.succeedNow' a
         | .inl e => Z.fail' e
@@ -104,7 +100,7 @@ namespace Z
 
     def serviceWithZ (f : S -> Z R E A): Z (R × S) E A := do
       let environment <- Z.environment (R × S) |>.widenError
-      Z.contramap (·.1) (f (environment.get S))
+      Z.contramap (·.1) <| f <| environment.get S
 
     def serviceWith (f : S -> A) : Z S E A :=
        Z.contramap ((), ·) (Z.serviceWithZ fun s => Z.succeedNow (f s))
@@ -118,6 +114,20 @@ end Z
 instance : MonadExceptOf E (Z R E) where
   throw    := fun e => Z.failCause <| .fail e
   tryCatch := fun z errorHandler => Z.foldZ z errorHandler pure
+
+instance : MonadExceptOf IO.Error (Z R Empty) where
+  throw    := fun ioe => Z.die ioe
+  tryCatch := fun z _ => Z.foldZ z impossible pure
+
+-- instance : MonadExceptOf IO.Error (Z R (Cause E)) where
+--   throw    := fun ioe => Z.die ioe
+--   tryCatch := fun z errorHandler => 
+--     z.foldZ 
+--       (fun
+--         | .die ioe => errorHandler ioe
+--         | _ => z
+--       ) 
+--       pure
 
 
 namespace Z
@@ -133,7 +143,7 @@ namespace Z
 
     .withLabel (label := s!"👮‍♀️ ensuring") $
       self.foldCauseZ
-        (fun cause => finalizer.foldCauseZ (fun _ => widenEnv $ .failCause cause) (fun _ => widenEnv $ .failCause cause))
+        (fun cause => finalizer.foldCauseZ (fun _ => .failCause cause) (fun _ => .failCause cause))
         (fun a     => finalizer.foldCauseZ (fun _ => pure a) (fun _ => pure a))
 
 

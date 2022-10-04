@@ -37,5 +37,5 @@ structure TLift (α : Type u) : Type (max u v) where
 
 
 def NodeId := String 
-  deriving ToString
+  deriving ToString, Repr
 
