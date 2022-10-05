@@ -96,9 +96,3 @@ def BusinessLogicLive.layer: Layer Github Empty BusinessLogic :=
 --     -- Z.addFinalizer http.shutdown
 --     return http
 
-
-
--- class HBind (m : Type u1 → Type v1) (n : Type u2 → Type v2) where
---   hBind {α : Type u1} {β : Type u2} : m α → (α → n β) → n β
-
--- @[defaultInstance] instance [Bind m] : HBind m m := ⟨bind⟩
