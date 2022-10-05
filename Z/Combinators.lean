@@ -83,17 +83,17 @@ namespace Z
     pure ()
 
   def fold (errorHandler : E -> A₁) (next : A -> A₁) : Z R E A₁ :=
-    self.foldZ (pure ∘ errorHandler) (pure ∘ next)
+    self.foldZ (errorHandler ∘> pure) (next ∘> pure)
 
   def foldCause (errorHandler : Cause E -> A₁) (next : A -> A₁) : Z R Empty A₁ :=
-    self.foldCauseZ (pure ∘ errorHandler) (pure ∘ next)
+    self.foldCauseZ (errorHandler ∘> pure) (next ∘> pure)
 
   def exit : Z R Empty (Exit E A) :=
     self.foldCause Exit.failure Exit.success |>.withLabel "exit"
 
   /-- aka flatMapFailure  -/
   def catchAll [A <: A₁] (errorHandler : E -> Z R E₁ A₁) : Z R E₁ A₁ :=
-    self.foldZ errorHandler (pure .) |>.withLabel "catchAll"
+    self.foldZ errorHandler (pure ·) |>.withLabel "catchAll"
 
   def mapFailure [ToString E₁] (f : E -> E₁) : Z R E₁ A :=
     self.catchAll fun e => .fail (f e)
@@ -102,7 +102,7 @@ namespace Z
     return f (<- self) (<- other)
 
   def zip (other : Z R E A₁) : Z R E (A × A₁) := do
-    self.zipWith other (., .) |>.withLabel "zip"
+    self.zipWith other (·, ·) |>.withLabel "zip"
 
   def sandbox [ToString E]: Z R (Cause E) A :=
     self.foldCauseZ (fun e => Z.fail e) pure

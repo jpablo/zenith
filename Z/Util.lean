@@ -26,11 +26,8 @@ def log (fiberId: String) (s: String) (color: String := Color.green) :=
 instance toSEmpty: ToString Empty := 
   ⟨fun _ => "Impossible!"⟩ 
 
--- instance toSAny: ToString A := 
---   ⟨fun _ => "..."⟩ 
 
 def FiberId := String deriving ToString
-
 
 structure TLift (α : Type u) : Type (max u v) where
   up :: down : α
@@ -39,3 +36,10 @@ structure TLift (α : Type u) : Type (max u v) where
 def NodeId := String 
   deriving ToString, Repr
 
+
+
+@[inline] def Function.andThen (f : A → B) (g : B → C) : A → C :=
+  fun x => g (f x)
+
+/-- andThen  -/
+infixl:90 " ∘> "  => Function.andThen

@@ -96,7 +96,7 @@ namespace Z
     Z.succeedNow' a
 
   def map (f : A -> B) (self : Z R E A) : (Z R E B) :=
-    internal.onSuccess self (fun a => succeedNow' <| f a) |>.withLabel "map"
+    internal.onSuccess self (f ∘> succeedNow') |>.withLabel "map"
 
   def contramap (f : R₀ -> R₁) (effect : Z R₁ E A) (md := mempty) : Z R₀ E A := 
     internal.contramap f effect md
@@ -115,7 +115,7 @@ namespace Z
         intro e0
         exact done' <| .failure <| e0.map f
       case next => 
-        exact done' ∘ .success  
+        exact .success ∘> done'
 
   def succeed' (io : IO A) (md := Metadata.withLabel "succeed"): Z R E A := 
     internal.sync io md

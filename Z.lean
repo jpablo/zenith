@@ -10,7 +10,7 @@ namespace Fiber
 
   def interrupt (self: Fiber E A): Z Unit Empty (Exit E A) := do
     Z.succeed (self.interrupted.set true) |>.withLabel s!"⌛ 🛑 Fiber.interrupted ← true ({self.fiberId})"
-    self.join.foldCauseZ (pure ∘ Exit.failure) (pure ∘ Exit.success)
+    self.join.foldCauseZ (Exit.failure ∘> pure) (Exit.success ∘> pure)
 
 end Fiber
 

@@ -1,4 +1,4 @@
-
+import Z.Util
 
 /- TODO: remove duplicates?  -/
 
@@ -40,7 +40,7 @@ class Subset (A : Type u) (B: Type v) where
 infixl:65 " ⊂ " => Subset
 
 def Subset.contramap {C} [inst: A ⊂ B] (f: A -> C): C ⊂ B :=
-  ⟨f ∘ inst.get⟩
+  ⟨inst.get ∘> f⟩
 
 
 /-- different tails but head1 is in tail2 and tail1 is subset of tuple2 -/
