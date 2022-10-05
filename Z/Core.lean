@@ -106,7 +106,7 @@ namespace Z
   def done (exit : Exit E A) (md := mempty): Z Unit E A := 
     done' exit md
 
-  def mapError (f : E₀ -> E) (self : Z R E₀ A) : Z R E A := by
+  def mapFailure (f : E₀ -> E) (self : Z R E₀ A) : Z R E A := by
       apply internal.onSuccessAndFailure self
       case md => 
         exact mempty
@@ -152,11 +152,12 @@ namespace Z
   /-- Simulate contravariant R -/
   instance [inst : R₀ <: R₁] : (Z R₁ E A) <: (Z R₀ E A) := ⟨contramap inst.coe⟩
     
-  /-- Simulate covariant A -/
+  /-- Simulate covariant E -/
+  instance [inst : E₀ <: E] : (Z R E₀ A) <: (Z R E A) := ⟨mapFailure inst.coe⟩
+
+  -- /-- Simulate covariant A -/
   instance [inst : A <: B] : (Z R E A) <: (Z R E B) := ⟨map inst.coe⟩
 
-  /-- Simulate covariant E -/
-  instance [inst : E₀ <: E] : (Z R E₀ A) <: (Z R E A) := ⟨mapError inst.coe⟩
 
   def widenError (self : Z R Empty A): Z R E A := self
 

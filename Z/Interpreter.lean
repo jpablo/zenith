@@ -15,6 +15,36 @@ mutual
   variable (diagram : ExecutionDiagram (IO Unit))
 
   /-- 
+  Entry point:
+  
+  Runs the given effect in IO and returns a Fiber  
+  -/
+  partial def unsafeRunFiber (self : Z R E A) (env : Environment Rfiber) [R ∣ Rfiber] (parentFiberId : FiberId) (name : String) (startTime : Nat) : IO (Fiber E A) := do
+    let fiberId := s!"{parentFiberId}-{name}-{<- IO.rand 0 100000}"
+    let fiber <- Fiber.empty fiberId
+    let state : RunState .. := {
+        interruption := (<- fiber.toInterruption)
+        fiberInfos   := (<- IO.mkRef [])
+        stack        := .done fiber.complete
+        environment  := env
+        fiberId      := fiberId
+        initialTime  := startTime
+    }
+    -- continue in the background
+    let task <- IO.asTask do
+      log fiberId s!"-->  Z.unsafeRunFiber -- starting run loop in a new task"
+      self.runLoop state
+      -- TODO: restore this later!
+      -- for fiberRef in (<- fiberInfos.get) do
+      --   log fiberId s!" finishing, interrupting child: {fiberRef.fiberId}"
+      --   fiberRef.interrupt
+      log fiberId s!"<-- Z.unsafeRunFiber -- finishing execution\n"
+    fiber.setTask task
+    return fiber
+
+
+
+  /-- 
   Main interpreter.
 
   - `diagram` : Service to trace execution onto a diagram
@@ -23,8 +53,14 @@ mutual
   - `Rfiber`  : Environment available in the current fiber
   - `validEnv`: proof that `R` is a component of `Rfiber`
   - `state`   : execution stack and other bookkiping data
+
+  Note that the cases obtained after `match self with ....` correspond not to the Z inductive type itself
+  but rather to the public API names.
+
+  The reason is that all the Z constructors are marked as `private`, which means they can't be used outside
+  of the file `Core.lean`. 
   -/
-  partial def runLoop (self : Z R E A) [validEnv : R ∣ Rfiber] (state : RunState Rfiber E A E₁ A₁) : IO Unit := do
+  private partial def runLoop (self : Z R E A) [validEnv : R ∣ Rfiber] (state : RunState Rfiber E A E₁ A₁) : IO Unit := do
     
     /- First ensure we have a nodeId -/
     let self := self.ensureNodeId (<- state.newId)
@@ -182,7 +218,7 @@ mutual
         nextEffect.runLoop (validEnv := validEnv) {state with stack := tail, environment := env }
 
 
-  partial def runWithInterruption (self : Z R E A) [validEnv : R ∣ Rfiber] t₀ (state : RunState Rfiber E A E₁ A₁) := do
+  private partial def runWithInterruption (self : Z R E A) [validEnv : R ∣ Rfiber] t₀ (state : RunState Rfiber E A E₁ A₁) := do
     -- We need to use the current node's Id for the interrupted box, as it is already in the graph.
     let interruptedBoxId := self.nodeId
     -- reset the current node's Id, it will be re-generated later if needed.
@@ -201,31 +237,6 @@ mutual
         stack := .more (fun _ => self) none (eq_E_E₁? := some (.up rfl)) state.stack none (validEnv := validEnv) (env := state.environment)
       }
 
-
-
-  /-- Runs the given effect in IO and returns a Fiber  -/
-  partial def unsafeRunFiber (self : Z R E A) (env : Environment Rfiber) [R ∣ Rfiber] (parentFiberId : FiberId) (name : String) (startTime : Nat) : IO (Fiber E A) := do
-    let fiberId := s!"{parentFiberId}-{name}-{<- IO.rand 0 100000}"
-    let fiber <- Fiber.empty fiberId
-    let state : RunState .. := {
-        interruption := (<- fiber.toInterruption)
-        fiberInfos   := (<- IO.mkRef [])
-        stack        := .done fiber.complete
-        environment  := env
-        fiberId      := fiberId
-        initialTime  := startTime
-    }
-    -- continue in the background
-    let task <- IO.asTask do
-      log fiberId s!"-->  Z.unsafeRunFiber -- starting run loop in a new task"
-      self.runLoop state
-      -- TODO: restore this later!
-      -- for fiberRef in (<- fiberInfos.get) do
-      --   log fiberId s!" finishing, interrupting child: {fiberRef.fiberId}"
-      --   fiberRef.interrupt
-      log fiberId s!"<-- Z.unsafeRunFiber -- finishing execution\n"
-    fiber.setTask task
-    return fiber
 end
 
 end Z

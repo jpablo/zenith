@@ -89,9 +89,6 @@ namespace Z
   def catchAll [A <: A₁] (errorHandler : E -> Z R E₁ A₁) : Z R E₁ A₁ :=
     self.foldZ errorHandler (pure ·) |>.withLabel "catchAll"
 
-  def mapFailure [ToString E₁] (f : E -> E₁) : Z R E₁ A :=
-    self.catchAll fun e => .fail (f e)
-
   def zipWith (other : Z R E A₁) (f : A -> A₁ -> A₃) : Z R E A₃ := do
     return f (<- self) (<- other)
 
@@ -99,10 +96,10 @@ namespace Z
     self.zipWith other (·, ·) |>.withLabel "zip"
 
   def sandbox [ToString E]: Z R (Cause E) A :=
-    self.foldCauseZ (fun e => Z.fail e) pure
+    self.foldCauseZ (fun e => fail e) pure
 
   def orDieWith (f : E -> IO.Error) : Z R Empty A :=
-    self.foldZ (fun e => Z.die <| f e) pure
+    self.foldZ (fun e => die <| f e) pure
 
   def orDie (self : Z R IO.Error A): Z R Empty A :=
     self.orDieWith id |>.withLabel "orDie"
