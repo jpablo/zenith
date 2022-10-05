@@ -9,5 +9,5 @@ def impossible {T : Empty -> Type _} (e) : T e :=
 
 instance :     A <: A    := ⟨id⟩
 instance : Empty <: A    := ⟨impossible⟩
-instance :     A <: Unit :=  ⟨fun _ => ()⟩
+instance :     A <: Unit := ⟨fun _ => ()⟩
 

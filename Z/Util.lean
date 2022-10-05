@@ -41,5 +41,5 @@ def NodeId := String
 @[inline] def Function.andThen (f : A → B) (g : B → C) : A → C :=
   fun x => g (f x)
 
-/-- andThen  -/
+/-- andThen: (A → B) ∘> (B → C) : A → C  -/
 infixl:90 " ∘> "  => Function.andThen

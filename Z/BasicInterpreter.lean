@@ -13,7 +13,7 @@ mutual
   variable (diagram: ExecutionDiagram (IO Unit))
 
   /-- Main interpreter -/
-  partial def runLoop1 (currentEffect: Z Rexp E A) [inst: Rexp ⊂ Rprov] (state: RunState Rprov E A E₁ A₁) : IO Unit := do
+  partial def runLoop1 (currentEffect: Z Rexp E A) [inst: Rexp | Rprov] (state: RunState Rprov E A E₁ A₁) : IO Unit := do
     
     if (<- state.interruption.shouldInterrupt) then 
       runWithInterruption1 currentEffect (<- IO.monoMsNow.toIO) state
@@ -89,7 +89,7 @@ mutual
         runLoop1 (currentEffect := (next value)) (inst := validEnv) {state with stack := tail, environment := env }
 
 
-  partial def runWithInterruption1 (currentEffect: Z Rexp E A)  [inst: Rexp ⊂ Rprov] currentTime (state: RunState Rprov E A E₁ A₁) := do
+  partial def runWithInterruption1 (currentEffect: Z Rexp E A)  [inst: Rexp | Rprov] currentTime (state: RunState Rprov E A E₁ A₁) := do
     let nextEffect: Z Unit _ _  := 
       Z.failCause Cause.interrupt
     runLoop1
@@ -101,7 +101,7 @@ mutual
 
 
   /-- Runs the given effect in IO and returns a Fiber  -/
-  partial def unsafeRunFiber (self: Z Rexp E A) (env: Environment Rprov) [Rexp ⊂ Rprov] (parentFiberId: FiberId) (name: String) (startTime: Nat) : IO (Fiber E A) := do
+  partial def unsafeRunFiber (self: Z Rexp E A) (env: Environment Rprov) [Rexp | Rprov] (parentFiberId: FiberId) (name: String) (startTime: Nat) : IO (Fiber E A) := do
     let fiberId := s!"{parentFiberId}-{name}-{<- IO.rand 0 100000}"
     let fiber <- Fiber.empty fiberId
     let state: RunState ..  := {

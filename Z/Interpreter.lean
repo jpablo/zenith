@@ -18,11 +18,14 @@ mutual
   /-- 
   Main interpreter
 
-  - self: 
-  - validEnv
-  - state
-   -/
-  partial def runLoop (self : Z Rexp E A) [validEnv : Rexp ⊂ Rprov] (state : RunState Rprov E A E₁ A₁) : IO Unit := do
+  - `diagram`: service to trace execution onto a diagram
+  - `self`: effect that will be evalauted by the current fiber
+  - `Rexp`: environment needed to run `self`
+  - `Rprov`: environment provided in the current fiber
+  - `validEnv`: proof that `Rexp` is a subset of `Rprov`
+  - `state`: execution stack and other bookkiping data
+  -/
+  partial def runLoop (self : Z Rexp E A) [validEnv : Rexp ∣ Rprov] (state : RunState Rprov E A E₁ A₁) : IO Unit := do
     
     /- First ensure we have a nodeId -/
     let (selfId, self) := self.ensureNodeId (<- state.newId)
@@ -32,6 +35,7 @@ mutual
 
     llog s!". {self.showHead} ({self.label})"
 
+    -- select a random color to be used for the current fiber
     let i := state.fiberId.hash % Colors.all.size
     let color := Colors.all[i.toNat]!
     let currentTime <- IO.monoMsNow.toIO
@@ -102,7 +106,7 @@ mutual
           let effect := effect.setNodeId effectId
           /- -------------------------- -/
           /- Launch a new Task -/
-          let fiber <- unsafeRunFiber effect state.environment state.fiberId name state.initialTime
+          let fiber <- effect.unsafeRunFiber state.environment state.fiberId name state.initialTime
           /- -------------------------- -/
           diagram.fork fiber.fiberId selfId effectId currentTime state.initialTime newFiberBoxId
           state.fiberInfos.modify (fiber.toFiberRef :: ·)
@@ -129,15 +133,15 @@ mutual
           diagram.setInterruptStatus selfId effectId nextEffectId
           nextEffect.runLoop state
 
-        | .contramap f effect _, p =>
+        | .contramap f effect _, _ =>
           let (effectId, effect) := effect.ensureNodeId (<- state.newId)
           diagram.widenEnv selfId effectId
-          effect.runLoop (validEnv := Subset.contramap f) state
+          effect.runLoop (validEnv := IsComponent.contramap f) state
 
         | .environment _ _ , inst => 
           continueOrComplete (inst.get state.environment) state
 
-        | .provideEnvironment effect env _ , inst => 
+        | .provideEnvironment effect env _ , _ => 
           let (effectId, effect) := effect.ensureNodeId (<- state.newId)
           diagram.provideEnvironment state.fiberId selfId effectId color
           effect.runLoop {state with environment := state.environment ++ env}
@@ -183,7 +187,7 @@ mutual
         nextEffect.runLoop (validEnv := validEnv) {state with stack := tail, environment := env }
 
 
-  partial def runWithInterruption (self : Z Rexp E A) [validEnv : Rexp ⊂ Rprov] currentTime (state : RunState Rprov E A E₁ A₁) := do
+  partial def runWithInterruption (self : Z Rexp E A) [validEnv : Rexp ∣ Rprov] currentTime (state : RunState Rprov E A E₁ A₁) := do
     -- We need to use the current node's Id for the interrupted box, as it is already in the graph.
     let interruptedBoxId := self.nodeId
     -- reset the current node's Id, it will be re-generated later if needed.
@@ -205,7 +209,7 @@ mutual
 
 
   /-- Runs the given effect in IO and returns a Fiber  -/
-  partial def unsafeRunFiber (self : Z Rexp E A) (env : Environment Rprov) [Rexp ⊂ Rprov] (parentFiberId : FiberId) (name : String) (startTime : Nat) : IO (Fiber E A) := do
+  partial def unsafeRunFiber (self : Z Rexp E A) (env : Environment Rprov) [Rexp ∣ Rprov] (parentFiberId : FiberId) (name : String) (startTime : Nat) : IO (Fiber E A) := do
     let fiberId := s!"{parentFiberId}-{name}-{<- IO.rand 0 100000}"
     let fiber <- Fiber.empty fiberId
     let state : RunState .. := {
