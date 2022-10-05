@@ -16,17 +16,11 @@ namespace Z
   def label : String :=
     self.metadata.label
 
-  def ensureNodeId' (nodeId : NodeId) : Z R E A :=
+  def ensureNodeId (nodeId : NodeId) : Z R E A :=
     if self.metadata.nodeId.isEmpty then
       self.setNodeId nodeId
     else
       self
-
-  def ensureNodeId (nodeId : NodeId) : NodeId × (Z R E A) :=
-    let ret := self.ensureNodeId' nodeId
-    let n := if self.metadata.nodeId.isEmpty then nodeId else self.metadata.nodeId
-    (n, ret)
-      
 
   def failCause (cause : Cause E) : Z R E Empty :=
     Z.done' <| Exit.failure cause
