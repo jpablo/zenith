@@ -151,7 +151,7 @@ namespace Z
   def serviceWith (f : S -> A) : Z S E A :=
       Z.contramap ((), ·) (Z.serviceWithZ fun s => Z.succeedNow (f s))
 
-  def service (A) : Z A E A :=
+  def service (A) : Z A Empty A :=
     serviceWith id
 
   partial def forever : Z R E A :=

@@ -98,7 +98,7 @@ mutual
           let effect := effect.setNodeId effectId
           /- -------------------------- -/
           /- Launch a new Task -/
-          let fiber <- Z.unsafeRunFiber effect state.environment state.fiberId name state.initialTime
+          let fiber <- unsafeRunFiber effect state.environment state.fiberId name state.initialTime
           /- -------------------------- -/
           diagram.fork fiber.fiberId currentEffectId effectId currentTime state.initialTime newFiberBoxId
           state.fiberInfos.modify (fiber.toFiberRef :: ·)
@@ -203,7 +203,7 @@ mutual
 
 
   /-- Runs the given effect in IO and returns a Fiber  -/
-  partial def Z.unsafeRunFiber (self: Z Rexp E A) (env: Environment Rprov) [Rexp ⊂ Rprov] (parentFiberId: FiberId) (name: String) (startTime: Nat) : IO (Fiber E A) := do
+  partial def unsafeRunFiber (self: Z Rexp E A) (env: Environment Rprov) [Rexp ⊂ Rprov] (parentFiberId: FiberId) (name: String) (startTime: Nat) : IO (Fiber E A) := do
     let fiberId := s!"{parentFiberId}-{name}-{<- IO.rand 0 100000}"
     let fiber <- Fiber.empty fiberId
     let state: RunState .. := {
@@ -228,23 +228,4 @@ mutual
 end
 
 end Z
-
-/-- 
-  Evaluate the given effect `self`.
-  Only allow execution of effects without any dependencies `(R := Unit)` 
-
-  - `useDiagram`: If provided will write a graphviz representation of program execution to the given file.
-
--/
-def Z.unsafeRunSync [ToString A] (self: Z Unit E A) (fiberId: FiberId) (useDiagram: Option String := none): IO (Option (Exit E A)) := do
-  let diagram :=
-    match useDiagram with
-      | some file => GraphViz.graphvizIO ⟨file⟩
-      | none      => ExecutionDiagram.empty
-  diagram.header
-  let t0    <- IO.monoMsNow.toIO
-  let fiber <- Z.unsafeRunFiber diagram self Environment.empty "" fiberId t0
-  let exit  <- fiber.awaitPoll (fiberId := fiberId)
-  diagram.footer
-  return exit
 

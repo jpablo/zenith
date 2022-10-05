@@ -15,20 +15,24 @@ namespace Fiber
 end Fiber
 
 
-
 namespace Z
+  /-- 
+    Evaluate the given effect `self`.
+    Only allow execution of effects without any dependencies `(R := Unit)` 
 
-  def consoleWith (f: Console -> Z R E A) : Z R E A :=
-    f (DefaultServices.live.get Console)
+    - `useDiagram`: If provided will write a graphviz representation of program execution to the given file.
 
-  def randomWith (f: Random -> Z R E A) : Z R E A :=
-    f (DefaultServices.live.get Random)
+  -/
+  def unsafeRunSync [ToString A] (self: Z Unit E A) (fiberId: FiberId) (useDiagram: Option String := none): IO (Option (Exit E A)) := do
+    let diagram :=
+      match useDiagram with
+        | some file => GraphViz.graphvizIO ⟨file⟩
+        | none      => ExecutionDiagram.empty
+    diagram.header
+    let t0    <- IO.monoMsNow.toIO
+    let fiber <- unsafeRunFiber diagram self Environment.empty "" fiberId t0
+    let exit  <- fiber.awaitPoll (fiberId := fiberId)
+    diagram.footer
+    return exit
 
 end Z
-
-namespace Console
-
-  -- def printLine (msg: String) : Z [] IO.Error Unit :=
-  --   Z.attempt (IO.println msg) {label := s!"📺 println '{msg}'"}
-
-end Console

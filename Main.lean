@@ -4,7 +4,7 @@ import Examples
 
 def main: IO Unit := do
   -- let z := asyncExample (E := Empty)
-  let z := succeedNowExample -- (E := Empty)
+  let z := forkExample
   let r <- Z.unsafeRunSync z "main"
   IO.println s!"---- exiting main ----"
   IO.println s!"{r}"

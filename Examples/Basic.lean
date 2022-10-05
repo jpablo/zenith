@@ -18,18 +18,16 @@ def IO.repeatN (n: Nat) (za: IO A) : IO Unit := do
 
 /-!  Examples -/
 
-
 def succeedNowExample :=
   Z.succeedNow "hello from Z.succeed"
 
 def zipExample :=
   (Z.succeedNow (8: Nat)).zip (.succeedNow "LO")
 
-
 def zipExample2: Z Unit Empty (Nat × String) :=
-  .flatMap (.done ∘ .success $ (8: Nat)) fun n => 
-    .flatMap (.done ∘ .success $ "LO") fun s => 
-      .done ∘ .success $ (n, s)
+  .flatMap (.done ∘ .success <| (8: Nat)) fun n => 
+    .flatMap (.done ∘ .success <| "LO") fun s => 
+      .done ∘ .success <| (n, s)
 
 def mapExample :=
   zipExample.withLabel "zipExample"
@@ -45,6 +43,9 @@ def succeedExample: Z Unit Empty Unit :=
 
 def attemptExample: Z Unit IO.Error Unit :=
   Z.attempt <| IO.println "hello from IO"
+
+def coercionExample: Z Unit IO.Error Unit :=
+  IO.println "hello from IO"
 
 
 /-- Option 1: propagate type parameters up to the top level function -/
@@ -77,56 +78,24 @@ def taskExample: IO Unit := do
   IO.println "done"
 
 
--- def ioFlatMapExample2 :=
--- Z.withIO (do IO.println "hi" ; return "one") (fun i => Z.printLine s!"got an {i}")
-
-
-
-----------------------------------------------
-
-/-- Option 2: Fix type parameters -/
-
-def forkExample2 := do
-  (consoleLive.printLine "(example) starting...")
-  let fiber  <- ((consoleLive.printLine "Howdy" *> .sleep 10).repeatN 3).fork "f1"
-  -- (Z.printLine "before sleep").orDie
-  -- (Z.sleep 1).orDie
-  -- (Z.printLine "after sleep").orDie
-  let _      <- fiber.join
-  -- (Z.printLine "(example) ==== Finishing example2 ====" ).orDie
-
-----------------------------------------------
-
-
-
-
-
 def stackOverflow :=
   Z.repeatN 20 <| consoleLive.printLine "Howdy!"
-
 
 def stackOverflowIO :=
   let p := IO.println "Howdy!"
   IO.repeatN 10000000 p
 
-
-
 def flatMapEx := do
   consoleLive.printLine "hi"
   consoleLive.printLine "there"
 
-
-
--- Investigate
 def ensuringExample :=  do
   consoleLive.printLine "Howdy" *> Z.sleep 100
   |>.repeatN 1
   |>.ensuring (consoleLive.printLine "--- Bowdy! ---" )
 
-
 def uninterruptibleExample :=
   Z.sleep 100 |>.uninterruptible
-
 
 /-- Fiber finishes before interruption  -/
 def interruptionExample1 := do
@@ -184,8 +153,7 @@ def uninterruptibleExample2 := do
   Z.sleep 100
   let _ <- fiber.interrupt
 
-
-def e1: Z Nat Empty (Environment Nat)       := Z.environment Nat
+def e1: Z Nat Empty (Environment Nat) := Z.environment Nat
 def e2: Z String Empty (Environment String) := Z.environment String
 
 def envExample1: Z (Nat × String) Empty Unit := do
@@ -195,10 +163,32 @@ def envExample1: Z (Nat × String) Empty Unit := do
   consoleLive.printLine (env.get Nat)
   consoleLive.printLine (env.get String)
 
-def envExample: Z Unit Empty Unit :=
+def envExample2 := do
+  let console <- Z.environment ConsoleIO
+  Z.succeed' <| console.printLine "hello from ConsoleIO.printLine"
+
+def envExample2ready :=
+  envExample2.provideEnvironment ConsoleIO.consoleLive
+
+def envExample1ready: Z Unit Empty Unit :=
   envExample1.provideEnvironment ((1: Nat), "hello")
 
 def envExample3 :=
   (Z.succeedNow "hello from Z.succeed").provideEnvironment ()
+
+/- Example using accessors defined in ConsoleIO -/
+open ConsoleIO in
+def envExample4 := do
+  printLineZ "What is your name?"
+  let msg <- readLineZ
+  printLineZ s!"hello {msg}"
+
+def envExample5ready: Z Unit Empty Unit :=
+  envExample4.provideEnvironment ConsoleIO.consoleLive
+
+
+def envExample5 := do
+  ConsoleIO.printLineZ "hello from ConsoleIO.printLine"
+
 
 

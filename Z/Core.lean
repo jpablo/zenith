@@ -161,6 +161,9 @@ namespace Z
 
   def widenError (self : Z R Empty A): Z R E A := self
 
+  /- ------------ Other coercions -------------- -/
+  instance : IO A <: Z R E A := ⟨Z.succeed'⟩
+
 end Z
 
 

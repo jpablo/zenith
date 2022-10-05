@@ -1,11 +1,8 @@
 import Z.Combinators
 
-
 structure Console where
-  printLine {A: Type} [ToString A] (line: A) : Z Unit Empty Unit
+  printLine {A: Type} [ToString A] (line : A) : Z Unit Empty Unit
   readLine : Z Unit IO.Error String
-
-
 
 namespace Console
 
@@ -18,5 +15,25 @@ namespace Console
         
 end Console
 
+/-! IO version, since we can't have Z services yet.  -/
 
--- #check Console.printLine
+structure ConsoleIO where
+  printLine (line : String) : IO Unit
+  readLine : IO String
+
+namespace ConsoleIO
+
+  def consoleLive: ConsoleIO where
+    printLine line := IO.println line
+    readLine := do (<- IO.getStdin).getLine
+
+  /-! accessors -/
+  
+  def printLineZ (line : String) : Z ConsoleIO Empty Unit := do
+    (<- Z.service ConsoleIO).printLine line
+
+  def readLineZ : Z ConsoleIO Empty String := do
+    (<- .service ConsoleIO).readLine
+
+end ConsoleIO
+
