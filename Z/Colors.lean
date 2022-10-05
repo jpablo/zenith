@@ -1,8 +1,9 @@
 
 namespace Colors
 
+  def Color := String deriving Inhabited
 
-  def all := #[
+  def all: Array Color := #[
     "antiquewhite",
     "antiquewhite2",
     "antiquewhite3",
@@ -202,5 +203,8 @@ namespace Colors
     "yellowgreen"
   ]
 
+  def get (base: String): Color := 
+    let i := base.hash % all.size
+    all[i.toNat]!
 
 end Colors

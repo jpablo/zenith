@@ -108,7 +108,7 @@ namespace Fiber
     interrupt  : IO Unit
     interrupted: IO Bool
 
-  def toFiberRef: FiberInfo where 
+  def toFiberInfo: FiberInfo where 
     fiberId     := self.fiberId
     interrupt   := self.interrupted.set true
     interrupted := self.interrupted.get

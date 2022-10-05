@@ -19,10 +19,10 @@ inductive Stack: (E: Type) -> (A: Type) -> (E₁: Type) -> (A₁: Type) -> Type 
       (tail          : Stack E₁ A₁ E₂ A₂)
       /- Used to link the parent node with this node -/
       (parentId      : Option NodeId)
-      /- Evidence that `next` and `errorHandler` can be executed given the current environment -/
-      (validEnv      : R ∣ Rprov)
+      /- Evidence that `next` and `errorHandler` can be executed given the current environment in the fiber -/
+      (validEnv      : R ∣ Rfiber)
       /- Environment in the Fiber at the time the stack entry was created  -/
-      (env           : Environment Rprov)
+      (env           : Environment Rfiber)
     : Stack E A E₁ A₁
 
   | done (complete: Observer E A) : Stack E A Empty Empty
@@ -32,11 +32,11 @@ def Stack.size : Stack E A E₁ A₁ -> Nat
   | Stack.done .. => 0
 
 /-- State needed to execute a Fiber  -/
-structure RunState (Rprov) (E A E₁ A₁: Type) where
+structure RunState (Rfiber) (E A E₁ A₁: Type) where
   interruption : Interruption
   fiberInfos   : IO.Ref (List FiberInfo)
   stack        : Stack E A E₁ A₁
-  environment  : Environment Rprov
+  environment  : Environment Rfiber
   fiberId      : FiberId
   initialTime  : Nat
 
