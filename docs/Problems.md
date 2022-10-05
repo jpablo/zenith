@@ -39,11 +39,11 @@ structure GithubZ: Type 1 where
 def z : Z Github E A := ...
 ```
 
-`Github` on the other hand cannot:
+`GithubZ` on the other hand cannot:
 
 ```coq
 -- doesn't compile:
--- Z GithubZ E A := ...
+-- def z : Z GithubZ E A := ...
 ```
 
 Because the `R` parameter has `Type` and `GithubZ` has `Type 1`.
