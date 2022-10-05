@@ -1,7 +1,6 @@
-import Z.Environment
+-- import Z.Environment
 import Z.Combinators
 import Z.GraphvizDiagram
-import Z.Fiber
 
 open Fiber
 

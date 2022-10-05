@@ -2,7 +2,6 @@ import Z.Combinators
 import Z.Colors
 import Z.GraphvizDiagram
 import Z.InterpreterModels
-import Z.Fiber
 
 open IO (userError)
 -- Needed to use dot notation on Fibers
