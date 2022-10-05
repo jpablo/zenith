@@ -15,6 +15,9 @@ namespace Fiber
 end Fiber
 
 
+open System
+open IO
+
 namespace Z
   /-- 
     Evaluate the given effect `self`.
@@ -24,10 +27,11 @@ namespace Z
 
   -/
   def unsafeRunSync [ToString A] (self: Z Unit E A) (fiberId: FiberId := "main") (useDiagram: Option String := none): IO (Option (Exit E A)) := do
-    let diagram <-
+    let diagramIO := do
       match useDiagram with
-        | some file => GraphViz.graphvizIO ⟨file⟩
-        | none      => pure ExecutionDiagram.empty
+        | some file => return GraphViz.graphvizIO (<- FS.Handle.mk file FS.Mode.write)
+        | none      => return ExecutionDiagram.empty
+    let diagram <- diagramIO
     diagram.header
     let t0    <- IO.monoMsNow.toIO
     let fiber <- unsafeRunFiber diagram self Environment.empty "" fiberId t0

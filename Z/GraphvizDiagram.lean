@@ -22,9 +22,7 @@ open System
 open IO
 
 /-- Implementation of `ExecutionDiagram` that writes a Graphviz diagram to the specified path -/
-def GraphViz.graphvizIO (path: FilePath): IO (ExecutionDiagram (IO Unit)) := do
-
-  let handle <- FS.Handle.mk path FS.Mode.write
+def GraphViz.graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
 
   let println txt := 
     FS.Handle.putStrLn handle txt
@@ -115,4 +113,4 @@ def GraphViz.graphvizIO (path: FilePath): IO (ExecutionDiagram (IO Unit)) := do
       printArrow currentEffectId effectId
   }
 
-  return diagram
+  diagram
