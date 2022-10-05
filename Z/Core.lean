@@ -86,7 +86,6 @@ namespace Z
     | internal.currentEnvironment md        => md
     | internal.provideEnvironment _ _ md    => md
 
-
   def withLabel (self : Z R E A) (label : String) : Z R E A :=
     self.updateMetadata fun md => {md with label := label }
 
@@ -114,9 +113,9 @@ namespace Z
         exact mempty
       case errorHandler => 
         intro e0
-        exact done' <| Exit.failure <| e0.map f
+        exact done' <| .failure <| e0.map f
       case next => 
-        exact done' ∘ Exit.success  
+        exact done' ∘ .success  
 
   def succeed' (io : IO A) (md := Metadata.withLabel "succeed"): Z R E A := 
     internal.sync io md

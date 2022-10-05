@@ -21,6 +21,12 @@ namespace Z
       (nodeId, self.setNodeId nodeId)
     else
       (self.metadata.nodeId, self)
+      
+  def ensureNodeId' (nodeId : NodeId) : Z R E A :=
+    if self.metadata.nodeId.isEmpty then
+      self.setNodeId nodeId
+    else
+      self
 
   def failCause (cause : Cause E) : Z R E Empty :=
     Z.done' <| Exit.failure cause
