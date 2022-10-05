@@ -8,7 +8,7 @@ namespace GraphViz
     let colorAttr  := if color.isEmpty then "" else s!"BGCOLOR=\"{color}\""
     let tableStyle := s!"CELLPADDING=\"4\" BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\""
     let label      := s!"<table {tableStyle}><tr><td {colorAttr} colspan='2'><b>{a}</b></td></tr>{String.join extras}</table>"
-    s!"dot: \"{nodeId}\" [shape=none, label=<{label}> {opts}]"
+    s!"\"{nodeId}\" [shape=none, label=<{label}> {opts}]"
 
 
   def newId (name: String): IO NodeId := do
@@ -22,19 +22,18 @@ open System
 open IO
 
 /-- Implementation of `ExecutionDiagram` that writes a Graphviz diagram to the specified path -/
-def GraphViz.graphvizIO (path: FilePath): ExecutionDiagram (IO Unit) :=
+def GraphViz.graphvizIO (path: FilePath): IO (ExecutionDiagram (IO Unit)) := do
 
-  let handle := 
-    FS.Handle.mk path FS.Mode.append
+  let handle <- FS.Handle.mk path FS.Mode.write
 
   let println txt := 
-    do FS.Handle.putStrLn (<- handle) txt
+    FS.Handle.putStrLn handle txt
 
-  let printNode {A} [ToString A] (nodeId: NodeId) (a: A) (extra: List (String × String) := []) (color: String := "") (opts: String :="") : IO Unit := 
-    do println <| formatNode nodeId a extra color opts
+  let printNode {A} [ToString A] (nodeId: NodeId) (a: A) (extra: List (String × String) := []) (color: String := "") (opts: String :="") := 
+    println <| formatNode nodeId a extra color opts
 
-  let printArrow (parentId: NodeId) (newId: NodeId) (opts: String := ""): IO Unit := 
-    do println s!"  \"{parentId}\" -> \"{newId}\" {opts}"
+  let printArrow (parentId: NodeId) (newId: NodeId) (opts: String := "") := 
+    println s!"  \"{parentId}\" -> \"{newId}\" {opts}"
 
   let diagram: ExecutionDiagram (IO Unit) := {
 
@@ -116,4 +115,4 @@ def GraphViz.graphvizIO (path: FilePath): ExecutionDiagram (IO Unit) :=
       printArrow currentEffectId effectId
   }
 
-  diagram
+  return diagram

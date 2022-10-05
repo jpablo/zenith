@@ -1,0 +1,5 @@
+digraph D {  node [shape=box]
+"-main-39500-138267881668416" [shape=none, label=<<table CELLPADDING="4" BORDER="0" CELLBORDER="1" CELLSPACING="0"><tr><td BGCOLOR="gray76" colspan='2'><b>sync</b></td></tr><tr><td align='right'>label:</td><td align='left'>succeed</td></tr><tr><td align='right'>stack:</td><td align='left'>0</td></tr><tr><td align='right'>isInterruptible:</td><td align='left'>✅</td></tr><tr><td align='right'>interrupted:</td><td align='left'>❌</td></tr><tr><td align='right'>isInterrupting:</td><td align='left'>❌</td></tr><tr><td align='right'>t:</td><td align='left'>0 ms</td></tr></table>> ]
+"-main-39500-138267881703208" [shape=none, label=<<table CELLPADDING="4" BORDER="0" CELLBORDER="1" CELLSPACING="0"><tr><td BGCOLOR="pink" colspan='2'><b>IO</b></td></tr><tr><td align='right'>took:</td><td align='left'>0 ms</td></tr></table>> ]
+  "-main-39500-138267881668416" -> "-main-39500-138267881703208" 
+}

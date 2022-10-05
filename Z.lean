@@ -23,11 +23,11 @@ namespace Z
     - `useDiagram`: If provided will write a graphviz representation of program execution to the given file.
 
   -/
-  def unsafeRunSync [ToString A] (self: Z Unit E A) (fiberId: FiberId) (useDiagram: Option String := none): IO (Option (Exit E A)) := do
-    let diagram :=
+  def unsafeRunSync [ToString A] (self: Z Unit E A) (fiberId: FiberId := "main") (useDiagram: Option String := none): IO (Option (Exit E A)) := do
+    let diagram <-
       match useDiagram with
         | some file => GraphViz.graphvizIO ⟨file⟩
-        | none      => ExecutionDiagram.empty
+        | none      => pure ExecutionDiagram.empty
     diagram.header
     let t0    <- IO.monoMsNow.toIO
     let fiber <- unsafeRunFiber diagram self Environment.empty "" fiberId t0

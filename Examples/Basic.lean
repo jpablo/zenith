@@ -39,21 +39,21 @@ def monadExample := do
   consoleLive.printLine s!"Got a tuple: ({a},{b})"
 
 def succeedExample: Z Unit Empty Unit :=
-  Z.succeed <| IO.println "hello from IO"
+  Z.succeed <| println! "hello from IO"
 
 def attemptExample: Z Unit IO.Error Unit :=
-  Z.attempt <| IO.println "hello from IO"
+  Z.attempt <| println! "hello from IO"
 
 def coercionExample: Z Unit IO.Error Unit :=
-  IO.println "hello from IO"
+  println! "hello from IO"
 
 
 /-- Option 1: propagate type parameters up to the top level function -/
 def asyncExample {R E} :=
   Z.async (R := R) (E := E) fun continueExecution => do
-    IO.println "sleeping 1 seconds..."
+    println! "sleeping 1 seconds..."
     IO.sleep 1000
-    IO.println "waking up"
+    println! "waking up"
     continueExecution (.success 10)
 
 def forkExample := do
@@ -163,6 +163,9 @@ def envExample1: Z (Nat × String) Empty Unit := do
   consoleLive.printLine (env.get Nat)
   consoleLive.printLine (env.get String)
 
+def envExample1ready: Z Unit Empty Unit :=
+  envExample1.provideEnvironment ((1: Nat), "hello")
+
 def envExample2 := do
   let console <- Z.environment ConsoleIO
   Z.succeed' <| console.printLine "hello from ConsoleIO.printLine"
@@ -170,8 +173,6 @@ def envExample2 := do
 def envExample2ready :=
   envExample2.provideEnvironment ConsoleIO.consoleLive
 
-def envExample1ready: Z Unit Empty Unit :=
-  envExample1.provideEnvironment ((1: Nat), "hello")
 
 def envExample3 :=
   (Z.succeedNow "hello from Z.succeed").provideEnvironment ()
@@ -183,7 +184,7 @@ def envExample4 := do
   let msg <- readLineZ
   printLineZ s!"hello {msg}"
 
-def envExample5ready: Z Unit Empty Unit :=
+def envExample4ready: Z Unit Empty Unit :=
   envExample4.provideEnvironment ConsoleIO.consoleLive
 
 
