@@ -52,7 +52,7 @@ def GraphViz.graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
           printArrow parentId nextEffectId  s!"[label = \"λ\"]"
 
     interruption := fun interruptedBoxId nextEffectId (currentTime initialTime: Nat) => do
-      println (formatNode interruptedBoxId s!"⌛ 🛑 interrupted!" [("t", s!"{currentTime - initialTime} ms")] "white")
+      printNode interruptedBoxId s!"⌛ 🛑 interrupted!" [("t", s!"{currentTime - initialTime} ms")] "white"
       printArrow interruptedBoxId nextEffectId "[label = generated]"
 
     currentNode := fun (label: String) (currentEffectStr: String) currentEffectId (interruption: Interruption) (initialTime currentTime stackSize: Nat) color => do
@@ -67,24 +67,24 @@ def GraphViz.graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
         ]
       printNode currentEffectId currentEffectStr (lbl ++ ex) color
 
-    done := fun fiberId currentEffectId color (msg: String) => do
+    done := fun fiberId currentEffectId color msg => do
       let exitId <- newId fiberId
-      println (formatNode exitId msg [] color)
+      printNode exitId msg [] color
       printArrow currentEffectId exitId
 
     syncTry := fun fiberId currentEffectId before => do
       let after <- IO.monoMsNow.toIO
       let resultId <- newId fiberId
-      println (formatNode resultId "IO" [("took", s!"{after - before} ms")] "pink")
+      printNode resultId "IO" [("took", s!"{after - before} ms")] "pink"
       printArrow currentEffectId resultId
 
-    onSuccess := fun e1 e2 =>
-      printArrow e1 e2
+    onSuccess := fun currentEffectId effectId =>
+      printArrow currentEffectId effectId
 
     async := fun fiberId effectId before => do
       let after <- IO.monoMsNow.toIO
       let resultId <- newId fiberId
-      println (formatNode resultId "IO" [("took", s!"{after - before} ms")] "pink")
+      printNode resultId "IO" [("took", s!"{after - before} ms")] "pink"
       printArrow effectId resultId s!"[label = \"λ\"]"
 
     fork := fun (fiberId: FiberId) currentEffectId effectId (currentTime initialTime: Nat) newFiberBoxId => do
@@ -92,7 +92,7 @@ def GraphViz.graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
         ("t", s!"{currentTime - initialTime} ms"), 
         ("fiberId", s!"{fiberId}")
       ]
-      println (formatNode newFiberBoxId s!"🧵 new fiber" attrs "white")
+      printNode newFiberBoxId s!"🧵 new fiber" attrs "white"
       printArrow currentEffectId newFiberBoxId "[color=red, arrowhead=none]"
       printArrow newFiberBoxId effectId "[color=red]"
 
@@ -108,7 +108,7 @@ def GraphViz.graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
 
     provideEnvironment := fun fiberId (currentEffectId effectId: String) color => do
       let envId <- newId fiberId
-      println (formatNode envId "Environment" [] color)
+      printNode envId "Environment" [] color
       printArrow currentEffectId envId
       printArrow currentEffectId effectId
   }
