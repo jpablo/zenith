@@ -12,9 +12,9 @@ For example consider the `Sync` case class
 case class Sync[A](trace: Trace, eval: () => A) extends ZIO[Any, Nothing, A]
 ```
 
-`R = Any` means that this value (worflow) is ready to be executed as it has no dependencies in the environment.
+`R = Any` means that this value is ready to be executed as it has no dependencies in the environment.
 
-`E = Nothing` means that this workflow has no expected errors ("failures").
+`E = Nothing` means that this value has no **expected** errors ("failures").
 
 Such a value can be used whenever a `ZIO[R, E, A]` is expected (for arbitrary types `R`, `E`) due to contravariance of `R` and covariance of `E`.
 
