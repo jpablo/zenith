@@ -1,6 +1,6 @@
 # Variance
 
-ZIO uses convariance and contravariance a lot to propagate constraints and in general to express certain program invariants.
+ZIO uses covariance and contravariance a lot to propagate constraints and in general to express certain program invariants.
 
 ```Scala
 sealed trait ZIO[-R, +E, +A]
