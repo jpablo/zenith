@@ -23,14 +23,6 @@ The main goals are pedagogical:
 * Environment ✅
 * Layers ❌
 
-## Future plans
-
-* Find a workaround for the limitation that `Z` Services can't be used in environment.
-* Scopes and FiberRefs
-* Fiber supervision
-* Concurrency primitives
-* Better integration with Lean features
-
 ## Building and running examples
 
 * [Elan](https://github.com/leanprover/elan) is needed to install `lake`, which will in turn download project dependencies (i.e. the specific Lean 4 version).
