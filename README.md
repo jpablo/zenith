@@ -2,14 +2,12 @@
 
 `Zenith` is a Lean 4 library inspired by [ZIO](https://zio.dev/).
 
-Right now the main goals are pedagogical:
+The main goals are pedagogical:
 
 * Explore how to translate certain OO patterns into Lean
 * Simple implementation of ZIO better suited for high level analysis
 * Visualization of program execution
 * etc
-
-But once the library matures enough it should be usable for regular programming.
 
 ## Features
 
