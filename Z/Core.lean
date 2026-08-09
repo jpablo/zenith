@@ -372,6 +372,13 @@ def adapt
     |>.mapFailure error
     |>.map success
 
+/-- Widen an action to an explicitly selected environment and error type. -/
+def into
+    [environment : Environment.CanProvide R R₁]
+    [error : E₀ <: E]
+    (self : Z R₁ E₀ A) : Z R E A :=
+  (self.contramap environment.provide).mapFailure error.coe
+
 instance [conversion : Environment.CanProvide R₀ R₁] :
     CoeTC (Z R₁ E A) (Z R₀ E A) :=
   ⟨contramap conversion.provide⟩

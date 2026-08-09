@@ -29,6 +29,11 @@ namespace GithubZ
       Z GithubZ IO.Error (List Issue) :=
     Z.serviceWithZ fun github => github.getIssues organization
 
+  def issueCount : Z (GithubZ × String) IO.Error Nat := zdo
+    let organization <- Z.environment String
+    let issues <- getIssuesZ organization
+    pure issues.length
+
 end GithubZ
 
 

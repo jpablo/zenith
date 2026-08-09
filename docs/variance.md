@@ -158,6 +158,17 @@ def Z.adapt
     (self : Z R₁ E₀ A₀) : Z R₀ E₁ A₁
 ```
 
+`Z.into` is a shorter explicit operation when only the environment and error
+types must change. The result annotation selects both target types:
+
+```lean
+example (selectNat : Bool) : Z (Nat × String) Empty String := do
+  if selectNat then
+    pure "nat"
+  else
+    Z.into (R := Nat × String) (E := Empty) (Z.environment String)
+```
+
 `Layer` has the same three one-axis coercions, the same low-priority combined
 coercion, and an explicit `Layer.adapt` operation.
 
@@ -247,15 +258,15 @@ def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := zdo
 `zdo` uses the expected `Z R E A` type as the complete environment and error
 type. It first infers the precise type of each action. It then uses
 `Environment.CanProvide` and the error conversion relation to widen that
-action before `bind`.
+action before `bind`. A private action elaborator applies the same operation
+to terminal actions before Lean fixes their branch type.
 
 The expected type is required. A missing service is a compile error. The
 implementation also supports services in `Type 1` or higher, because it
 creates a fresh universe for each action environment.
 
-The current prototype has one control-flow limitation. A terminal action in
-an `if` or `match` branch must use `let` and end with `pure`. Lean sends the
-complete branch type into a bare terminal action before `DoOps` can widen it.
+Bare terminal actions now work in `if`, `match`, `try`, and loop blocks. The
+checked examples also cover `return` and nested actions.
 
 This design does not calculate a GLB. The result annotation supplies the
 complete environment. Automatic inference of a canonical environment remains

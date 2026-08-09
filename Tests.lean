@@ -343,6 +343,29 @@ def testZDoEnvironmentComposition : IO Unit := do
   | .success (42, "service") => pure ()
   | _ => failTest "zdo did not project the declared environment"
 
+def testZDoControlFlow : IO Unit := do
+  let branchProgram : Z (String × Nat) Empty String := zdo
+    if false then
+      let _ <- Z.environment Nat
+      pure "number"
+    else
+      Z.environment String
+  match <- runProgram "zdo-terminal-branch"
+      (branchProgram.provideEnvironment ("service", 42)) with
+  | .success "service" => pure ()
+  | _ => failTest "zdo did not adapt a terminal branch action"
+
+  let catchProgram : Z (String × Nat) IO.Error String := zdo
+    try
+      let _ <- Z.environment Nat
+      throw (IO.userError "expected")
+    catch _ =>
+      Z.environment String
+  match <- runProgram "zdo-catch"
+      (catchProgram.provideEnvironment ("recovered", 42)) with
+  | .success "recovered" => pure ()
+  | _ => failTest "zdo did not adapt a catch handler action"
+
 def main : IO Unit := do
   testFinalizerFailure
   testIOErrorCatch
@@ -367,4 +390,5 @@ def main : IO Unit := do
   testParallelLayerFailureCleanup
   testAcquireReleaseZLayer
   testZDoEnvironmentComposition
+  testZDoControlFlow
   IO.println "All regression tests passed."

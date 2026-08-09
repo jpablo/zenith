@@ -280,7 +280,7 @@ A → Z R₂ E B
 Z (R₁ & R₂) E B
 ```
 
-Lean does not provide a standard graded-monad class. However, Lean 4.32 has a
+Lean does not provide a standard graded-monad class. However, Lean 4.31 has a
 new extensible `do` elaborator. `Lean.Elab.Do.DoOps` supplies custom builders
 for `pure` and `bind`, plus operations that recognize and construct monadic
 types. `Lean.Elab.Do.elabDoWith` runs the standard `do` elaborator with those
@@ -293,17 +293,18 @@ reuses Lean's `do` parser and control-flow elaboration. It infers a fresh
 environment and error type for each action, then widens the action to the
 expected block type before `bind`.
 
-This first version requires an expected `Z R E A` type. It verifies that `R`
+This version requires an expected `Z R E A` type. It verifies that `R`
 contains all requirements. It does not infer an intersection or other GLB.
-Ordinary `do` remains unchanged. A terminal action in an `if` or `match`
-branch must currently use `let` and end with `pure` so that `zdo` can widen it.
+Ordinary `do` remains unchanged. A private action elaborator also widens bare
+terminal actions in control-flow branches before Lean fixes the branch type.
 
 ## Recommended research sequence
 
 1. Define the Scala fragment that Zenith and other target libraries need.
 2. Formalize its subtype preorder, intersection rules, and equivalence laws.
 3. Decide whether service environments use products or normalized rows.
-4. Test the expected-environment `flatMapIn` and `zdo` design on real programs.
+4. Continue to test the expected-environment `flatMapIn` and `zdo` design on
+   real programs.
 5. Decide whether automatic environment inference is still necessary.
 6. If it is necessary, implement GLB formation and prove its laws.
 7. Add unions and error-channel least upper bounds only after intersections
@@ -320,4 +321,4 @@ lake env lean docs/intersection-types.lean
 [scala-union-rules]: https://docs.scala-lang.org/scala3/reference/new-types/union-types-spec.html
 [scala-members]: https://docs.scala-lang.org/scala3/reference/new-types/intersection-types.html
 [lean-do-release]: https://lean-lang.org/doc/reference/latest/releases/v4.31.0/
-[lean-do-ops]: https://github.com/leanprover/lean4/blob/v4.32.2/src/Lean/Elab/Do/Basic.lean
+[lean-do-ops]: https://github.com/leanprover/lean4/blob/v4.31.0/src/Lean/Elab/Do/Basic.lean

@@ -80,17 +80,47 @@ example (selectNat : Bool) : Z (Nat × String) Empty String := zdo
     let _ <- Z.environment Nat
     pure "nat"
   else
-    let string <- Z.environment String
-    pure string
+    Z.environment String
+
+example (selectNat : Bool) : Z (Nat × String) Empty String := do
+  if selectNat then
+    pure "nat"
+  else
+    Z.into (R := Nat × String) (E := Empty) (Z.environment String)
 
 example (selection : Option Bool) : Z (Nat × String) Empty String := zdo
   match selection with
   | some true =>
       let _ <- Z.environment Nat
       pure "nat"
-  | _ =>
-      let string <- Z.environment String
-      pure string
+  | _ => Z.environment String
+
+example (stopEarly : Bool) : Z (Nat × String) Empty String := zdo
+  if stopEarly then
+    return "early"
+  let _ <- Z.environment Nat
+  Z.environment String
+
+example : Z (Nat × String) IO.Error String := zdo
+  try
+    let _ <- Z.environment Nat
+    throw (IO.userError "expected")
+  catch _ =>
+    Z.environment String
+
+example : Z (Nat × String) Empty String := zdo
+  for _ in [1, 2] do
+    let _ <- Z.environment Nat
+    pure ()
+  Z.environment String
+
+example : Z (Nat × String) Empty (Nat × String) := zdo
+  pure ((<- Z.environment Nat), (<- Z.environment String))
+
+example : Z Unit IO.Error Nat := zdo
+  let io : IO Nat := do
+    pure 42
+  Z.attempt io
 
 #check_failure (zdo
   let string <- Z.environment String
