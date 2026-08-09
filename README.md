@@ -45,7 +45,7 @@ find . -name "*.lean" | entr -s 'lake build'
 #### Run example programs
 
 ```bash
-./build/bin/z
+lake exe z
 ```
 
 #### Regenerate svg diagrams

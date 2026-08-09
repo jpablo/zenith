@@ -89,7 +89,7 @@ namespace Layer
 
 
   def map (self : Layer A E B) (f : Environment B -> Environment C) : Layer A E C := 
-    flatMap self (fun env => succeedEnvironment <| f env)
+    flatMap self (fun env => fromEnvironment <| Z.succeedNow' <| f env)
 
 
 

@@ -31,7 +31,7 @@ namespace Z
   def fail [ToString E] (userError : E): Z Unit E Empty :=
     fail' userError
 
-  def die (ioe : IO.Error) : Z Unit Empty Empty :=
+  def die (ioe : IO.Error) : Z R Empty Empty :=
     failCause (Cause.die ioe)
 
   def errorHandlerCause (errorHandler : E -> Z R E₁ A₁): Cause E -> Z R E₁ A₁ := fun
@@ -61,7 +61,13 @@ namespace Z
 
   instance : MonadExceptOf IO.Error (Z R Empty) where
     throw    := fun ioe => Z.die ioe
-    tryCatch := fun z _ => Z.foldZ z impossible pure
+    tryCatch := fun z errorHandler =>
+      z.foldCauseZ
+        (fun
+          | .die ioe => errorHandler ioe
+          | .interrupt => Z.failCause .interrupt
+          | .fail e => nomatch e)
+        pure
 
   -- instance : MonadExceptOf IO.Error (Z R (Cause E)) where
   --   throw    := fun ioe => Z.die ioe
@@ -96,7 +102,7 @@ namespace Z
     self.zipWith other (·, ·) |>.withLabel "zip"
 
   def sandbox [ToString E]: Z R (Cause E) A :=
-    self.foldCauseZ (fun e => fail e) pure
+    self.foldCauseZ (fun e => fail' e) pure
 
   def orDieWith (f : E -> IO.Error) : Z R Empty A :=
     self.foldZ (fun e => die <| f e) pure
@@ -150,10 +156,12 @@ namespace Z
 
   def ensuring (finalizer : Z R Empty A₀): Z R E A :=
     let finalizer := finalizer.withLabel "🏁 finalizer"
+    let finalizerFailure (cause : Cause Empty) : Z R E A :=
+      Z.failCause (cause.map impossible)
     .withLabel (label := s!"👮‍♀️ ensuring") $
       self.foldCauseZ
-        (fun cause => finalizer.foldCauseZ (fun _ => .failCause cause) (fun _ => .failCause cause))
-        (fun a     => finalizer.foldCauseZ (fun _ => pure a) (fun _ => pure a))
+        (fun cause => finalizer.foldCauseZ finalizerFailure (fun _ => .failCause cause))
+        (fun a     => finalizer.foldCauseZ finalizerFailure (fun _ => pure a))
 
   def interruptible : Z R E A :=
     self.setInterruptStatus .interruptible |>.withLabel "🛡 ↓ interruptible"

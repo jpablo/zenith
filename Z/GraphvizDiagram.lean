@@ -2,13 +2,23 @@ import Z.ExecutionDiagram
 
 
 namespace GraphViz
+
+  def escapeHtml (value: String) : String :=
+    value.replace "&" "&amp;"
+      |>.replace "<" "&lt;"
+      |>.replace ">" "&gt;"
+      |>.replace "\"" "&quot;"
+      |>.replace "'" "&#39;"
+
+  def quoteId (value: String) : String :=
+    value.quote
   
   def formatNode [ToString A] (nodeId: NodeId) (a: A) (extra: List (String × String) := []) (color: String := "") (opts: String :=""): String :=
-    let extras     := extra.map fun (k,v) => s!"<tr><td align='right'>{k}:</td><td align='left'>{v}</td></tr>"
-    let colorAttr  := if color.isEmpty then "" else s!"BGCOLOR=\"{color}\""
+    let extras     := extra.map fun (k,v) => s!"<tr><td align='right'>{escapeHtml k}:</td><td align='left'>{escapeHtml v}</td></tr>"
+    let colorAttr  := if color.isEmpty then "" else s!"BGCOLOR=\"{escapeHtml color}\""
     let tableStyle := s!"CELLPADDING=\"4\" BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\""
-    let label      := s!"<table {tableStyle}><tr><td {colorAttr} colspan='2'><b>{a}</b></td></tr>{String.join extras}</table>"
-    s!"\"{nodeId}\" [shape=none, label=<{label}> {opts}]"
+    let label      := s!"<table {tableStyle}><tr><td {colorAttr} colspan='2'><b>{escapeHtml (toString a)}</b></td></tr>{String.join extras}</table>"
+    s!"{quoteId nodeId} [shape=none, label=<{label}> {opts}]"
 
 
   def newId (name: String): IO NodeId := do
@@ -31,7 +41,7 @@ def GraphViz.graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
     println <| formatNode nodeId a extra color opts
 
   let printArrow (parentId: NodeId) (newId: NodeId) (opts: String := "") := 
-    println s!"  \"{parentId}\" -> \"{newId}\" {opts}"
+    println s!"  {quoteId parentId} -> {quoteId newId} {opts}"
 
   let diagram: ExecutionDiagram (IO Unit) := {
 

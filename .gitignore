@@ -1,4 +1,5 @@
 /build
+/.lake/
 /lean_packages/*
 !/lean_packages/manifest.json
 /build

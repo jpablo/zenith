@@ -9,7 +9,7 @@ namespace Fiber
     Z.async self.awaitAsync |>.withLabel s!"⌛ ⑂ Fiber.join ({self.fiberId})"
 
   def interrupt (self: Fiber E A): Z Unit Empty (Exit E A) := do
-    Z.succeed (self.interrupted.set true) |>.withLabel s!"⌛ 🛑 Fiber.interrupted ← true ({self.fiberId})"
+    Z.succeed self.requestInterrupt |>.withLabel s!"⌛ 🛑 Fiber.interrupted ← true ({self.fiberId})"
     self.join.foldCauseZ (Exit.failure ∘> pure) (Exit.success ∘> pure)
 
 end Fiber
@@ -36,6 +36,7 @@ namespace Z
     let t0    <- IO.monoMsNow.toIO
     let fiber <- unsafeRunFiber diagram self Environment.empty "" fiberId t0
     let exit  <- fiber.awaitPoll (fiberId := fiberId)
+    fiber.awaitTask
     diagram.footer
     return exit
 

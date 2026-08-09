@@ -10,6 +10,13 @@ open Function (const)
 
 namespace Z
 
+private def interruptChildren (fiberInfos : IO.Ref (List FiberInfo)) : IO Unit := do
+  let children <- fiberInfos.get
+  for child in children do
+    child.interrupt
+  for child in children do
+    child.await
+
 mutual
 
   variable (diagram : ExecutionDiagram (IO Unit))
@@ -32,13 +39,13 @@ mutual
     }
     -- continue in the background
     let task <- IO.asTask do
-      log fiberId s!"-->  Z.unsafeRunFiber -- starting run loop in a new task"
-      self.runLoop state
-      -- TODO: restore this later!
-      -- for fiberRef in (<- fiberInfos.get) do
-      --   log fiberId s!" finishing, interrupting child: {fiberRef.fiberId}"
-      --   fiberRef.interrupt
-      log fiberId s!"<-- Z.unsafeRunFiber -- finishing execution\n"
+      try
+        log fiberId s!"-->  Z.unsafeRunFiber -- starting run loop in a new task"
+        self.runLoop state
+        log fiberId s!"<-- Z.unsafeRunFiber -- finishing execution\n"
+      catch ioError =>
+        interruptChildren state.fiberInfos
+        fiber.complete (.failure (.die ioError))
     fiber.setTask task
     return fiber
 
@@ -85,29 +92,27 @@ mutual
       /- Note: we need to match on the instance `validEnv` so that it is propagated in the branches:
         https://leanprover.zulipchat.com/#narrow/stream/270676-lean4/topic/Help.20understanding.20GADTs
       -/
-      match self, validEnv with
+      (match self, validEnv with
 
-        | .done' (Exit.success value) _, _ =>
+        | .done' (Exit.success value) _, _ => do
           diagram.done state.fiberId self.nodeId color "Exit.success"
           continueOrComplete value state
 
-        | .done' (Exit.failure cause) _, _ => 
+        | .done' (Exit.failure cause) _, _ => do
           diagram.done state.fiberId self.nodeId color "Exit.failure"
           runWithErrorHandler cause state
         
-        | .succeed' io _, _ =>  
-          EStateM.tryCatch 
-            (do 
-              let result <- io
-              diagram.syncTry state.fiberId self.nodeId t₀
-              continueOrComplete result state
-            )
-            (fun ioError => 
-              let nextEffect := Z.done <| .failure <| .die ioError
-              nextEffect.runLoop state)
+        | .succeed' io _, _ => do
+          try
+            let result <- io
+            diagram.syncTry state.fiberId self.nodeId t₀
+            continueOrComplete result state
+          catch ioError =>
+            let nextEffect := Z.done <| .failure <| .die ioError
+            nextEffect.runLoop state
 
 
-        | .flatMap effect next _, validEnv' =>
+        | .flatMap effect next _, validEnv' => do
           let effect := effect.ensureNodeId (<- state.newId)
           diagram.onSuccess self.nodeId effect.nodeId
           -- An `onSuccess` node doesn't change the error type; we take advantage of this fact to capture the proposition `E = E₁` 
@@ -119,17 +124,32 @@ mutual
           
 
         /- Important special case: registerCallback == Fiber.await -/
-        | .async await _, _ =>
-          await fun
-            | .failure e => do
+        | .async register _, _ => do
+          let resumed <- IO.mkRef false
+          let resume (exit : Exit E A) : IO Unit := do
+            let isFirst <- resumed.modifyGet fun alreadyResumed => (!alreadyResumed, true)
+            if isFirst then
+              state.interruption.interruptHandler.set IO.unit
               diagram.async state.fiberId self.nodeId t₀
-              runWithErrorHandler e state
+              match exit with
+                | .failure cause => runWithErrorHandler cause state
+                | .success value => continueOrComplete value state
+          let interrupt := do
+            if <- state.interruption.shouldInterrupt then
+              resume (.failure .interrupt)
+          let callback (exit : Exit E A) := do
+            if <- state.interruption.shouldInterrupt then
+              resume (.failure .interrupt)
+            else
+              resume exit
+          state.interruption.interruptHandler.set interrupt
+          if <- state.interruption.shouldInterrupt then
+            interrupt
+          else
+            try register callback
+            catch ioError => resume (.failure (.die ioError))
 
-            | .success a => do
-              diagram.async state.fiberId self.nodeId t₀
-              continueOrComplete a state 
-
-        | .fork effect name _, _ =>
+        | Z.fork effect name _, _ => do
           let effect := effect.ensureNodeId (<- state.newId)
           let newFiberBoxId := effect.nodeId
           let effectId <- state.newId
@@ -143,7 +163,7 @@ mutual
           continueOrComplete fiber state
 
 
-        | .foldCauseZ effect errorHandler next _, validEnv' => 
+        | .foldCauseZ effect errorHandler next _, validEnv' => do
           let effect := effect.ensureNodeId (<- state.newId)
           diagram.onSuccessAndFailure self.nodeId effect.nodeId
           effect.runLoop { state with 
@@ -152,7 +172,7 @@ mutual
           }
 
 
-        | .setInterruptStatus effect status _, _ =>
+        | .setInterruptStatus effect status _, _ => do
           let isInterruptible := state.interruption.isInterruptible
           let oldIsInterruptible <- isInterruptible.get
           /- ------------------------------ -/
@@ -166,56 +186,58 @@ mutual
           diagram.setInterruptStatus self.nodeId effect.nodeId nextEffect.nodeId
           nextEffect.runLoop state
 
-        | .contramap f effect _, _ =>
+        | .contramap f effect _, _ => do
           let effect := effect.ensureNodeId (<- state.newId)
           diagram.widenEnv self.nodeId effect.nodeId
           effect.runLoop (validEnv := IsComponent.contramap f) state
 
-        | .environment _ _ , validEnv' => 
+        | .environment _ _ , validEnv' => do
           continueOrComplete (validEnv'.get state.environment) state
 
-        | .provideEnvironment effect env _ , _ => 
+        | .provideEnvironment effect env _ , _ => do
           let effect := effect.ensureNodeId (<- state.newId)
           diagram.provideEnvironment state.fiberId self.nodeId effect.nodeId color
-          effect.runLoop {state with environment := state.environment ++ env}
+          effect.runLoop {state with environment := state.environment ++ env})
 
 
   private partial def runWithErrorHandler (cause : Cause E) (state : RunState Rfiber E A E₁ A₁) : IO Unit := do
     log state.fiberId  s!"[continueOrComplete] [stack: {Stack.size state.stack}]"
     -- looking at the stack to decide what do do next:
-    match state.stack with
+    (match state.stack with
       -- error handler found, use it to produce the next effect.
-      | .more _ (some errorHandler) _ tail parentId? validEnv env =>
+      | .more _ (some errorHandler) _ tail parentId? validEnv env => do
         let nextEffect := errorHandler cause |>.ensureNodeId (<- state.newId)
         diagram.errorHandler parentId? nextEffect.nodeId
         nextEffect.runLoop (validEnv := validEnv) { state with stack := tail, environment := env }
 
       -- No error handler found at the top of the stack; try with the tail.
-      | .more _ none (some (.up eq_E_E₁)) tail .. => 
+      | .more _ none (some (.up eq_E_E₁)) tail .. => do
         let cause₁: Cause E₁ := cause.map (cast eq_E_E₁) 
         runWithErrorHandler cause₁ {state with stack := tail}
 
-      | .more _ none none .. => 
+      | .more _ none none .. => do
         log state.fiberId "Internal defect: Stack not empty but don't know what do do next. (This should not happen)"
 
       -- nothing else to do, return control to the user
-      | .done complete =>
-        complete (.failure cause)
+      | .done complete => do
+        interruptChildren state.fiberInfos
+        complete (.failure cause))
     
 
   /-- `A` will be passed to the first continuation in the stack  -/
   private partial def continueOrComplete (value : A) (state : RunState Rfiber E A E₁ A₁) : IO Unit := do
     let msg := s!"[continueOrComplete] [stack: {Stack.size state.stack}]"
-    match state.stack with
-      | .done complete  => 
+    (match state.stack with
+      | .done complete  => do
         log state.fiberId s!"{msg} .done"
+        interruptChildren state.fiberInfos
         complete (.success value)
 
-      | .more next _ _ tail parentId? validEnv env =>
+      | .more next _ _ tail parentId? validEnv env => do
         log state.fiberId s!"{msg} .more"
         let nextEffect := next value |>.ensureNodeId (<- state.newId)
         diagram.continue_ parentId? nextEffect.nodeId
-        nextEffect.runLoop (validEnv := validEnv) {state with stack := tail, environment := env }
+        nextEffect.runLoop (validEnv := validEnv) {state with stack := tail, environment := env })
 
 
   private partial def runWithInterruption (self : Z R E A) [validEnv : R ∣ Rfiber] t₀ (state : RunState Rfiber E A E₁ A₁) := do
@@ -240,4 +262,3 @@ mutual
 end
 
 end Z
-

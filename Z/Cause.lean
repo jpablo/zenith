@@ -1,10 +1,13 @@
 
 
+deriving instance BEq for IO.Error
+
 /-- Cause of error -/
 inductive Cause (E: Type)
   | fail (userError: E)
   | die (ioError: IO.Error)
   | interrupt --(fiberId: FiberId)
+  deriving BEq
 
 def Cause.show [ToString E] : Cause E -> String
   | fail e    => s!"Cause.fail ({toString e})"

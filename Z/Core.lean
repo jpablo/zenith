@@ -122,7 +122,8 @@ namespace Z
   def succeed (io : IO A) (md := Metadata.withLabel "succeed"): Z Unit Empty A := 
     succeed' io md
 
-  def fork (effect : Z R E A) (name : String) (md := mempty) := 
+  @[match_pattern]
+  def fork (effect : Z R E A) (name : String) (md := mempty) : Z R Empty (Fiber E A) :=
     internal.fork effect name md
 
   def async (registerCallback : Observer E A -> IO Unit) (md := mempty) : Z R E A := 
@@ -170,4 +171,3 @@ end Z
 /-- Plays better with the rest of the library in many cases. -/
 def ioThrow : IO.Error -> IO Empty := 
   @throw IO.Error IO _ Empty
-
