@@ -1,26 +1,54 @@
 import Z.Core
 
-namespace Z
+namespace ZCore
 
-  variable (self : Z R E A)
+  variable (self : _root_.ZCore R E A)
 
   def nodeId : NodeId :=
     self.metadata.nodeId
 
-  def setNodeId (nodeId : NodeId) : Z R E A :=
+  def setNodeId (nodeId : NodeId) : _root_.ZCore R E A :=
     self.updateMetadata fun md => {md with nodeId := nodeId}
 
-  def resetNodeId : Z R E A :=
+  def resetNodeId : _root_.ZCore R E A :=
     self.setNodeId ""
 
   def label : String :=
     self.metadata.label
 
-  def ensureNodeId (nodeId : NodeId) : Z R E A :=
+  def ensureNodeId (nodeId : NodeId) : _root_.ZCore R E A :=
     if self.metadata.nodeId.isEmpty then
       self.setNodeId nodeId
     else
       self
+
+  def failCause (cause : Cause E) : _root_.ZCore R E A :=
+    ZCore.done' <| .failure cause
+
+  def ensuring
+      (finalizer : _root_.ZCore R Empty A₀) : _root_.ZCore R E A :=
+    let finalizer := finalizer.withLabel "🏁 finalizer"
+    let finalizerFailure (cause : Cause Empty) : _root_.ZCore R E A :=
+      ZCore.failCause (cause.map impossible)
+    .withLabel (label := "👮‍♀️ ensuring") <|
+      self.foldCauseZ
+        (fun cause =>
+          finalizer.foldCauseZ
+            finalizerFailure
+            (fun _ => .failCause cause))
+        (fun value =>
+          finalizer.foldCauseZ
+            finalizerFailure
+            (fun _ => .succeedNow' value))
+
+  instance : ToString (_root_.ZCore R E A) :=
+    ⟨(·.showHead)⟩
+
+end ZCore
+
+namespace Z
+
+  variable (self : Z R E A)
 
   def failCause (cause : Cause E) : Z R E Empty :=
     Z.done' <| Exit.failure cause
@@ -48,7 +76,7 @@ namespace Z
     pure a := succeedNow' a |>.withLabel "pure"
     bind z f := z.flatMap f |>.withLabel "do"
 
-  instance : ToString (Z R E A) := ⟨(·.showHead)⟩
+  instance : ToString (Z R E A) := ⟨fun _ => "Z"⟩
   instance : ToString (URIO R A) := inferInstanceAs (ToString (Z R Empty A))
 
   instance : Monad ZTask    := inferInstanceAs (Monad (Z Unit IO.Error))
@@ -141,12 +169,11 @@ namespace Z
   def sleep (ms : UInt32) : Z Unit Empty Unit :=
     Z.succeed (IO.sleep ms) {label := s!"😴 sleep : {toString ms}ms"}
 
-  def serviceWithZ (f : S -> Z R E A): Z (R × S) E A := do
-    let environment <- Z.environment (R × S) |>.widenError
-    Z.contramap (·.1) <| f <| environment.get S
+  def serviceWithZ (operation : S -> Z Unit E A) : Z S E A :=
+    Z.fromCore fun service => (operation service).close ()
 
-  def serviceWith (f : S -> A) : Z S E A :=
-      Z.contramap ((), ·) (Z.serviceWithZ fun s => Z.succeedNow (f s))
+  def serviceWith (operation : S -> A) : Z S E A :=
+    Z.fromCore fun service => ZCore.succeedNow' (operation service)
 
   def service (A) : Z A Empty A :=
     serviceWith id

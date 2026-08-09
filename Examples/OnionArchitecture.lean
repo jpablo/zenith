@@ -16,6 +16,21 @@ structure GithubZ: Type 1 where
   getIssues (organization: String): Z Unit IO.Error (List Issue)
   postComment (issue: Issue) (comment: Comment):  Z Unit IO.Error Unit
 
+namespace GithubZ
+
+  def mock : GithubZ where
+    getIssues _ := Z.succeedNow' []
+    postComment _ _ := Z.succeedNow' ()
+
+  def layer : Layer Unit IO.Error GithubZ where
+    build _ := pure mock
+
+  def getIssuesZ (organization : String) :
+      Z GithubZ IO.Error (List Issue) :=
+    Z.serviceWithZ fun github => github.getIssues organization
+
+end GithubZ
+
 
 structure Http where
   get (url: String): IO ByteArray -- Z Unit IO.Error ByteArray
@@ -70,9 +85,7 @@ structure HttpConfig
 --   businessLogic.run
 
 
-/- Using Layers -/
-
-/- Problem: Only services with of Type 0 can be used! -/  
+/- Using layers. `GithubZ : Type 1` is a valid layer output and environment. -/
 
 -- https://leanprover.zulipchat.com/#narrow/stream/270676-lean4/topic/universe.20polymorphic.20IO
 -- https://github.com/leanprover/lean4/issues/1136
@@ -95,4 +108,3 @@ def BusinessLogicLive.layer: Layer Github Empty BusinessLogic :=
 --     Z.attempt' http.start
 --     -- Z.addFinalizer http.shutdown
 --     return http
-

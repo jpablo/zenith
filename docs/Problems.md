@@ -1,21 +1,14 @@
-# Problems
+# Universe design
 
-## `IO` is not universe polymorphic
+## Standard `IO` is not universe-polymorphic
 
-Lean defines `IO` as:
+Lean defines:
 
 ```lean
 IO : Type → Type
 ```
 
-The result type of `IO` must therefore be in `Type`. A Zenith effect is in
-`Type 1`:
-
-```lean
-Z Unit Empty Unit : Type 1
-```
-
-As a result, `IO` cannot contain a `Z` value:
+Therefore, standard `IO` cannot return a Zenith effect:
 
 ```lean
 import Z
@@ -23,58 +16,61 @@ import Z
 #check_failure IO (Z Unit Empty Unit)
 ```
 
-This restriction concerns values stored in `IO`. It is separate from the
-environment restriction below.
+Zenith uses `HEIO` when a layer must produce a value from a higher universe.
+`HEIO` threads the same `IO.RealWorld` token as standard `IO`. A standard `IO`
+action enters it through `HEIO.liftIO`.
 
-## `Z` environments are restricted to `Type`
+## High-universe services
 
-The current declarations fix all three parameters at `Type`:
-
-```lean
-inductive Z : Type → Type → Type → Type 1 where ...
-inductive Layer : Type → Type → Type → Type 1 where ...
-```
-
-Consider a service record that stores operations as `Z` values:
+A service whose fields contain `Z` values lives in `Type 1`:
 
 ```lean
 structure Issue where
-structure Comment where
 
-structure GithubZ : Type 1 where
-  getIssues (organization : String) : Z Unit IO.Error (List Issue)
-  postComment (issue : Issue) (comment : Comment) : Z Unit IO.Error Unit
+structure Github : Type 1 where
+  getIssues : String → Z Unit IO.Error (List Issue)
 ```
 
-`GithubZ` is in `Type 1` because its fields contain `Z` values. It cannot be
-used directly as the `R` parameter:
+The public environment parameter of `Z` is universe-polymorphic, so this is
+valid:
 
 ```lean
-#check_failure Z GithubZ Empty Unit
+#check Z Github IO.Error Unit
 ```
 
-This error comes from the declaration `R : Type`. Support for this service
-requires a universe-polymorphic environment parameter throughout `Z`, `Layer`,
-and the related runtime types. It does not require `IO` to contain a `Z` value.
-
-## `Type` services can still use `Z` operations
-
-A service in `Type` can be used as an environment when its data is stored in
-the record and its `Z` operations are separate definitions:
+Business logic selects an effectful method with `serviceWithZ`:
 
 ```lean
-structure Github : Type where
-  endpoint : String
-
-def Github.getIssues
-    (_ : String) : Z Github IO.Error (List Issue) :=
-  Z.serviceWith fun _ : Github => []
+def program : Z Github IO.Error (List Issue) :=
+  Z.serviceWithZ fun github =>
+    github.getIssues "lean"
 ```
 
-The exact restriction is that a service record in `Type` cannot store
-`Z`-valued operations as fields.
+The service does not become a fiber result. `serviceWithZ` closes the
+environment and produces the existing deep `ZCore Unit` instruction tree. The
+current interpreter then runs that tree without a new service-call fiber.
 
-The complete runnable example is in [`Problems.lean`](Problems.lean). Run it
+## High-universe layers
+
+`Layer` can produce a service from any universe:
+
+```lean
+def githubLayer : Layer Unit IO.Error Github where
+  build _ :=
+    pure {
+      getIssues := fun _ => Z.succeedNow' []
+    }
+```
+
+`Layer.run` builds the service, supplies it to the program, and runs the closed
+instruction tree:
+
+```lean
+def runProgram : IO (Option (Exit IO.Error (List Issue))) :=
+  githubLayer.run () program
+```
+
+The complete checked example is in [`Problems.lean`](Problems.lean). Run it
 from the project root:
 
 ```sh

@@ -8,7 +8,7 @@ open IO (userError)
 open Fiber
 open Function (const)
 
-namespace Z
+namespace ZCore
 
 private def interruptChildren (fiberInfos : IO.Ref (List FiberInfo)) : IO Unit := do
   let children <- fiberInfos.get
@@ -26,7 +26,7 @@ mutual
   
   Runs the given effect in IO and returns a Fiber  
   -/
-  partial def unsafeRunFiber (self : Z R E A) (env : Environment Rfiber) [R ∣ Rfiber] (parentFiberId : FiberId) (name : String) (startTime : Nat) : IO (Fiber E A) := do
+  partial def unsafeRunFiber (self : ZCore R E A) (env : Environment Rfiber) [R ∣ Rfiber] (parentFiberId : FiberId) (name : String) (startTime : Nat) : IO (Fiber E A) := do
     let fiberId := s!"{parentFiberId}-{name}-{<- IO.rand 0 100000}"
     let fiber <- Fiber.empty fiberId
     let state : RunState .. := {
@@ -67,7 +67,7 @@ mutual
   The reason is that all the Z constructors are marked as `private`, which means they can't be used outside
   of the file `Core.lean`. 
   -/
-  private partial def runLoop (self : Z R E A) [validEnv : R ∣ Rfiber] (state : RunState Rfiber E A E₁ A₁) : IO Unit := do
+  private partial def runLoop (self : ZCore R E A) [validEnv : R ∣ Rfiber] (state : RunState Rfiber E A E₁ A₁) : IO Unit := do
     
     /- First ensure we have a nodeId -/
     let self := self.ensureNodeId (<- state.newId)
@@ -108,7 +108,7 @@ mutual
             diagram.syncTry state.fiberId self.nodeId t₀
             continueOrComplete result state
           catch ioError =>
-            let nextEffect := Z.done <| .failure <| .die ioError
+            let nextEffect := ZCore.done <| .failure <| .die ioError
             nextEffect.runLoop state
 
 
@@ -149,7 +149,7 @@ mutual
             try register callback
             catch ioError => resume (.failure (.die ioError))
 
-        | Z.fork effect name _, _ => do
+        | ZCore.fork effect name _, _ => do
           let effect := effect.ensureNodeId (<- state.newId)
           let newFiberBoxId := effect.nodeId
           let effectId <- state.newId
@@ -240,14 +240,14 @@ mutual
         nextEffect.runLoop (validEnv := validEnv) {state with stack := tail, environment := env })
 
 
-  private partial def runWithInterruption (self : Z R E A) [validEnv : R ∣ Rfiber] t₀ (state : RunState Rfiber E A E₁ A₁) := do
+  private partial def runWithInterruption (self : ZCore R E A) [validEnv : R ∣ Rfiber] t₀ (state : RunState Rfiber E A E₁ A₁) := do
     -- We need to use the current node's Id for the interrupted box, as it is already in the graph.
     let interruptedBoxId := self.nodeId
     -- reset the current node's Id, it will be re-generated later if needed.
     let self := self.resetNodeId
 
-    let nextEffect : Z Unit _ _  := 
-      Z.failCause Cause.interrupt |>.withLabel "failCause: interrupt"
+    let nextEffect : ZCore Unit E Empty :=
+      ZCore.failCause Cause.interrupt |>.withLabel "failCause: interrupt"
         |>.withLabel "shouldInterrupt = true"
         |>.ensureNodeId (<- state.newId)
     
@@ -256,9 +256,41 @@ mutual
     nextEffect.runLoop
       { state with
         interruption := {state.interruption with isInterrupting := true}
-        stack := .more (fun _ => self) none (eq_E_E₁? := some (.up rfl)) state.stack none (validEnv := validEnv) (env := state.environment)
+        stack := .more (fun _ : Empty => self) none (eq_E_E₁? := some (.up rfl)) state.stack none (validEnv := validEnv) (env := state.environment)
       }
 
 end
+
+end ZCore
+
+open System
+open IO
+
+namespace Z
+
+/-- Run a closed Zenith effect with the fiber interpreter. -/
+def unsafeRunSync
+    (self : Z Unit E A)
+    (fiberId : FiberId := "main")
+    (useDiagram : Option String := none) : IO (Option (Exit E A)) := do
+  let diagram <-
+    match useDiagram with
+    | some file =>
+        pure <| GraphViz.graphvizIO <|
+          <- FS.Handle.mk file FS.Mode.write
+    | none => pure ExecutionDiagram.empty
+  diagram.header
+  let startTime <- IO.monoMsNow.toIO
+  let fiber <- ZCore.unsafeRunFiber
+    diagram
+    (self.close ())
+    Environment.empty
+    ""
+    fiberId
+    startTime
+  let exit <- fiber.awaitPoll (fiberId := fiberId)
+  fiber.awaitTask
+  diagram.footer
+  pure exit
 
 end Z

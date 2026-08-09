@@ -3,25 +3,31 @@ import Z
 namespace Problems
 
 structure Issue where
-structure Comment where
 
--- `IO` cannot contain a value from `Type 1`.
+-- Standard `IO` still cannot return an effect from `Type 1`.
 #check_failure IO (Z Unit Empty Unit)
 
--- A service that stores `Z` operations must live in `Type 1`.
-structure GithubZ : Type 1 where
-  getIssues (organization : String) : Z Unit IO.Error (List Issue)
-  postComment (issue : Issue) (comment : Comment) : Z Unit IO.Error Unit
+structure Github : Type 1 where
+  getIssues : String -> Z Unit IO.Error (List Issue)
 
--- The current `Z` environment parameter accepts only values from `Type`.
-#check_failure Z GithubZ Empty Unit
+-- The public environment parameter accepts `Github : Type 1`.
+#check Z Github IO.Error Unit
 
--- A service can remain in `Type` when its `Z` operations are definitions.
-structure Github : Type where
-  endpoint : String
+def program : Z Github IO.Error (List Issue) :=
+  Z.serviceWithZ fun github =>
+    github.getIssues "lean"
 
-def Github.getIssues
-    (_ : String) : Z Github IO.Error (List Issue) :=
-  Z.serviceWith fun _ : Github => []
+def githubLayer : Layer Unit IO.Error Github where
+  build _ :=
+    pure {
+      getIssues := fun _ => Z.succeedNow' []
+    }
+
+def runProgram : IO (Option (Exit IO.Error (List Issue))) :=
+  githubLayer.run () program
+
+#check githubLayer
+#check program
+#check runProgram
 
 end Problems

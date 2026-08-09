@@ -101,6 +101,48 @@ def testChildDiagramLifetime : IO Unit := do
   assertTrue "a child fiber wrote after the Graphviz footer"
     (contents.endsWith "}\n")
 
+structure HighGithub : Type 1 where
+  getIssues : String -> Z Unit IO.Error (List Nat)
+
+def highGithubSeed : IO Nat :=
+  pure 42
+
+def highGithubLayer : Layer Unit IO.Error HighGithub where
+  build _ := do
+    let seed <- HEIO.liftIO.{1} Cause.die highGithubSeed
+    pure {
+      getIssues := fun _ => Z.succeedNow' [seed.down]
+    }
+
+def highGithubProgram : Z HighGithub IO.Error Nat := do
+  let issues <- Z.serviceWithZ fun github =>
+    github.getIssues "lean"
+  pure issues.length
+
+def testHighUniverseEnvironment : IO Unit := do
+  match <- highGithubLayer.run () highGithubProgram "high-environment" with
+  | some (.success 1) => pure ()
+  | _ => failTest "the high-universe service did not run"
+
+def failingHighGithubLayer : Layer Unit IO.Error HighGithub :=
+  Layer.failCause (.fail (IO.userError "layer build failed"))
+
+def testHighUniverseLayerFailure : IO Unit := do
+  match <- failingHighGithubLayer.run () highGithubProgram "high-layer-failure" with
+  | some (.failure (.fail _)) => pure ()
+  | _ => failTest "the high-universe layer failure was not preserved"
+
+def stringLayer : Layer Nat IO.Error String :=
+  Layer.fromZ <| Z.serviceWith fun value : Nat => toString value
+
+def stringProgram : Z String IO.Error String :=
+  Z.serviceWith id
+
+def testLayerFromZ : IO Unit := do
+  match <- stringLayer.run 42 stringProgram "layer-from-z" with
+  | some (.success "42") => pure ()
+  | _ => failTest "Layer.fromZ did not build and provide its output"
+
 def main : IO Unit := do
   testFinalizerFailure
   testIOErrorCatch
@@ -111,4 +153,7 @@ def main : IO Unit := do
   testObserverRace
   testGraphVizEscaping
   testChildDiagramLifetime
+  testHighUniverseEnvironment
+  testHighUniverseLayerFailure
+  testLayerFromZ
   IO.println "All regression tests passed."

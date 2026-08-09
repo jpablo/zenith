@@ -11,8 +11,8 @@ It stores success/error continuations alongside with extra data needed to resume
 -/
 inductive Stack: (E: Type) -> (A: Type) -> (E₁: Type) -> (A₁: Type) -> Type 1 where
   | more
-      (next          : A -> Z R E₁ A₁) 
-      (errorHandler? : Option (Cause E -> Z R E₁ A₁))
+      (next          : A -> ZCore R E₁ A₁)
+      (errorHandler? : Option (Cause E -> ZCore R E₁ A₁))
       /- Evidence that `errorHandler` does not change the error type `E`. This is used only when *there is no* error handler. -/
       (eq_E_E₁?      : Option (PLift (E = E₁)) := none)
       (tail          : Stack E₁ A₁ E₂ A₂)
@@ -43,4 +43,3 @@ structure RunState (Rfiber) (E A E₁ A₁: Type) where
 /-- Generates a new random id using `fiberId` as prefix  -/
 def RunState.newId (self: RunState R E A E₁ A₁) : IO NodeId :=
   GraphViz.newId self.fiberId
-

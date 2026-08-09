@@ -12,10 +12,19 @@ namespace Console
         
     readLine :=
       Z.attempt (do (<- IO.getStdin).getLine) |>.withLabel s!"📺 getLine"
+
+  /-! Environment accessors. -/
+
+  def printLineZ {A : Type} [ToString A]
+      (line : A) : Z Console Empty Unit :=
+    Z.serviceWithZ fun console => console.printLine line
+
+  def readLineZ : Z Console IO.Error String :=
+    Z.serviceWithZ fun console => console.readLine
         
 end Console
 
-/-! IO version, since we can't have Z services yet.  -/
+/-! A low-universe `IO` service retained for compatibility. -/
 
 structure ConsoleIO where
   printLine (line : String) : IO Unit
@@ -36,4 +45,3 @@ namespace ConsoleIO
     (<- .service ConsoleIO).readLine
 
 end ConsoleIO
-

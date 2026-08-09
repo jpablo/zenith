@@ -1,117 +1,133 @@
-import Z.Combinators
+import Z.Interpreter
+import Z.HEIO
 
+/-!
+A layer builds a service inside `HEIO`. The input and output can live in any
+universe. Layer failures retain the complete `Cause E` value.
+-/
 
-inductive Layer : Type -> Type -> Type -> Type 1
-
-  | internal.apply (self : Z A E (Environment B)) : Layer A E B
-  
-  | internal.fold  
-    (self : Layer A E B)
-    (failure :       Cause E -> Layer A E₁ C)
-    (success : Environment B -> Layer A E₁ C)
-                              : Layer A E₁ C
-
-  | internal.fresh (self : Layer A E B) : Layer A E B
-
-  | internal.suspend (self : Unit -> Layer A E B) : Layer A E B
-
-  | internal.to
-    (self : Layer A E B)
-    (that : Layer B E C)
-          : Layer A E C
-
-  | internal.zipWithPar
-    (self : Layer A E B)
-    (that : Layer A E C)
-    (f : Environment B -> Environment C -> Environment D)
-  : Layer A E D
-
-
-def Layer.contramap (f : A₀ -> A) : Layer A E C -> Layer A₀ E C := 
-  internal.to <| internal.apply <| Z.environment A |>.contramap f
-
-/-- Simulate contravariant A  -/
-instance [inst: A₀ <: A] : (Layer A E C) <: (Layer A₀ E C) := ⟨.contramap inst.coe⟩
-
+structure Layer.{uin, uout}
+    (RIn : Type uin)
+    (E : Type)
+    (ROut : Type uout) : Type (max uin uout) where
+  build : RIn -> HEIO (Cause E) ROut
 
 namespace Layer
 
-  def suspend (layer : Thunk (Layer A E B)) : Layer A E B :=
-    internal.suspend fun _ => layer.get
+def fromHEIO
+    (build : RIn -> HEIO (Cause E) ROut) :
+    Layer RIn E ROut :=
+  ⟨build⟩
 
-  def fromEnvironment (effect : Z R E (Environment A)) : Layer R E A :=
-    suspend (internal.apply effect)
+def succeed (value : A) : Layer Unit Empty A :=
+  fromHEIO fun _ => HEIO.pure value
 
-  def succeed (a : A) : Layer Unit Empty A :=
-    fromEnvironment <| Z.succeedNow <| Environment.of a
+def succeedEnvironment
+    (environment : Environment A) : Layer Unit Empty A :=
+  succeed environment
 
-  def succeedEnvironment (env : Environment A) : Layer Unit Empty A :=
-    fromEnvironment <| Z.succeedNow env
+def failCause (cause : Cause E) : Layer R E A :=
+  fromHEIO fun _ => HEIO.throw cause
 
-  def fromZ (effect : Z R E A) : Layer R E A :=
-    fromEnvironment <| effect.map Environment.of
+def suspend
+    (layer : Thunk (Layer R E A)) : Layer R E A :=
+  fromHEIO fun environment => layer.get.build environment
 
-  def failCause (cause : Cause E) : Layer R E A := 
-    internal.apply <| .failCause cause
+def contramap
+    (f : R₀ -> R)
+    (self : Layer R E A) : Layer R₀ E A :=
+  fromHEIO fun environment => self.build (f environment)
 
-  def foldLayer
-    [A₀ <: A]
-    (self    : Layer A E B)
-    (failure :             E -> Layer A₀ E₁ C) 
-    (success : Environment B -> Layer A₀ E₁ C) 
-                              : Layer A₀ E₁ C :=
-    internal.fold 
-      self 
-      (fun cause : Cause E => 
-        match cause.failureOrCause with
-          | .inl e => failure e
-          | .inr r => Layer.failCause r
-      ) 
-      success
+instance [conversion : R₀ <: R] :
+    (Layer R E A) <: (Layer R₀ E A) :=
+  ⟨contramap conversion.coe⟩
 
-  def mapError (f : E -> E₁) (aec : Layer A E C) : Layer A E₁ C := by
-    apply internal.fold aec
-    case failure => 
-      intro ce
-      apply failCause
-      exact ce.map f
-    case success => 
-      intro env
-      apply fromEnvironment
-      apply Z.succeedNow' env
+def mapError
+    (f : E -> E₁)
+    (self : Layer R E A) : Layer R E₁ A :=
+  fromHEIO fun environment =>
+    (self.build environment).mapError (Cause.map f)
 
-  /-- Simulate covariant E -/
-  instance [inst: E <: E₁] : (Layer A E C) <: (Layer A E₁ C) := ⟨mapError inst.coe⟩
+instance [conversion : E <: E₁] :
+    (Layer R E A) <: (Layer R E₁ A) :=
+  ⟨mapError conversion.coe⟩
 
+def flatMap
+    (self : Layer R E A)
+    (next : A -> Layer R E B) : Layer R E B :=
+  fromHEIO fun environment =>
+    HEIO.bind (self.build environment) fun value =>
+      (next value).build environment
 
-  def flatMap [E <: E₁] (self : Layer A E B) (f : Environment B -> Layer A E₁ C) : Layer A E₁ C := 
-    foldLayer self (fun e => failCause <| Cause.fail e) f
+def map
+    (self : Layer R E A)
+    (f : A -> B) : Layer R E B :=
+  self.flatMap fun value =>
+    fromHEIO fun _ => HEIO.pure (f value)
 
+/-- Feed the output of one layer into the next layer. -/
+def to
+    (self : Layer R E A)
+    (next : Layer A E B) : Layer R E B :=
+  fromHEIO fun environment =>
+    HEIO.bind (self.build environment) next.build
 
-  def map (self : Layer A E B) (f : Environment B -> Environment C) : Layer A E C := 
-    flatMap self (fun env => fromEnvironment <| Z.succeedNow' <| f env)
+/--
+Build two layers and combine their outputs. This first implementation is
+sequential. It can become parallel after `HEIO` has high-universe task support.
+-/
+def zipWith
+    (left : Layer R E A)
+    (right : Layer R E B)
+    (f : A -> B -> C) : Layer R E C :=
+  fromHEIO fun environment =>
+    HEIO.bind (left.build environment) fun a =>
+      HEIO.bind (right.build environment) fun b =>
+        HEIO.pure (f a b)
 
+def fromFunction (f : R -> A) : Layer R Empty A :=
+  fromHEIO fun environment => HEIO.pure (f environment)
 
+/-- Build a low-universe layer output with a normal Zenith effect. -/
+def fromZ
+    (effect : Z R E A) : Layer R E A :=
+  Layer.fromHEIO fun environment =>
+    HEIO.bind
+      (HEIO.liftIO.{0} Cause.die <|
+        Z.unsafeRunSync
+          (effect.provideEnvironment environment)
+          "layer")
+      fun result =>
+        match result.down with
+        | some (.success value) => HEIO.pure value
+        | some (.failure cause) => HEIO.throw cause
+        | none =>
+            HEIO.throw <| .die <|
+              IO.userError "the layer fiber did not return a result"
 
-  class FunctionConstructor (In) where
-    Out: Type u
-    apply: In -> Out
+def fromEnvironment
+    (effect : Z R E (Environment A)) : Layer R E A :=
+  fromZ effect
 
-  instance : FunctionConstructor (Unit -> A) where
-    Out := Layer Unit Empty A
-    apply f := succeed (f ())
-
-  instance {A B: Type}: FunctionConstructor (A -> B) where
-    Out := Layer A Empty B
-    apply f := fromEnvironment (Z.serviceWith fun a => Environment.of (f a))
-
-
-  instance : FunctionConstructor (A -> B -> C) where
-    Out := Layer (A × B) Empty C
-    apply f := fromEnvironment (Z.serviceWith fun ab => Environment.of (f ab.1 ab.2))
-
-
-  def fromFunction (input: In) [constructor: FunctionConstructor In] : constructor.Out :=
-    constructor.apply input
+/--
+Build a layer, supply its service to a program, and run the resulting deep
+instruction tree.
+-/
+def run.{uin, uout}
+    (self : Layer.{uin, uout} RIn E ROut)
+    (input : RIn)
+    (program : Z ROut E A)
+    (fiberId : FiberId := "main")
+    (useDiagram : Option String := none) : IO (Option (Exit E A)) := do
+  let builtAndRun : HEIO (Cause E) (ULift.{uout} (Option (Exit E A))) :=
+    HEIO.bind (self.build input) fun environment =>
+      HEIO.liftIO.{uout} Cause.die <|
+        Z.unsafeRunSync
+          (program.provideEnvironment environment)
+          fiberId
+          useDiagram
+  match <- HEIO.toIOResult builtAndRun with
+  | .ok result => pure result
+  | .error cause => pure (some (.failure cause))
 
 end Layer
