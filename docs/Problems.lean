@@ -17,8 +17,8 @@ def program : Z Github IO.Error (List Issue) :=
   Z.serviceWithZ fun github =>
     github.getIssues "lean"
 
-def githubLayer : Layer Unit IO.Error Github where
-  build _ :=
+def githubLayer : Layer Unit IO.Error Github :=
+  Layer.fromHEIO fun _ =>
     pure {
       getIssues := fun _ => Z.succeedNow' []
     }

@@ -21,6 +21,104 @@ def HEIO.{ue, ua}
 
 namespace HEIO
 
+/-- A mutable reference that can contain a value from any universe. -/
+structure Ref.{u} (A : Type u) : Type u where
+  private mk ::
+  ref : ST.RefPointed.type
+  h : Nonempty A
+
+private inductive STOut.{u} (A : Type u) : Type u where
+  | mk : A -> Void IO.RealWorld -> STOut A
+
+private def HST.{u} (A : Type u) : Type u :=
+  Void IO.RealWorld -> STOut A
+
+private noncomputable def inhabitedFromRef
+    (reference : Ref A) : HST A :=
+  let _ : Inhabited A := Classical.inhabited_of_nonempty reference.h
+  fun world => .mk default world
+
+private def liftHST (action : HST A) : HEIO E A :=
+  fun world =>
+    match action world with
+    | .mk value world => .ok value world
+
+namespace Prim
+
+@[extern "lean_st_mk_ref"]
+opaque mkRef
+    (value : A) : HST (Ref A) :=
+  fun world => .mk {
+      ref := Classical.choice ST.RefPointed.property
+      h := Nonempty.intro value
+    } world
+
+@[extern "lean_st_ref_get"]
+opaque Ref.get
+    (reference : @& HEIO.Ref A) : HST A :=
+  inhabitedFromRef reference
+
+@[extern "lean_st_ref_set"]
+opaque Ref.set
+    (reference : @& HEIO.Ref A)
+    (value : A) : HST Unit :=
+  fun world => .mk () world
+
+@[extern "lean_st_ref_swap"]
+opaque Ref.swap
+    (reference : @& HEIO.Ref A)
+    (value : A) : HST A :=
+  inhabitedFromRef reference
+
+@[extern "lean_io_as_task"]
+opaque asTask
+    (action : HST A)
+    (priority := Task.Priority.default) : HST (Task A) :=
+  fun world =>
+    match action world with
+    | .mk value world => .mk (Task.pure value) world
+
+@[extern "lean_io_wait"]
+opaque wait
+    (task : Task A) : HST A :=
+  fun world => .mk task.get world
+
+end Prim
+
+/-- Create a universe-polymorphic reference. -/
+def mkRef (value : A) : HEIO E (Ref A) :=
+  liftHST (Prim.mkRef value)
+
+/-- Read a universe-polymorphic reference. -/
+def Ref.get (reference : Ref A) : HEIO E A :=
+  liftHST (Prim.Ref.get reference)
+
+/-- Replace the value in a universe-polymorphic reference. -/
+def Ref.set (reference : Ref A) (value : A) : HEIO E Unit :=
+  liftHST (Prim.Ref.set reference value)
+
+/-- Replace and return the value in a universe-polymorphic reference. -/
+def Ref.swap (reference : Ref A) (value : A) : HEIO E A :=
+  liftHST (Prim.Ref.swap reference value)
+
+private def toHSTResult
+    (action : HEIO E A) : HST (Except E A) :=
+  fun world =>
+    match action world with
+    | .ok value world => .mk (.ok value) world
+    | .error error world => .mk (.error error) world
+
+/-- Start an `HEIO` action in a runtime task. -/
+def fork
+    (action : HEIO E A)
+    (priority := Task.Priority.default) :
+    HEIO E (Task (Except E A)) :=
+  liftHST (Prim.asTask (toHSTResult action) priority)
+
+/-- Wait for a task that was created by `HEIO.fork`. -/
+def wait (task : Task A) : HEIO E A :=
+  liftHST (Prim.wait task)
+
 def pure (value : A) : HEIO E A :=
   fun world => .ok value world
 
@@ -31,6 +129,11 @@ def bind
     match self world with
     | .ok value world => next value world
     | .error error world => .error error world
+
+def map
+    (f : A -> B)
+    (self : HEIO E A) : HEIO E B :=
+  bind self fun value => pure (f value)
 
 def throw (error : E) : HEIO E A :=
   fun world => .error error world
@@ -51,6 +154,34 @@ def mapError
     | .ok value world => .ok value world
     | .error error world => .error (f error) world
 
+/-- Handle both outcomes and permit the result universe and error type to change. -/
+def fold
+    (self : HEIO E A)
+    (failure : E -> HEIO E₁ B)
+    (success : A -> HEIO E₁ B) : HEIO E₁ B :=
+  fun world =>
+    match self world with
+    | .ok value world => success value world
+    | .error error world => failure error world
+
+/--
+Run `finalizer` after either outcome. If both actions fail, the finalizer
+failure is returned. This is the same policy that `Z.ensuring` uses.
+-/
+def ensuring
+    (self : HEIO E A)
+    (finalizer : HEIO E Unit) : HEIO E A :=
+  fun world =>
+    match self world with
+    | .ok value world =>
+        match finalizer world with
+        | .ok _ world => .ok value world
+        | .error error world => .error error world
+    | .error originalError world =>
+        match finalizer world with
+        | .ok _ world => .error originalError world
+        | .error finalizerError world => .error finalizerError world
+
 instance : Monad (HEIO E) where
   pure := pure
   bind := bind
@@ -58,6 +189,13 @@ instance : Monad (HEIO E) where
 instance : MonadExceptOf E (HEIO E) where
   throw := throw
   tryCatch := tryCatch
+
+/-- Run an exception-free standard action inside a selected `HEIO` universe. -/
+def liftBaseIO.{u}
+    (action : BaseIO A) : HEIO E (ULift.{u} A) :=
+  fun world =>
+    match action world with
+    | .mk value world => .ok (ULift.up value) world
 
 /-- Run a standard `IO` action inside a selected `HEIO` universe. -/
 def liftIO.{u}

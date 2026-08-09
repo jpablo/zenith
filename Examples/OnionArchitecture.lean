@@ -22,8 +22,8 @@ namespace GithubZ
     getIssues _ := Z.succeedNow' []
     postComment _ _ := Z.succeedNow' ()
 
-  def layer : Layer Unit IO.Error GithubZ where
-    build _ := pure mock
+  def layer : Layer Unit IO.Error GithubZ :=
+    Layer.fromHEIO fun _ => pure mock
 
   def getIssuesZ (organization : String) :
       Z GithubZ IO.Error (List Issue) :=

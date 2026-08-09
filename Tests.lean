@@ -107,8 +107,8 @@ structure HighGithub : Type 1 where
 def highGithubSeed : IO Nat :=
   pure 42
 
-def highGithubLayer : Layer Unit IO.Error HighGithub where
-  build _ := do
+def highGithubLayer : Layer Unit IO.Error HighGithub :=
+  Layer.fromHEIO fun _ => do
     let seed <- HEIO.liftIO.{1} Cause.die highGithubSeed
     pure {
       getIssues := fun _ => Z.succeedNow' [seed.down]
@@ -143,6 +143,196 @@ def testLayerFromZ : IO Unit := do
   | some (.success "42") => pure ()
   | _ => failTest "Layer.fromZ did not build and provide its output"
 
+def recordLayerEvent
+    (events : IO.Ref (List String))
+    (event : String) : HEIO (Cause IO.Error) Unit :=
+  HEIO.bind
+    (HEIO.liftIO.{0} Cause.die <|
+      events.modify fun current => current ++ [event])
+    fun _ => HEIO.pure ()
+
+def trackedLayer
+    (events : IO.Ref (List String))
+    (name : String) : Layer Unit IO.Error String :=
+  Layer.acquireRelease
+    (fun _ =>
+      HEIO.bind (recordLayerEvent events s!"acquire-{name}") fun _ =>
+        HEIO.pure name)
+    (fun _ _ => recordLayerEvent events s!"release-{name}")
+
+def testLayerReleaseOrder : IO Unit := do
+  let events <- IO.mkRef []
+  let layer := (trackedLayer events "left").zipWith
+    (trackedLayer events "right")
+    (·, ·)
+  let program : Z (String × String) IO.Error Unit :=
+    Z.serviceWith fun _ => ()
+  match <- layer.run () program "layer-release-order" with
+  | some (.success ()) => pure ()
+  | _ => failTest "the composed layer did not run"
+  assertTrue "layer resources were not released in reverse order"
+    ((<- events.get) == [
+      "acquire-left",
+      "acquire-right",
+      "release-right",
+      "release-left"
+    ])
+
+def testLayerReleaseAfterProgramFailure : IO Unit := do
+  let events <- IO.mkRef []
+  let program : Z String IO.Error Unit :=
+    (Z.fail' (IO.userError "program failed")).map impossible
+  match <- (trackedLayer events "service").run
+      () program "layer-program-failure" with
+  | some (.failure (.fail _)) => pure ()
+  | _ => failTest "the program failure was not preserved"
+  assertTrue "the layer resource was not released after program failure"
+    ((<- events.get) == ["acquire-service", "release-service"])
+
+def testLayerCleanupAfterAcquisitionFailure : IO Unit := do
+  let events <- IO.mkRef []
+  let failingRight : Layer Unit IO.Error String :=
+    Layer.fromHEIO fun _ =>
+      HEIO.bind (recordLayerEvent events "acquire-right") fun _ =>
+        HEIO.throw (.fail (IO.userError "right acquisition failed"))
+  let layer := (trackedLayer events "left").zipWith failingRight (·, ·)
+  let program : Z (String × String) IO.Error Unit :=
+    Z.serviceWith fun _ => ()
+  match <- layer.run () program "layer-acquisition-failure" with
+  | some (.failure (.fail _)) => pure ()
+  | _ => failTest "the layer acquisition failure was not preserved"
+  assertTrue "an earlier resource was not released after acquisition failure"
+    ((<- events.get) == [
+      "acquire-left",
+      "acquire-right",
+      "release-left"
+    ])
+
+def testLayerReleaseFailure : IO Unit := do
+  let events <- IO.mkRef []
+  let layer : Layer Unit IO.Error String :=
+    Layer.acquireRelease
+      (fun _ =>
+        HEIO.bind (recordLayerEvent events "acquire") fun _ =>
+          HEIO.pure "service")
+      (fun _ _ =>
+        HEIO.bind (recordLayerEvent events "release") fun _ =>
+          HEIO.throw (.die (IO.userError "release failed")))
+  let program : Z String IO.Error Unit :=
+    Z.serviceWith fun _ => ()
+  match <- layer.run () program "layer-release-failure" with
+  | some (.failure (.die _)) => pure ()
+  | _ => failTest "the layer release failure was not returned"
+  assertTrue "the failing release action did not run exactly once"
+    ((<- events.get) == ["acquire", "release"])
+
+def testHighUniverseLayerRelease : IO Unit := do
+  let events <- IO.mkRef []
+  let layer : Layer Unit IO.Error HighGithub :=
+    Layer.acquireRelease
+      (fun _ =>
+        HEIO.bind (recordLayerEvent events "acquire-high") fun _ =>
+          HEIO.pure {
+            getIssues := fun _ => Z.succeedNow' [1]
+          })
+      (fun _ _ => recordLayerEvent events "release-high")
+  match <- layer.run () highGithubProgram "high-layer-release" with
+  | some (.success 1) => pure ()
+  | _ => failTest "the scoped high-universe layer did not run"
+  assertTrue "the high-universe layer resource was not released"
+    ((<- events.get) == ["acquire-high", "release-high"])
+
+def testHighUniverseLayerSharing : IO Unit := do
+  let events <- IO.mkRef []
+  let source : Layer Unit IO.Error HighGithub :=
+    Layer.acquireRelease
+      (fun _ =>
+        HEIO.bind (recordLayerEvent events "acquire-shared") fun _ =>
+          HEIO.pure {
+            getIssues := fun _ => Z.succeedNow' [1]
+          })
+      (fun _ _ => recordLayerEvent events "release-shared")
+  let sharedSource := source.share fun shared =>
+    shared.zipWithPar shared fun first _ => first
+  match <- sharedSource.run () highGithubProgram "high-layer-sharing" with
+  | some (.success 1) => pure ()
+  | some (.success value) =>
+      failTest s!"the shared high-universe layer returned {value}"
+  | some (.failure cause) =>
+      failTest s!"the shared high-universe layer failed: {cause}"
+  | none => failTest "the shared high-universe layer returned no result"
+  assertTrue "the shared layer was not acquired and released once"
+    ((<- events.get) == ["acquire-shared", "release-shared"])
+
+def testHighUniverseParallelLayers : IO Unit := do
+  let left : Layer Unit IO.Error HighGithub :=
+    Layer.fromHEIO fun _ => HEIO.pure {
+      getIssues := fun _ => Z.succeedNow' [1]
+    }
+  let right : Layer Unit IO.Error HighGithub :=
+    Layer.fromHEIO fun _ => HEIO.pure {
+      getIssues := fun _ => Z.succeedNow' [2]
+    }
+  let combined := left.zipWithPar right fun first _ => first
+  match <- combined.run () highGithubProgram "high-layer-parallel" with
+  | some (.success 1) => pure ()
+  | _ => failTest "parallel high-universe layers did not run"
+
+def observeParallelStart (counter : Std.Mutex Nat) : IO Nat := do
+  counter.atomically do modify (· + 1)
+  IO.sleep 50
+  counter.atomically get
+
+def testParallelLayerOverlap : IO Unit := do
+  let counter <- Std.Mutex.new 0
+  let branch : Layer Unit IO.Error Nat :=
+    Layer.fromHEIO fun _ =>
+      HEIO.bind
+        (HEIO.liftIO.{0} Cause.die (observeParallelStart counter))
+        fun value => HEIO.pure value.down
+  let combined := branch.zipWithPar branch (·, ·)
+  let program : Z (Nat × Nat) IO.Error (Nat × Nat) :=
+    Z.serviceWith id
+  match <- combined.run () program "layer-parallel-overlap" with
+  | some (.success (2, 2)) => pure ()
+  | _ => failTest "parallel layer acquisitions did not overlap"
+
+def testParallelLayerFailureCleanup : IO Unit := do
+  let released <- IO.mkRef false
+  let left : Layer Unit IO.Error String :=
+    Layer.acquireRelease
+      (fun _ => HEIO.pure "left")
+      (fun _ _ =>
+        HEIO.bind (HEIO.liftIO.{0} Cause.die (released.set true)) fun _ =>
+          HEIO.pure ())
+  let right : Layer Unit IO.Error String :=
+    Layer.failCause (.fail (IO.userError "right failed"))
+  let combined := left.zipWithPar right (·, ·)
+  let program : Z (String × String) IO.Error Unit :=
+    Z.serviceWith fun _ => ()
+  match <- combined.run () program "layer-parallel-failure" with
+  | some (.failure (.fail _)) => pure ()
+  | _ => failTest "the parallel layer failure was not preserved"
+  assertTrue "the successful parallel acquisition was not released"
+    (<- released.get)
+
+def testAcquireReleaseZLayer : IO Unit := do
+  let events <- IO.mkRef []
+  let acquire : Z Unit IO.Error String :=
+    Z.attempt do
+      events.modify fun current => current ++ ["acquire-z"]
+      pure "service"
+  let release (_ : String) : Z Unit Empty Unit :=
+    Z.succeed <| events.modify fun current => current ++ ["release-z"]
+  let layer := Layer.acquireReleaseZ acquire release
+  let program : Z String IO.Error Unit :=
+    Z.serviceWith fun _ => ()
+  match <- layer.run () program "layer-acquire-release-z" with
+  | some (.success ()) => pure ()
+  | _ => failTest "the acquireReleaseZ layer did not run"
+  assertTrue "acquireReleaseZ did not release its resource"
+    ((<- events.get) == ["acquire-z", "release-z"])
+
 def main : IO Unit := do
   testFinalizerFailure
   testIOErrorCatch
@@ -156,4 +346,14 @@ def main : IO Unit := do
   testHighUniverseEnvironment
   testHighUniverseLayerFailure
   testLayerFromZ
+  testLayerReleaseOrder
+  testLayerReleaseAfterProgramFailure
+  testLayerCleanupAfterAcquisitionFailure
+  testLayerReleaseFailure
+  testHighUniverseLayerRelease
+  testHighUniverseLayerSharing
+  testHighUniverseParallelLayers
+  testParallelLayerOverlap
+  testParallelLayerFailureCleanup
+  testAcquireReleaseZLayer
   IO.println "All regression tests passed."

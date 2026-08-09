@@ -55,8 +55,8 @@ current interpreter then runs that tree without a new service-call fiber.
 `Layer` can produce a service from any universe:
 
 ```lean
-def githubLayer : Layer Unit IO.Error Github where
-  build _ :=
+def githubLayer : Layer Unit IO.Error Github :=
+  Layer.fromHEIO fun _ =>
     pure {
       getIssues := fun _ => Z.succeedNow' []
     }
@@ -69,6 +69,15 @@ instruction tree:
 def runProgram : IO (Option (Exit IO.Error (List Issue))) :=
   githubLayer.run () program
 ```
+
+Layers can own resources. `acquireRelease` accepts high-universe `HEIO`
+actions. `acquireReleaseZ` is the simpler constructor for low-universe `Z`
+values. Release actions run in reverse acquisition order, including after a
+program failure or a later acquisition failure.
+
+`zipWith` builds in sequence. `zipWithPar` builds independent layers in
+parallel. `memoize` and `share` give explicit scoped sharing. All other layer
+builds are fresh.
 
 The complete checked example is in [`Problems.lean`](Problems.lean). Run it
 from the project root:
