@@ -50,34 +50,40 @@ its coercion system and recommends that users do not implement it directly.
 Zenith now limits its direct `CoeTC` instances to the `Z` and `Layer`
 boundaries.
 
-## Precise and context-polymorphic constructors
+## Precise public constructors
 
-The current API keeps both precise constructors and constructors that adopt
-their environment and error types from the expected context:
-
-```lean
-def Z.succeedNow' (value : A) : Z R E A
-def Z.succeedNow  (value : A) : Z Unit Empty A
-
-def Z.fail' [ToString E] (error : E) : Z R E Empty
-def Z.fail  [ToString E] (error : E) : Z Unit E Empty
-```
-
-`succeedNow` and `fail` give the most precise types. The apostrophe variants
-are useful inside combinators because their unspecified parameters can match
-the surrounding context.
-
-For example, `fail'` can adopt `R` from an exact expected type:
+The public constructors return the most precise `Z` type:
 
 ```lean
-example (cause : Cause E) : Z R (Cause E) Empty :=
-  Z.fail' cause
+def Z.succeedNow (value : A) : Z Unit Empty A
+def Z.succeed (action : IO A) : Z Unit Empty A
+def Z.done (exit : Exit E A) : Z Unit E A
+def Z.fail [ToString E] (error : E) : Z Unit E Empty
+def Z.attempt (action : IO A) : Z Unit IO.Error A
 ```
 
-If the expected type also requires a coercion, Lean can leave this implicit
-`R` unresolved. In that case, give `R` explicitly, or use the precise
-constructor. The current `sandbox` uses `fail`, whose source environment is
-the concrete type `Unit`:
+Zenith no longer exposes apostrophe variants of these functions. The variance
+coercions adapt a precise result to its use site. For example:
+
+```lean
+example : Z R IO.Error Nat :=
+  Z.succeedNow 1
+```
+
+Lean elaborates the precise constructor before it inserts the `Z` coercion.
+Thus, a value with an unknown element type can need an annotation:
+
+```lean
+example : Z R IO.Error (List Issue) :=
+  Z.succeedNow ([] : List Issue)
+```
+
+Framework code can use `Z.internal.succeedNow`, `Z.internal.succeed`,
+`Z.internal.done`, `Z.internal.fail`, and `Z.internal.attempt`. These builders
+let the surrounding implementation select `R` and `E`, which can avoid
+unnecessary conversion nodes. They are not part of the public API.
+
+The current `sandbox` uses the precise public `fail` constructor:
 
 ```lean
 def Z.sandbox (self : Z R E A) [ToString E] : Z R (Cause E) A :=

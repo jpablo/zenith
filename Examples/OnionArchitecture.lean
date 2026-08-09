@@ -19,8 +19,8 @@ structure GithubZ: Type 1 where
 namespace GithubZ
 
   def mock : GithubZ where
-    getIssues _ := Z.succeedNow' []
-    postComment _ _ := Z.succeedNow' ()
+    getIssues _ := Z.succeedNow ([] : List Issue)
+    postComment _ _ := Z.succeedNow ()
 
   def layer : Layer Unit IO.Error GithubZ :=
     Layer.fromHEIO fun _ => pure mock
@@ -104,7 +104,7 @@ def BusinessLogicLive.layer: Layer Github Empty BusinessLogic :=
 -- def HttpLive.layer: Layer HttpConfig IO.Error Http := 
 --   Layer.fromZ do
 --     let config <- Z.service HttpConfig
---     let http <- Z.succeedNow' (HttpLive.new config)
---     Z.attempt' http.start
+--     let http <- Z.succeedNow (HttpLive.new config)
+--     Z.attempt http.start
 --     -- Z.addFinalizer http.shutdown
 --     return http

@@ -111,7 +111,7 @@ def highGithubLayer : Layer Unit IO.Error HighGithub :=
   Layer.fromHEIO fun _ => do
     let seed <- HEIO.liftIO.{1} Cause.die highGithubSeed
     pure {
-      getIssues := fun _ => Z.succeedNow' [seed.down]
+      getIssues := fun _ => Z.succeedNow [seed.down]
     }
 
 def highGithubProgram : Z HighGithub IO.Error Nat := do
@@ -181,7 +181,7 @@ def testLayerReleaseOrder : IO Unit := do
 def testLayerReleaseAfterProgramFailure : IO Unit := do
   let events <- IO.mkRef []
   let program : Z String IO.Error Unit :=
-    (Z.fail' (IO.userError "program failed")).map impossible
+    (Z.fail (IO.userError "program failed")).map impossible
   match <- (trackedLayer events "service").run
       () program "layer-program-failure" with
   | some (.failure (.fail _)) => pure ()
@@ -233,7 +233,7 @@ def testHighUniverseLayerRelease : IO Unit := do
       (fun _ =>
         HEIO.bind (recordLayerEvent events "acquire-high") fun _ =>
           HEIO.pure {
-            getIssues := fun _ => Z.succeedNow' [1]
+            getIssues := fun _ => Z.succeedNow [1]
           })
       (fun _ _ => recordLayerEvent events "release-high")
   match <- layer.run () highGithubProgram "high-layer-release" with
@@ -249,7 +249,7 @@ def testHighUniverseLayerSharing : IO Unit := do
       (fun _ =>
         HEIO.bind (recordLayerEvent events "acquire-shared") fun _ =>
           HEIO.pure {
-            getIssues := fun _ => Z.succeedNow' [1]
+            getIssues := fun _ => Z.succeedNow [1]
           })
       (fun _ _ => recordLayerEvent events "release-shared")
   let sharedSource := source.share fun shared =>
@@ -267,11 +267,11 @@ def testHighUniverseLayerSharing : IO Unit := do
 def testHighUniverseParallelLayers : IO Unit := do
   let left : Layer Unit IO.Error HighGithub :=
     Layer.fromHEIO fun _ => HEIO.pure {
-      getIssues := fun _ => Z.succeedNow' [1]
+      getIssues := fun _ => Z.succeedNow [1]
     }
   let right : Layer Unit IO.Error HighGithub :=
     Layer.fromHEIO fun _ => HEIO.pure {
-      getIssues := fun _ => Z.succeedNow' [2]
+      getIssues := fun _ => Z.succeedNow [2]
     }
   let combined := left.zipWithPar right fun first _ => first
   match <- combined.run () highGithubProgram "high-layer-parallel" with

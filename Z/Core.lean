@@ -225,13 +225,18 @@ def updateMetadata
 def withLabel (self : Z R E A) (label : String) : Z R E A :=
   self.updateMetadata fun md => { md with label := label }
 
-def succeedNow'
+namespace internal
+
+/-- Build a successful effect with context-selected environment and error types. -/
+def succeedNow
     (value : A)
     (md := Metadata.withLabel "succeedNow") : Z R E A :=
   ⟨fun _ => ZCore.succeedNow' value md⟩
 
+end internal
+
 def succeedNow (value : A) : Z Unit Empty A :=
-  succeedNow' value
+  internal.succeedNow value
 
 def map (f : A -> B) (self : Z R E A) : Z R E B :=
   ⟨fun environment => (self.close environment).map f⟩
@@ -243,30 +248,40 @@ def contramap
   ⟨fun environment =>
     ZCore.contramap id (effect.close (f environment)) md⟩
 
-def done'
+namespace internal
+
+/-- Build a completed effect with a context-selected environment type. -/
+def done
     (exit : Exit E A)
     (md := mempty) : Z R E A :=
   ⟨fun _ => ZCore.done' exit md⟩
 
+end internal
+
 def done
     (exit : Exit E A)
     (md := mempty) : Z Unit E A :=
-  done' exit md
+  internal.done exit md
 
 def mapFailure
     (f : E₀ -> E)
     (self : Z R E₀ A) : Z R E A :=
   ⟨fun environment => (self.close environment).mapFailure f⟩
 
-def succeed'
+namespace internal
+
+/-- Build an IO-backed effect with context-selected environment and error types. -/
+def succeed
     (io : IO A)
     (md := Metadata.withLabel "succeed") : Z R E A :=
   ⟨fun _ => ZCore.succeed' io md⟩
 
+end internal
+
 def succeed
     (io : IO A)
     (md := Metadata.withLabel "succeed") : Z Unit Empty A :=
-  succeed' io md
+  internal.succeed io md
 
 def fork
     (effect : Z R E A)
@@ -331,7 +346,7 @@ def provideEnvironment
 def withIO
     (io : IO A)
     (f : A -> Z R E B) : Z R E B :=
-  (succeed' io).flatMap f
+  (internal.succeed io).flatMap f
 
 /-- Change all three `Z` parameters with explicit conversion functions. -/
 def adapt
@@ -366,7 +381,7 @@ def widenError (self : Z R Empty A) : Z R E A :=
   self.mapFailure impossible
 
 instance : CoeTC (IO A) (Z R E A) :=
-  ⟨Z.succeed'⟩
+  ⟨Z.internal.succeed⟩
 
 end Z
 

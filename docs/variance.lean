@@ -14,6 +14,9 @@ example (effect : Z Unit Empty Empty) : Z R E A :=
 
 #check_failure (show Unit from (42 : Nat))
 
+example : Z R IO.Error Nat := Z.succeedNow 1
+example : Z R IO.Error (List Nat) := Z.succeedNow ([] : List Nat)
+
 example (self : Z R E A) [ToString E] : Z R (Cause E) A :=
   self.foldCauseZ (fun cause => Z.fail cause) pure
 

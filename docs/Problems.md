@@ -58,7 +58,7 @@ current interpreter then runs that tree without a new service-call fiber.
 def githubLayer : Layer Unit IO.Error Github :=
   Layer.fromHEIO fun _ =>
     pure {
-      getIssues := fun _ => Z.succeedNow' []
+      getIssues := fun _ => Z.succeedNow ([] : List Issue)
     }
 ```
 

@@ -20,7 +20,7 @@ def program : Z Github IO.Error (List Issue) :=
 def githubLayer : Layer Unit IO.Error Github :=
   Layer.fromHEIO fun _ =>
     pure {
-      getIssues := fun _ => Z.succeedNow' []
+      getIssues := fun _ => Z.succeedNow ([] : List Issue)
     }
 
 def runProgram : IO (Option (Exit IO.Error (List Issue))) :=

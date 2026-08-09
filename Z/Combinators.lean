@@ -51,21 +51,26 @@ namespace Z
   variable (self : Z R E A)
 
   def failCause (cause : Cause E) : Z R E Empty :=
-    Z.done' <| Exit.failure cause
+    Z.internal.done <| Exit.failure cause
 
-  def fail' [ToString E] (userError : E): Z R E Empty :=
+  namespace internal
+
+  /-- Build a failed effect with a context-selected environment type. -/
+  def fail [ToString E] (userError : E): Z R E Empty :=
     (failCause (Cause.fail userError)).withLabel s!"fail ({userError})"
 
+  end internal
+
   def fail [ToString E] (userError : E): Z Unit E Empty :=
-    fail' userError
+    internal.fail userError
 
   def die (ioe : IO.Error) : Z R Empty Empty :=
     failCause (Cause.die ioe)
 
   def errorHandlerCause (errorHandler : E -> Z R E₁ A₁): Cause E -> Z R E₁ A₁ := fun
     | .fail  e   => errorHandler e
-    | .die ioe   => done' <| .failure <| .die ioe
-    | .interrupt => done' <| .failure .interrupt
+    | .die ioe   => internal.done <| .failure <| .die ioe
+    | .interrupt => internal.done <| .failure .interrupt
 
   def foldZ (errorHandler : E -> Z R E₁ A₁) (next : A -> Z R E₁ A₁) : Z R E₁ A₁ :=
     (self.foldCauseZ (errorHandlerCause errorHandler) next).withLabel "foldZ"
@@ -73,7 +78,7 @@ namespace Z
   /- ---- Monad instances ------------ -/
 
   instance : Monad (Z R E) where
-    pure a := succeedNow' a |>.withLabel "pure"
+    pure a := internal.succeedNow a |>.withLabel "pure"
     bind z f := z.flatMap f |>.withLabel "do"
 
   instance : ToString (Z R E A) := ⟨fun _ => "Z"⟩
@@ -149,23 +154,23 @@ namespace Z
 
   def getOrFail (v : Option A): Z Unit IO.Error A := 
     match v with
-    | some a => Z.succeedNow' a
+    | some a => Z.succeedNow a
     | none => Z.fail <| IO.userError "none found!"
 
   /-- Similar to Z.succeed, but exposes the IO.Error in the error channel  -/
-  def attempt' (io : IO A) (md := mempty): Z R IO.Error A  :=
+  def internal.attempt (io : IO A) (md := mempty): Z R IO.Error A  :=
     let infallible : IO (IO.Error ⊕ A) :=
       try
         return .inr (<- io)
       catch
         | ioError => return .inl ioError
-    Z.succeed' infallible md
+    Z.internal.succeed infallible md
       |>.flatMap fun
-      | .inr a => Z.succeedNow' a
-      | .inl e => Z.fail' (R := R) e
+      | .inr a => Z.internal.succeedNow a
+      | .inl e => Z.internal.fail (R := R) e
 
   def attempt (io : IO A) (md := mempty): Z Unit IO.Error A :=
-    attempt' io md
+    internal.attempt io md
 
   def sleep (ms : UInt32) : Z Unit Empty Unit :=
     Z.succeed (IO.sleep ms) {label := s!"😴 sleep : {toString ms}ms"}

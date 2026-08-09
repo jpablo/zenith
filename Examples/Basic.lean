@@ -166,9 +166,9 @@ def envExample1: Z (Nat × String) Empty Unit := do
 def envExample1ready: Z Unit Empty Unit :=
   envExample1.provideEnvironment ((1: Nat), "hello")
 
-def envExample2 := do
+def envExample2 : Z ConsoleIO Empty Unit := do
   let console <- Z.environment ConsoleIO
-  Z.succeed' <| console.printLine "hello from ConsoleIO.printLine"
+  Z.succeed <| console.printLine "hello from ConsoleIO.printLine"
 
 def envExample2ready :=
   envExample2.provideEnvironment ConsoleIO.consoleLive
@@ -190,6 +190,4 @@ def envExample4ready: Z Unit Empty Unit :=
 
 def envExample5 := do
   ConsoleIO.printLineZ "hello from ConsoleIO.printLine"
-
-
 

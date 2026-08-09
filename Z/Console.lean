@@ -8,7 +8,7 @@ namespace Console
 
   def consoleLive: Console where
     printLine line := 
-      Z.succeed' (IO.println line) |>.withLabel s!"📺 println '{line}'"
+      Z.internal.succeed (IO.println line) |>.withLabel s!"📺 println '{line}'"
         
     readLine :=
       Z.attempt (do (<- IO.getStdin).getLine) |>.withLabel s!"📺 getLine"
