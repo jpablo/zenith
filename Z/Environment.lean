@@ -1,9 +1,8 @@
 import Z.Coercions
 import Z.Util
 
-/- TODO: remove duplicates?  -/
-
-def Environment (R: Type u) := R
+/-- An environment has the runtime representation of its service type. -/
+abbrev Environment (R : Type u) := R
 
 /--
 `IsComponent A B` means that a permutation of `A` is part of `B`.
@@ -115,6 +114,37 @@ namespace Environment
       ⟨conversion.coe⟩
 
   end CanProvide
+
+  /--
+  `Meet Left Right Result` combines two environment requirements.
+
+  If one side already provides the other, `Result` is that side. Otherwise,
+  `Result` is their product.
+  -/
+  class Meet.{u, v, w}
+      (Left : Type u)
+      (Right : Type v)
+      (Result : outParam (Type w)) : Type (max u v w) where
+    left : Result -> Left
+    right : Result -> Right
+
+  namespace Meet
+
+    instance (priority := high)
+        [provider : CanProvide Right Left] : Meet Left Right Right where
+      left := provider.provide
+      right := id
+
+    instance
+        [provider : CanProvide Left Right] : Meet Left Right Left where
+      left := id
+      right := provider.provide
+
+    instance (priority := low) : Meet Left Right (Left × Right) where
+      left := Prod.fst
+      right := Prod.snd
+
+  end Meet
 
   def EmptyEnv: Type := Environment Unit
   

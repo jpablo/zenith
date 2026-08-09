@@ -318,6 +318,14 @@ def flatMapIn
   (effect.contramap left.get).flatMap fun value =>
     (next value).contramap right.get
 
+/-- Compose two actions and infer their combined environment requirement. -/
+def flatMapMeet
+    [meet : Environment.Meet R₁ R₂ R]
+    (effect : Z R₁ E A)
+    (next : A -> Z R₂ E B) : Z R E B :=
+  (effect.contramap meet.left).flatMap fun value =>
+    (next value).contramap meet.right
+
 def setInterruptStatus
     (effect : Z R E A)
     (interruptStatus : InterruptStatus)

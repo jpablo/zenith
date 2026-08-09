@@ -106,36 +106,37 @@ theorem meetsDistributive :
   simp only [Meets]
   exact and_or_left
 
-/-! ## A first environment-meet experiment -/
+/-! ## Production environment meet -/
 
-class EnvMeet.{u, v, w}
-    (R₁ : Type u)
-    (R₂ : Type v)
-    (R : outParam (Type w)) : Type (max u v w) where
-  left : R → R₁
-  right : R → R₂
-
-instance : EnvMeet R₁ R₂ (R₁ × R₂) where
-  left := Prod.fst
-  right := Prod.snd
-
-def Z.flatMapMeet
-    [meet : EnvMeet R₁ R₂ R]
-    (self : Z R₁ E A)
-    (next : A → Z R₂ E B) : Z R E B :=
-  (self.contramap meet.left).flatMap fun value =>
-    (next value).contramap meet.right
-
-def combinedProduct : Z (Nat × String) Empty (Nat × String) :=
+def inferredProduct :=
   Z.flatMapMeet (Z.environment Nat) fun nat =>
     (Z.environment String).map fun string =>
       (nat, string)
 
--- The product fallback duplicates an equal requirement instead of normalizing it.
-def duplicatedRequirement : Z (Nat × Nat) Empty (Nat × Nat) :=
+#check inferredProduct
+example : Z (Nat × String) Empty (Nat × String) := inferredProduct
+
+def inferredDuplicate :=
   Z.flatMapMeet (Z.environment Nat) fun first =>
     (Z.environment Nat).map fun second =>
       (first, second)
+
+#check inferredDuplicate
+example : Z Nat Empty (Nat × Nat) := inferredDuplicate
+
+def inferredContained :=
+  Z.flatMapMeet (Z.environment Nat) fun nat =>
+    (Z.environment (String × Nat)).map fun environment =>
+      (nat, environment)
+
+#check inferredContained
+example : Z (String × Nat) Empty (Nat × (String × Nat)) :=
+  inferredContained
+
+example : Environment.Meet Nat String (Nat × String) := inferInstance
+example : Environment.Meet Nat Nat Nat := inferInstance
+example : Environment.Meet Unit Nat Nat := inferInstance
+example : Environment.Meet Nat (String × Nat) (String × Nat) := inferInstance
 
 /-! ## Current `do` extension points -/
 

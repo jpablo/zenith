@@ -206,38 +206,19 @@ def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := do
   pure (environment.get Nat, environment.get String)
 ```
 
-The standard `do` elaborator fixes `R` for the complete block. It sends this
-type into each direct function application before it tries an outer coercion.
-Therefore, the following form does not compile:
+`Environment` is a reducible abbreviation. This lets Lean see that an
+environment action returns the requested service type. With an expected
+result type, the standard `do` form now works:
 
 ```lean
--- Does not compile.
 def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := do
   let nat <- Z.environment Nat
   let string <- Z.environment String
   pure (nat, string)
 ```
 
-Each `Z.environment` call returns its precise environment type. The standard
-elaborator asks the call to return `Z (Nat × String) Empty` directly, so it
-does not reach the later `Z` coercion.
-
-Zenith already has `IsComponent`, written `A ∣ R`, for environment projection.
-A helper can use it to widen each environment request explicitly:
-
-```lean
-def environmentPart (A : Type) [A ∣ R] : Z R Empty (Environment A) :=
-  (Z.environment A).contramap fun environment : Environment R =>
-    environment.get A
-
-def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := do
-  let nat <- environmentPart Nat
-  let string <- environmentPart String
-  pure (nat, string)
-```
-
-This code works, but requirement selection is manual. Code can also use
-`Z.flatMapIn` directly:
+The expected `R` still controls the complete block. Code can make this
+selection explicit with `Z.flatMapIn`:
 
 ```lean
 def combinedEnvironment : Z (Nat × String) Empty (Nat × String) :=
@@ -246,13 +227,17 @@ def combinedEnvironment : Z (Nat × String) Empty (Nat × String) :=
       (nat, string)
 ```
 
-The `zdo` elaborator removes this manual widening:
+Some standard `do` control-flow forms still send an incomplete success type
+into each branch before a `Z` coercion can run. The expected-environment form
+of `zdo` handles these cases:
 
 ```lean
-def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := zdo
-  let nat <- Z.environment Nat
-  let string <- Z.environment String
-  pure (nat, string)
+def selected (chooseNat : Bool) : Z (Nat × String) Empty String := zdo
+  if chooseNat then
+    let _ <- Z.environment Nat
+    pure "nat"
+  else
+    Z.environment String
 ```
 
 `zdo` uses the expected `Z R E A` type as the complete environment and error
@@ -261,16 +246,35 @@ type. It first infers the precise type of each action. It then uses
 action before `bind`. A private action elaborator applies the same operation
 to terminal actions before Lean fixes their branch type.
 
-The expected type is required. A missing service is a compile error. The
-implementation also supports services in `Type 1` or higher, because it
-creates a fresh universe for each action environment.
+For linear blocks, `zdo[E]` infers the environment. `E` is the explicit error
+type:
 
-Bare terminal actions now work in `if`, `match`, `try`, and loop blocks. The
-checked examples also cover `return` and nested actions.
+```lean
+def combinedEnvironment := zdo[Empty]
+  let nat <- Z.environment Nat
+  let string <- Z.environment String
+  pure (nat, string)
 
-This design does not calculate a GLB. The result annotation supplies the
-complete environment. Automatic inference of a canonical environment remains
-an open problem.
+-- combinedEnvironment : Z (Nat × String) Empty (Nat × String)
+```
+
+`Environment.Meet` combines the requirements at each bind. It keeps one side
+when that side already provides the other side. This removes duplicate
+requirements and makes `Unit` the identity. Otherwise, it uses a product.
+`Z.flatMapMeet` exposes the same operation without notation.
+
+The inferred form works across environment universes. It also removes
+non-adjacent duplicate requirements. Product order follows the program's bind
+order, so reversed programs can infer different but mutually usable product
+types.
+
+The inferred form does not yet combine the requirements of separate
+control-flow branches. Use expected-environment `zdo` for `if`, `match`,
+`try`, loops, and `return`. Error unions are also not inferred, which is why
+`zdo[E]` requires `E`.
+
+This is a capability meet for Zenith environments. It is not a general Scala
+intersection type and does not make products definitionally commutative.
 
 The checked examples are in [`variance.lean`](variance.lean). Run them from the
 project root:

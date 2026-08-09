@@ -233,29 +233,28 @@ This approach does not add intersection types to Lean's kernel. It implements
 the required Scala type algebra inside Lean. It gives one direct place to
 control normalization, member merging, unions, and Scala-specific rules.
 
-## A first environment-meet sketch
+## Environment meet in Zenith
 
-The checked companion contains this relation:
+Zenith now contains this production relation:
 
 ```lean
-class EnvMeet (R₁ : Type u) (R₂ : Type v)
-    (R : outParam (Type w)) where
-  left : R → R₁
-  right : R → R₂
+class Environment.Meet (Left : Type u) (Right : Type v)
+    (Result : outParam (Type w)) where
+  left : Result → Left
+  right : Result → Right
 ```
 
-It also defines a product fallback and a heterogeneous `Z.flatMapMeet`. The
-example combines `Z Nat` and `Z String` into `Z (Nat × String)`.
+The first rule keeps `Right` when it provides `Left`. The second rule keeps
+`Left` when it provides `Right`. A low-priority fallback returns
+`Left × Right`. These rules remove equal and contained requirements. They
+also use `Unit` as the identity. `Z.flatMapMeet` uses the two projections to
+compose heterogeneous actions.
 
-This proves that heterogeneous composition is implementable. It does not yet
-prove that the result is a GLB. In particular, the fallback combines two
-`Z Nat` requirements into `Z (Nat × Nat)`. A real solution must normalize this
-case to `Z Nat` and must give coherent results for three or more requirements.
-
-Zenith now uses a different first production step. `Z.flatMapIn` takes its
-complete environment from the expected result type. `IsComponent` verifies
-that this environment supplies both actions. This avoids GLB calculation and
-normalizes duplicate requirements when the declared environment does.
+This relation does not sort unrelated types. Thus, `Meet Nat String` returns
+`Nat × String`, while `Meet String Nat` returns `String × Nat`. These types
+provide the same services through `Environment.CanProvide`, but they are not
+definitionally equal. The result is sufficient for program-order inference.
+It is not yet a canonical row representation.
 
 ## `Monad` and `do` notation
 
@@ -280,7 +279,7 @@ A → Z R₂ E B
 Z (R₁ & R₂) E B
 ```
 
-Lean does not provide a standard graded-monad class. However, Lean 4.31 has a
+Lean does not provide a standard graded-monad class. However, Lean 4.32 has a
 new extensible `do` elaborator. `Lean.Elab.Do.DoOps` supplies custom builders
 for `pure` and `bind`, plus operations that recognize and construct monadic
 types. `Lean.Elab.Do.elabDoWith` runs the standard `do` elaborator with those
@@ -288,27 +287,32 @@ operations. The [`DoOps` source][lean-do-ops] exposes this interface. The
 [Lean 4.31 release notes][lean-do-release] describe the new elaborator as
 extensible.
 
-Zenith now uses this integration point in `Z/Do.lean`. The `zdo` elaborator
-reuses Lean's `do` parser and control-flow elaboration. It infers a fresh
-environment and error type for each action, then widens the action to the
-expected block type before `bind`.
+Zenith uses this integration point in `Z/Do.lean`. The `zdo` elaborator reuses
+Lean's `do` parser and control-flow elaboration. It infers a fresh environment
+and error type for each action, then widens the action to the expected block
+type before `bind`.
 
 This version requires an expected `Z R E A` type. It verifies that `R`
 contains all requirements. It does not infer an intersection or other GLB.
 Ordinary `do` remains unchanged. A private action elaborator also widens bare
 terminal actions in control-flow branches before Lean fixes the branch type.
 
+The `zdo[E]` form uses `Z.flatMapMeet` at each bind and infers the complete
+environment of a linear block. The error type stays explicit because Zenith
+does not yet infer unions. The inferred form does not yet merge separate
+control-flow branches.
+
 ## Recommended research sequence
 
 1. Define the Scala fragment that Zenith and other target libraries need.
 2. Formalize its subtype preorder, intersection rules, and equivalence laws.
-3. Decide whether service environments use products or normalized rows.
-4. Continue to test the expected-environment `flatMapIn` and `zdo` design on
-   real programs.
-5. Decide whether automatic environment inference is still necessary.
-6. If it is necessary, implement GLB formation and prove its laws.
-7. Add unions and error-channel least upper bounds only after intersections
-   are stable.
+3. Test the product-based `Environment.Meet` on real programs.
+4. Add meet operations for separate control-flow branches.
+5. Decide whether stable cross-program type equality requires normalized rows.
+6. If normalized rows are necessary, define stable service keys and prove the
+   meet laws.
+7. Add unions and error-channel least upper bounds only after environment
+   meets are stable.
 
 Run the checked sketches from the project root:
 
@@ -321,4 +325,4 @@ lake env lean docs/intersection-types.lean
 [scala-union-rules]: https://docs.scala-lang.org/scala3/reference/new-types/union-types-spec.html
 [scala-members]: https://docs.scala-lang.org/scala3/reference/new-types/intersection-types.html
 [lean-do-release]: https://lean-lang.org/doc/reference/latest/releases/v4.31.0/
-[lean-do-ops]: https://github.com/leanprover/lean4/blob/v4.31.0/src/Lean/Elab/Do/Basic.lean
+[lean-do-ops]: https://github.com/leanprover/lean4/blob/v4.32.2/src/Lean/Elab/Do/Basic.lean

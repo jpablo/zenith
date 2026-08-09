@@ -36,10 +36,10 @@ example : Z (Nat × String) Empty (Nat × String) := do
   let environment <- Z.environment (Nat × String)
   pure (environment.get Nat, environment.get String)
 
-#check_failure (do
+example : Z (Nat × String) Empty (Nat × String) := do
   let nat <- Z.environment Nat
   let string <- Z.environment String
-  pure (nat, string) : Z (Nat × String) Empty (Nat × String))
+  pure (nat, string)
 
 example : Z (Nat × String) Empty (Nat × String) := do
   let nat <- environmentPart Nat
@@ -55,6 +55,63 @@ example : Z (Nat × String) Empty (Nat × String) := zdo
   let nat <- Z.environment Nat
   let string <- Z.environment String
   pure (nat, string)
+
+def inferredCombined := zdo[Empty]
+  let nat <- Z.environment Nat
+  let string <- Z.environment String
+  pure (nat, string)
+
+#check inferredCombined
+example : Z (Nat × String) Empty (Nat × String) := inferredCombined
+
+def inferredRepeated := zdo[Empty]
+  let first <- Z.environment Nat
+  let second <- Z.environment Nat
+  pure (first, second)
+
+#check inferredRepeated
+example : Z Nat Empty (Nat × Nat) := inferredRepeated
+
+def inferredThree := zdo[Empty]
+  let nat <- Z.environment Nat
+  let string <- Z.environment String
+  let bool <- Z.environment Bool
+  pure (nat, string, bool)
+
+#check inferredThree
+example : Z (Nat × String × Bool) Empty (Nat × String × Bool) :=
+  inferredThree
+
+def inferredNonAdjacentDuplicate := zdo[Empty]
+  let first <- Z.environment Nat
+  let string <- Z.environment String
+  let second <- Z.environment Nat
+  pure (first, string, second)
+
+#check inferredNonAdjacentDuplicate
+example : Z (String × Nat) Empty (Nat × String × Nat) :=
+  inferredNonAdjacentDuplicate
+
+def inferredError := zdo[IO.Error]
+  let nat <- Z.environment Nat
+  let value <- Z.attempt (pure 1)
+  pure (nat, value)
+
+#check inferredError
+example : Z Nat IO.Error (Nat × Nat) := inferredError
+
+def inferredPure := zdo[Empty]
+  pure 42
+
+#check inferredPure
+example : Z Unit Empty Nat := inferredPure
+
+#check_failure (zdo[Empty]
+  if true then
+    let _ <- Z.environment Nat
+    pure "nat"
+  else
+    Z.environment String)
 
 example : Z Nat Empty (Nat × Nat) := zdo
   let first <- Z.environment Nat
@@ -136,5 +193,13 @@ example : Z (HighService × String) Empty Nat := zdo
   let value <- Z.serviceWith (S := HighService) (·.value)
   let string <- Z.environment String
   pure (value + string.length)
+
+def inferredHighService := zdo[Empty]
+  let value <- Z.serviceWith (S := HighService) (·.value)
+  let string <- Z.environment String
+  pure (value + string.length)
+
+#check inferredHighService
+example : Z (HighService × String) Empty Nat := inferredHighService
 
 end Variance

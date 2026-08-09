@@ -366,6 +366,41 @@ def testZDoControlFlow : IO Unit := do
   | .success "recovered" => pure ()
   | _ => failTest "zdo did not adapt a catch handler action"
 
+def testZDoInferredEnvironment : IO Unit := do
+  let combined := zdo[Empty]
+    let nat <- Z.environment Nat
+    let string <- Z.environment String
+    pure (nat, string)
+  let combinedClosed : Z Unit Empty (Nat × String) :=
+    combined.provideEnvironment (42, "service")
+  match <- runProgram "zdo-inferred-environment" combinedClosed with
+  | .success (42, "service") => pure ()
+  | _ => failTest "zdo did not infer and project the combined environment"
+
+  let repeated := zdo[Empty]
+    let first <- Z.environment Nat
+    let second <- Z.environment Nat
+    pure (first, second)
+  let repeatedClosed : Z Unit Empty (Nat × Nat) :=
+    repeated.provideEnvironment 42
+  match <- runProgram "zdo-inferred-duplicate" repeatedClosed with
+  | .success (42, 42) => pure ()
+  | _ => failTest "zdo did not remove a repeated environment requirement"
+
+  let highService : HighGithub := {
+    getIssues := fun _ => Z.succeedNow [1, 2]
+  }
+  let highProgram := zdo[IO.Error]
+    let issues <- Z.serviceWithZ fun github : HighGithub =>
+      github.getIssues "lean"
+    let suffix <- Z.environment String
+    pure (issues.length + suffix.length)
+  let highClosed : Z Unit IO.Error Nat :=
+    highProgram.provideEnvironment (highService, "ok")
+  match <- runProgram "zdo-inferred-high-environment" highClosed with
+  | .success 4 => pure ()
+  | _ => failTest "zdo did not infer a high-universe environment"
+
 def main : IO Unit := do
   testFinalizerFailure
   testIOErrorCatch
@@ -391,4 +426,5 @@ def main : IO Unit := do
   testAcquireReleaseZLayer
   testZDoEnvironmentComposition
   testZDoControlFlow
+  testZDoInferredEnvironment
   IO.println "All regression tests passed."
