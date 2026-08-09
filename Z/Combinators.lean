@@ -84,16 +84,16 @@ namespace Z
   instance : Monad (URIO R) := inferInstanceAs (Monad (Z R Empty))
 
   instance : MonadExceptOf E (Z R E) where
-    throw    := fun e => Z.failCause <| .fail e
+    throw    := fun e => Z.failCause (R := R) <| .fail e
     tryCatch := fun z errorHandler => Z.foldZ z errorHandler pure
 
   instance : MonadExceptOf IO.Error (Z R Empty) where
-    throw    := fun ioe => Z.die ioe
+    throw    := fun ioe => Z.die (R := R) ioe
     tryCatch := fun z errorHandler =>
       z.foldCauseZ
         (fun
           | .die ioe => errorHandler ioe
-          | .interrupt => Z.failCause .interrupt
+          | .interrupt => Z.failCause (R := R) (E := Empty) .interrupt
           | .fail e => nomatch e)
         pure
 
@@ -120,8 +120,9 @@ namespace Z
     self.foldCause Exit.failure Exit.success |>.withLabel "exit"
 
   /-- aka flatMapFailure  -/
-  def catchAll [A <: A₁] (errorHandler : E -> Z R E₁ A₁) : Z R E₁ A₁ :=
-    self.foldZ errorHandler (pure ·) |>.withLabel "catchAll"
+  def catchAll [conversion : A <: A₁]
+      (errorHandler : E -> Z R E₁ A₁) : Z R E₁ A₁ :=
+    self.foldZ errorHandler (pure <| conversion.coe ·) |>.withLabel "catchAll"
 
   def zipWith (other : Z R E A₁) (f : A -> A₁ -> A₃) : Z R E A₃ := do
     return f (<- self) (<- other)
@@ -130,10 +131,10 @@ namespace Z
     self.zipWith other (·, ·) |>.withLabel "zip"
 
   def sandbox [ToString E]: Z R (Cause E) A :=
-    self.foldCauseZ (fun e => fail' e) pure
+    self.foldCauseZ (fun e => fail e) pure
 
   def orDieWith (f : E -> IO.Error) : Z R Empty A :=
-    self.foldZ (fun e => die <| f e) pure
+    self.foldZ (fun e => die (R := R) <| f e) pure
 
   def orDie (self : Z R IO.Error A): Z R Empty A :=
     self.orDieWith id |>.withLabel "orDie"
@@ -149,7 +150,7 @@ namespace Z
   def getOrFail (v : Option A): Z Unit IO.Error A := 
     match v with
     | some a => Z.succeedNow' a
-    | none => Z.fail' <| IO.userError "none found!"
+    | none => Z.fail <| IO.userError "none found!"
 
   /-- Similar to Z.succeed, but exposes the IO.Error in the error channel  -/
   def attempt' (io : IO A) (md := mempty): Z R IO.Error A  :=
@@ -161,7 +162,7 @@ namespace Z
     Z.succeed' infallible md
       |>.flatMap fun
       | .inr a => Z.succeedNow' a
-      | .inl e => Z.fail' e
+      | .inl e => Z.fail' (R := R) e
 
   def attempt (io : IO A) (md := mempty): Z Unit IO.Error A :=
     attempt' io md
@@ -184,10 +185,12 @@ namespace Z
   def ensuring (finalizer : Z R Empty A₀): Z R E A :=
     let finalizer := finalizer.withLabel "🏁 finalizer"
     let finalizerFailure (cause : Cause Empty) : Z R E A :=
-      Z.failCause (cause.map impossible)
+      Z.failCause (R := R) (E := E) (cause.map impossible)
     .withLabel (label := s!"👮‍♀️ ensuring") $
       self.foldCauseZ
-        (fun cause => finalizer.foldCauseZ finalizerFailure (fun _ => .failCause cause))
+        (fun cause =>
+          finalizer.foldCauseZ finalizerFailure
+            (fun _ => .failCause (R := R) cause))
         (fun a     => finalizer.foldCauseZ finalizerFailure (fun _ => pure a))
 
   def interruptible : Z R E A :=

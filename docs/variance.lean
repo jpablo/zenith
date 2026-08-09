@@ -7,18 +7,23 @@ variable {R E A : Type}
 example (effect : Z Unit E A) : Z R E A := effect
 example (effect : Z R Empty A) : Z R E A := effect
 example (effect : Z R E Empty) : Z R E A := effect
+example (effect : Z Unit Empty Empty) : Z R E A := effect
+
+example (effect : Z Unit Empty Empty) : Z R E A :=
+  effect.adapt (fun _ => ()) impossible impossible
+
+#check_failure (show Unit from (42 : Nat))
 
 example (self : Z R E A) [ToString E] : Z R (Cause E) A :=
-  self.foldCauseZ (fun cause => Z.fail' cause) pure
-
-#check_failure fun (self : Z R E A) [ToString E] =>
-  show Z R (Cause E) A from
-    self.foldCauseZ (fun cause => Z.fail cause) pure
+  self.foldCauseZ (fun cause => Z.fail cause) pure
 
 example (cause : Cause E) [ToString E] : Z R (Cause E) A :=
-  let environmentWide : Z R (Cause E) Empty := Z.fail cause
-  let resultWide : Z R (Cause E) A := environmentWide
-  resultWide
+  Z.fail cause
+
+example (layer : Layer Unit Empty Empty) : Layer R E A := layer
+
+example (layer : Layer Unit Empty Empty) : Layer R E A :=
+  layer.adapt (fun _ => ()) impossible impossible
 
 def environmentPart (A : Type) [A ∣ R] : Z R Empty (Environment A) :=
   (Z.environment A).contramap fun environment : Environment R =>

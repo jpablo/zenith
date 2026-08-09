@@ -2,34 +2,38 @@ import Examples
 
 def dotFile (name: String) := s!"diagrams/{name}.dot"
 
+def runExample (name : String) (program : Z Unit E A) : IO Unit := do
+  let _ <- Z.unsafeRunSync program (dotFile name)
+  pure ()
+
 def main: IO Unit := do
-  Z.unsafeRunSync succeedNowExample        <| dotFile "succeedNowExample"
-  Z.unsafeRunSync zipExample               <| dotFile "zipExample"
-  Z.unsafeRunSync zipExample2              <| dotFile "zipExample2"
-  Z.unsafeRunSync mapExample               <| dotFile "mapExample"
-  Z.unsafeRunSync monadExample             <| dotFile "monadExample"
-  Z.unsafeRunSync succeedExample           <| dotFile "succeedExample"
-  Z.unsafeRunSync attemptExample           <| dotFile "attemptExample"
-  Z.unsafeRunSync coercionExample          <| dotFile "coercionExample"
-  Z.unsafeRunSync asyncExample (E := Empty)<| dotFile "asyncExample"
-  Z.unsafeRunSync forkExample              <| dotFile "forkExample"
-  Z.unsafeRunSync stackOverflow            <| dotFile "stackOverflow"
-  Z.unsafeRunSync flatMapEx                <| dotFile "flatMapEx"
-  Z.unsafeRunSync ensuringExample          <| dotFile "ensuringExample"
-  Z.unsafeRunSync uninterruptibleExample   <| dotFile "uninterruptibleExample"
-  Z.unsafeRunSync interruptionExample1     <| dotFile "interruptionExample1"
-  Z.unsafeRunSync interruptionExample2     <| dotFile "interruptionExample2"
-  Z.unsafeRunSync interruptionExample2b    <| dotFile "interruptionExample2b"
-  Z.unsafeRunSync interruptionExample3     <| dotFile "interruptionExample3"
-  Z.unsafeRunSync uninterruptibleExample1  <| dotFile "uninterruptibleExample1"
-  Z.unsafeRunSync uninterruptibleExample2  <| dotFile "uninterruptibleExample2"
-  Z.unsafeRunSync envExample1ready         <| dotFile "envExample1ready"
-  Z.unsafeRunSync envExample2ready         <| dotFile "envExample2ready"
-  Z.unsafeRunSync envExample3              <| dotFile "envExample3"
-  Z.unsafeRunSync errorHandling1a          <| dotFile "errorHandling1a"
-  Z.unsafeRunSync errorHandling1b          <| dotFile "errorHandling1b"
-  Z.unsafeRunSync errorHandling1c          <| dotFile "errorHandling1c"
-  Z.unsafeRunSync errorHandling2a          <| dotFile "errorHandling2a"
+  runExample "succeedNowExample" succeedNowExample
+  runExample "zipExample" zipExample
+  runExample "zipExample2" zipExample2
+  runExample "mapExample" mapExample
+  runExample "monadExample" monadExample
+  runExample "succeedExample" succeedExample
+  runExample "attemptExample" attemptExample
+  runExample "coercionExample" coercionExample
+  runExample (E := Empty) "asyncExample" asyncExample
+  runExample "forkExample" forkExample
+  runExample "stackOverflow" stackOverflow
+  runExample "flatMapEx" flatMapEx
+  runExample "ensuringExample" ensuringExample
+  runExample "uninterruptibleExample" uninterruptibleExample
+  runExample "interruptionExample1" interruptionExample1
+  runExample "interruptionExample2" interruptionExample2
+  runExample "interruptionExample2b" interruptionExample2b
+  runExample "interruptionExample3" interruptionExample3
+  runExample "uninterruptibleExample1" uninterruptibleExample1
+  runExample "uninterruptibleExample2" uninterruptibleExample2
+  runExample "envExample1ready" envExample1ready
+  runExample "envExample2ready" envExample2ready
+  runExample "envExample3" envExample3
+  runExample "errorHandling1a" errorHandling1a
+  runExample "errorHandling1b" errorHandling1b
+  runExample "errorHandling1c" errorHandling1c
+  runExample "errorHandling2a" errorHandling2a
   println! "---- exiting main ----"
     
 

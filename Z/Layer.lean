@@ -151,7 +151,7 @@ def contramap
   ⟨fun environment => self.build (f environment)⟩
 
 instance [conversion : R₀ <: R] :
-    (Layer R E A) <: (Layer R₀ E A) :=
+    CoeTC (Layer R E A) (Layer R₀ E A) :=
   ⟨contramap conversion.coe⟩
 
 def mapError
@@ -162,7 +162,7 @@ def mapError
       (Resource.mapError f)⟩
 
 instance [conversion : E <: E₁] :
-    (Layer R E A) <: (Layer R E₁ A) :=
+    CoeTC (Layer R E A) (Layer R E₁ A) :=
   ⟨mapError conversion.coe⟩
 
 def flatMap
@@ -183,6 +183,27 @@ def map
     (f : A -> B) : Layer R E B :=
   ⟨fun environment =>
     (self.build environment).map (Resource.map f)⟩
+
+/-- Change all three `Layer` parameters with explicit conversion functions. -/
+def adapt
+    (environment : R₀ -> R)
+    (error : E -> E₁)
+    (output : A -> B)
+    (self : Layer R E A) : Layer R₀ E₁ B :=
+  self.contramap environment
+    |>.mapError error
+    |>.map output
+
+instance [conversion : A <: B] :
+    CoeTC (Layer R E A) (Layer R E B) :=
+  ⟨fun self => self.map conversion.coe⟩
+
+instance (priority := low)
+    [environment : R₀ <: R]
+    [error : E <: E₁]
+    [output : A <: B] :
+    CoeTC (Layer R E A) (Layer R₀ E₁ B) :=
+  ⟨adapt environment.coe error.coe output.coe⟩
 
 /-- Feed the output of one layer into the next layer. -/
 def to

@@ -333,19 +333,39 @@ def withIO
     (f : A -> Z R E B) : Z R E B :=
   (succeed' io).flatMap f
 
-instance [conversion : R₀ <: R₁] : (Z R₁ E A) <: (Z R₀ E A) :=
+/-- Change all three `Z` parameters with explicit conversion functions. -/
+def adapt
+    (environment : R₀ -> R₁)
+    (error : E₀ -> E₁)
+    (success : A₀ -> A₁)
+    (self : Z R₁ E₀ A₀) : Z R₀ E₁ A₁ :=
+  self.contramap environment
+    |>.mapFailure error
+    |>.map success
+
+instance [conversion : R₀ <: R₁] :
+    CoeTC (Z R₁ E A) (Z R₀ E A) :=
   ⟨contramap conversion.coe⟩
 
-instance [conversion : E₀ <: E] : (Z R E₀ A) <: (Z R E A) :=
+instance [conversion : E₀ <: E] :
+    CoeTC (Z R E₀ A) (Z R E A) :=
   ⟨mapFailure conversion.coe⟩
 
-instance [conversion : A <: B] : (Z R E A) <: (Z R E B) :=
+instance [conversion : A <: B] :
+    CoeTC (Z R E A) (Z R E B) :=
   ⟨map conversion.coe⟩
+
+instance (priority := low)
+    [environment : R₀ <: R₁]
+    [error : E₀ <: E₁]
+    [success : A₀ <: A₁] :
+    CoeTC (Z R₁ E₀ A₀) (Z R₀ E₁ A₁) :=
+  ⟨adapt environment.coe error.coe success.coe⟩
 
 def widenError (self : Z R Empty A) : Z R E A :=
   self.mapFailure impossible
 
-instance : IO A <: Z R E A :=
+instance : CoeTC (IO A) (Z R E A) :=
   ⟨Z.succeed'⟩
 
 end Z

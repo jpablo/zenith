@@ -16,33 +16,39 @@ where an effect with more environment requirements or more error types is
 expected.
 
 Lean does not have declaration-site variance or a general subtype relation.
-Zenith therefore uses type-class coercions to approximate these rules.
+Zenith therefore uses a project-specific conversion relation and focused
+type-class coercions to approximate these rules.
 
 ## The conversion relation
 
-Zenith defines a local conversion relation in
+Zenith defines its own conversion relation in
 [`Z/Coercions.lean`](../Z/Coercions.lean):
 
 ```lean
-infixl:65 " <: " => CoeTC
+class CanConvert (A : Type u) (B : Type v) : Type (max u v) where
+  coe : A -> B
+
+infixl:65 " <: " => CanConvert
 
 def impossible {T : Empty -> Type _} (value : Empty) : T value :=
   Empty.rec T value
 
-instance : A <: A := ⟨id⟩
+instance (priority := low) : A <: A := ⟨id⟩
 instance : Empty <: A := ⟨impossible⟩
 instance : A <: Unit := ⟨fun _ => ()⟩
 ```
 
 For this relation, `Empty` acts as the bottom type and `Unit` acts as the top
-type. These instances do not add a general subtype system to Lean.
+type. The low priority on identity lets the bottom and top rules take
+precedence when they overlap.
 
-The notation uses `CoeTC`, not `Coe`. Lean defines `CoeTC` as the auxiliary
-class that implements the transitive closure of ordinary `Coe` instances.
-Zenith deliberately queries it as a relation in constraints such as
-`[A <: B]`. It includes identity and ordinary `Coe` conversions. Lean's source
-notes that users should generally not implement `CoeTC` directly, so this is a
-deliberate implementation choice in Zenith.
+`CanConvert` is not a Lean coercion. For example, the instance `Nat <: Unit`
+does not let Lean silently use a `Nat` as a `Unit`. This keeps the Scala-like
+relation inside the APIs that request it. It also avoids using `CoeTC` as the
+base relation for all types. Lean uses `CoeTC` as an implementation class for
+its coercion system and recommends that users do not implement it directly.
+Zenith now limits its direct `CoeTC` instances to the `Z` and `Layer`
+boundaries.
 
 ## Precise and context-polymorphic constructors
 
@@ -61,77 +67,101 @@ def Z.fail  [ToString E] (error : E) : Z Unit E Empty
 are useful inside combinators because their unspecified parameters can match
 the surrounding context.
 
-For example, the current `sandbox` implementation uses `fail'`:
+For example, `fail'` can adopt `R` from an exact expected type:
+
+```lean
+example (cause : Cause E) : Z R (Cause E) Empty :=
+  Z.fail' cause
+```
+
+If the expected type also requires a coercion, Lean can leave this implicit
+`R` unresolved. In that case, give `R` explicitly, or use the precise
+constructor. The current `sandbox` uses `fail`, whose source environment is
+the concrete type `Unit`:
 
 ```lean
 def Z.sandbox (self : Z R E A) [ToString E] : Z R (Cause E) A :=
-  self.foldCauseZ (fun cause => Z.fail' cause) pure
+  self.foldCauseZ (fun cause => Z.fail cause) pure
 ```
-
-Here, `fail'` adopts `R` from the expected result. The success type changes
-from `Empty` to `A` through the covariant success conversion.
 
 ## Simulated `Z` variance
 
-The current `Z` instances are:
+Zenith uses `CoeTC` only at the boundary where a complete `Z` value becomes
+another `Z` value. The current instances are equivalent to:
 
 ```lean
-instance [conversion : R₀ <: R₁] : (Z R₁ E A) <: (Z R₀ E A) :=
+instance [conversion : R₀ <: R₁] :
+    CoeTC (Z R₁ E A) (Z R₀ E A) :=
   ⟨Z.contramap conversion.coe⟩
 
-instance [conversion : E₀ <: E] : (Z R E₀ A) <: (Z R E A) :=
+instance [conversion : E₀ <: E] :
+    CoeTC (Z R E₀ A) (Z R E A) :=
   ⟨Z.mapFailure conversion.coe⟩
 
-instance [conversion : A <: B] : (Z R E A) <: (Z R E B) :=
+instance [conversion : A <: B] :
+    CoeTC (Z R E A) (Z R E B) :=
   ⟨Z.map conversion.coe⟩
+
+instance (priority := low)
+    [environment : R₀ <: R₁]
+    [error : E₀ <: E₁]
+    [success : A₀ <: A₁] :
+    CoeTC (Z R₁ E₀ A₀) (Z R₀ E₁ A₁) :=
+  ⟨Z.adapt environment.coe error.coe success.coe⟩
 ```
 
-Each instance changes one parameter. These conversions support cases such as:
+The first three instances change one parameter. The low-priority fallback
+changes all parameters in one coercion. This fallback is important because
+Lean does not reliably chain several user-defined `CoeTC` conversions.
+
+The conversions support one-axis and multi-axis cases:
 
 ```lean
 example (effect : Z Unit E A) : Z R E A := effect
 example (effect : Z R Empty A) : Z R E A := effect
 example (effect : Z R E Empty) : Z R E A := effect
+example (effect : Z Unit Empty Empty) : Z R E A := effect
 ```
 
-Lean does not automatically chain these conversions when more than one `Z`
-parameter must change. The built-in `CoeTC` closure chains ordinary `Coe`
-instances after a `CoeTC` instance. Zenith's `Z` variance instances are
-themselves `CoeTC` instances, so two of them do not form that chain. For
-example, `Z.fail cause` has both the wrong environment and the wrong success
-type for the handler below:
+For example, `Z.fail cause` changes both the environment and success types in
+this handler:
 
 ```lean
--- Does not compile.
 example (self : Z R E A) [ToString E] : Z R (Cause E) A :=
   self.foldCauseZ (fun cause => Z.fail cause) pure
 ```
 
-An explicit intermediate type makes both conversions work:
+For code that must control the conversion, `Z.adapt` accepts the three
+functions directly:
 
 ```lean
-example (cause : Cause E) [ToString E] : Z R (Cause E) A :=
-  let environmentWide : Z R (Cause E) Empty := Z.fail cause
-  let resultWide : Z R (Cause E) A := environmentWide
-  resultWide
+def Z.adapt
+    (environment : R₀ -> R₁)
+    (error : E₀ -> E₁)
+    (success : A₀ -> A₁)
+    (self : Z R₁ E₀ A₀) : Z R₀ E₁ A₁
 ```
 
-In normal combinator code, using `fail'` is shorter.
+`Layer` has the same three one-axis coercions, the same low-priority combined
+coercion, and an explicit `Layer.adapt` operation.
 
 ## Runtime representation cost
 
 The public `Z` type is now a shallow environment wrapper. It closes its
 environment into a deep `ZCore Unit E A` instruction tree.
 
-The variance operations still add nodes to that instruction tree:
+The `Z` variance operations still add nodes to that instruction tree:
 
 - `map` adds a success continuation.
 - `mapFailure` adds a failure continuation.
 - `contramap` changes the environment before closure and currently adds a
   `ZCore.contramap id` node.
 
-A conversion from `Empty` is safe because no `Empty` value can reach the
-conversion function. The instruction node still has an interpreter cost.
+A one-axis coercion uses its specialized instance, so it adds only the node
+for that axis. A multi-axis coercion uses `adapt` and adds all three nodes,
+including identity conversions on unchanged axes. An explicit `adapt` has the
+same cost. A conversion from `Empty` is safe because no `Empty` value can
+reach the conversion function.
 
 ## Combining environment requirements
 
