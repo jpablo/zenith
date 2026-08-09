@@ -171,9 +171,13 @@ reach the conversion function.
 
 ## Combining environment requirements
 
-Environment combination remains a separate problem. In Scala, a
-contravariant environment parameter lets the compiler infer an intersection
-such as `Int & String`. In Zenith, products represent combined requirements:
+Environment combination remains a separate problem. The complete property
+catalogue and encoding analysis are in
+[`intersection-types.md`](intersection-types.md).
+
+In Scala, a contravariant environment parameter lets the compiler infer an
+intersection such as `Int & String`. In Zenith, products represent combined
+requirements:
 
 ```lean
 def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := do
