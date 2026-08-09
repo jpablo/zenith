@@ -1,149 +1,185 @@
 # Variance
 
-ZIO uses covariance and contravariance a lot to propagate constraints and in general to express certain program invariants.
+ZIO uses declaration-site variance to express how environment, error, and
+success types can change:
 
-```Scala
+```scala
 sealed trait ZIO[-R, +E, +A]
 ```
 
-For example consider the `Sync` case class
+- `R` is contravariant.
+- `E` is covariant.
+- `A` is covariant.
 
-```scala
-case class Sync[A](trace: Trace, eval: () => A) extends ZIO[Any, Nothing, A]
+For example, an effect with environment `Any` and error `Nothing` can be used
+where an effect with more environment requirements or more error types is
+expected.
+
+Lean does not have declaration-site variance or a general subtype relation.
+Zenith therefore uses type-class coercions to approximate these rules.
+
+## The conversion relation
+
+Zenith defines a local conversion relation in
+[`Z/Coercions.lean`](../Z/Coercions.lean):
+
+```lean
+infixl:65 " <: " => CoeTC
+
+def impossible {T : Empty -> Type _} (value : Empty) : T value :=
+  Empty.rec T value
+
+instance : A <: A := ⟨id⟩
+instance : Empty <: A := ⟨impossible⟩
+instance : A <: Unit := ⟨fun _ => ()⟩
 ```
 
-`R = Any` means that this value is ready to be executed as it has no dependencies in the environment.
+For this relation, `Empty` acts as the bottom type and `Unit` acts as the top
+type. These instances do not add a general subtype system to Lean.
 
-`E = Nothing` means that this value has no **expected** errors ("failures").
+The notation uses `CoeTC`, not `Coe`. Lean defines `CoeTC` as the auxiliary
+class that implements the transitive closure of ordinary `Coe` instances.
+Zenith deliberately queries it as a relation in constraints such as
+`[A <: B]`. It includes identity and ordinary `Coe` conversions. Lean's source
+notes that users should generally not implement `CoeTC` directly, so this is a
+deliberate implementation choice in Zenith.
 
-Such a value can be used whenever a `ZIO[R, E, A]` is expected (for arbitrary types `R`, `E`) due to contravariance of `R` and covariance of `E`.
+## Precise and context-polymorphic constructors
 
-Lean of course has no co/contravariance, which leads to a situation like the following:
+The current API keeps both precise constructors and constructors that adopt
+their environment and error types from the expected context:
 
-Let's say we have two functions
+```lean
+def Z.succeedNow' (value : A) : Z R E A
+def Z.succeedNow  (value : A) : Z Unit Empty A
 
-```coq
-def foldCauseZ (effect : Z R E A) (errorHandler : Cause E -> Z R E₁ A₁) (next : A -> Z R E₁ A₁)
-
-def fail [ToString E] (userError : E): Z Unit E Empty
+def Z.fail' [ToString E] (error : E) : Z R E Empty
+def Z.fail  [ToString E] (error : E) : Z Unit E Empty
 ```
 
-and we want to implement `sandbox` in terms of them:
+`succeedNow` and `fail` give the most precise types. The apostrophe variants
+are useful inside combinators because their unspecified parameters can match
+the surrounding context.
 
-```coq
-def sandbox [ToString E]: Z R (Cause E) A :=
-  self.foldCauseZ (fun e => fail e) pure
+For example, the current `sandbox` implementation uses `fail'`:
+
+```lean
+def Z.sandbox (self : Z R E A) [ToString E] : Z R (Cause E) A :=
+  self.foldCauseZ (fun cause => Z.fail' cause) pure
 ```
 
-Unfortunately this doesn't compile:
+Here, `fail'` adopts `R` from the expected result. The success type changes
+from `Empty` to `A` through the covariant success conversion.
 
-```
-type mismatch
-  fail e
-has type
-  Z Unit (Cause E) Empty : Type 1
-but is expected to have type
-  Z R (Cause E) A : Type 1
-```
+## Simulated `Z` variance
 
-There are two options AFAICT:
+The current `Z` instances are:
 
-## Don't fix type parameters
+```lean
+instance [conversion : R₀ <: R₁] : (Z R₁ E A) <: (Z R₀ E A) :=
+  ⟨Z.contramap conversion.coe⟩
 
-This means having two versions of the same function, for example:
+instance [conversion : E₀ <: E] : (Z R E₀ A) <: (Z R E A) :=
+  ⟨Z.mapFailure conversion.coe⟩
 
-```coq
-def succeedNow' (a : A): Z R E A :=
-  Z.internal.done (Exit.success a)
-
-def succeedNow (a : A): Z Unit Empty A := 
-  Z.succeedNow' a
+instance [conversion : A <: B] : (Z R E A) <: (Z R E B) :=
+  ⟨Z.map conversion.coe⟩
 ```
 
-cleary `succeedNow` is preferred, as it provides more information on the resulting value. But the alternative `succeedNow'` will have to be used in contexts where `Unit` and `Empty` don't work.
+Each instance changes one parameter. These conversions support cases such as:
 
-## Use coercions to simulate variance
-
-Alternatively, one can try to simulate variance by a set of coercions like this:
-
-```coq
-infixl:65 " <: " => Coe
-
-def impossible {T : Empty -> Type _} (e) : T e := 
-  Empty.rec e
-
-/-! Using `Empty` as bottom and `Unit` as top  -/
-
-instance :     A <: A    := ⟨id⟩
-instance : Empty <: A    := ⟨impossible⟩
-instance :     A <: Unit := ⟨fun _ => ()⟩
+```lean
+example (effect : Z Unit E A) : Z R E A := effect
+example (effect : Z R Empty A) : Z R E A := effect
+example (effect : Z R E Empty) : Z R E A := effect
 ```
 
-This defines `Empty` as a bottom type and `Unit` as a top type.
+Lean does not automatically chain these conversions when more than one `Z`
+parameter must change. The built-in `CoeTC` closure chains ordinary `Coe`
+instances after a `CoeTC` instance. Zenith's `Z` variance instances are
+themselves `CoeTC` instances, so two of them do not form that chain. For
+example, `Z.fail cause` has both the wrong environment and the wrong success
+type for the handler below:
 
-Armed with this one can simulate variance:
-
-```coq
-/-- Simulate contravariant R -/
-instance [inst : R₀ <: R₁] : (Z R₁ E A) <: (Z R₀ E A) := ⟨contramap inst.coe⟩
-    
-/-- Simulate covariant E -/
-instance [inst : E₀ <: E] : (Z R E₀ A) <: (Z R E A) := ⟨mapFailure inst.coe⟩
-
-/-- Simulate covariant A -/
-instance [inst : A <: B] : (Z R E A) <: (Z R E B) := ⟨map inst.coe⟩
+```lean
+-- Does not compile.
+example (self : Z R E A) [ToString E] : Z R (Cause E) A :=
+  self.foldCauseZ (fun cause => Z.fail cause) pure
 ```
 
-After this the previous example `sandbox` compiles fine.
+An explicit intermediate type makes both conversions work:
 
-The downside is that extra nodes are introduced in the program structure.  The cost of this depends a bit on the actual implementation of the coercion functions. Right now `contramap`, `mapFailure` and `map` are either primitives or close to primitives.
-
-On the other hand in some cases the conversion needed is `Empty -> A` which is totally fine, as in this case know for sure that this conversion will never be evaluated.
-
-## Least upper bounds
-
-One situation that it's unclear yet how to handle is the following:
-
-```scala
-val combinedEnv: ZIO[Int & String, IOException, Unit] = 
-  for
-    env <- ZIO.environment[Int]
-    str <- ZIO.environment[String]
-    _ <- Console.printLine((env, str))
-  yield ()
+```lean
+example (cause : Cause E) [ToString E] : Z R (Cause E) A :=
+  let environmentWide : Z R (Cause E) Empty := Z.fail cause
+  let resultWide : Z R (Cause E) A := environmentWide
+  resultWide
 ```
 
-In this case Scala 3 will infer the `R` type correctly as `Int & String`.
+In normal combinator code, using `fail'` is shorter.
 
-In Zenith right now the whole environment has to be summoned at once:
+## Runtime representation cost
 
-```coq
-def combinedEnv: Z (Nat × String) Empty Unit := do
-  let env <- Z.environment (Nat × String)
-  consoleLive.printLine (env.get Nat)
-  consoleLive.printLine (env.get String)
+The public `Z` type is now a shallow environment wrapper. It closes its
+environment into a deep `ZCore Unit E A` instruction tree.
+
+The variance operations still add nodes to that instruction tree:
+
+- `map` adds a success continuation.
+- `mapFailure` adds a failure continuation.
+- `contramap` changes the environment before closure and currently adds a
+  `ZCore.contramap id` node.
+
+A conversion from `Empty` is safe because no `Empty` value can reach the
+conversion function. The instruction node still has an interpreter cost.
+
+## Combining environment requirements
+
+Environment combination remains a separate problem. In Scala, a
+contravariant environment parameter lets the compiler infer an intersection
+such as `Int & String`. In Zenith, products represent combined requirements:
+
+```lean
+def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := do
+  let environment <- Z.environment (Nat × String)
+  pure (environment.get Nat, environment.get String)
 ```
 
-Because if we try to get one type at a time:
+The current monad instance fixes `R` for the complete `do` block. Therefore,
+the following form does not compile:
 
-```coq
--- Does not compile:
-def envExample1: Z (Nat × String) Empty Unit := do
+```lean
+-- Does not compile.
+def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := do
   let nat <- Z.environment Nat
-  let str <- Z.environment String
-  consoleLive.printLine (env.get Nat)
-  consoleLive.printLine (env.get String)
+  let string <- Z.environment String
+  pure (nat, string)
 ```
 
-The first `Z.environment Nat` fixes the Monad instance to be 
+The first statement selects `Z Nat Empty` as the monad. The second statement
+needs `Z String Empty`, while the declared result needs
+`Z (Nat × String) Empty`.
 
-```coq
-Z Nat Empty _
+Zenith already has `IsComponent`, written `A ∣ R`, for environment projection.
+A helper can use it to widen each environment request explicitly:
+
+```lean
+def environmentPart (A : Type) [A ∣ R] : Z R Empty (Environment A) :=
+  (Z.environment A).contramap fun environment : Environment R =>
+    environment.get A
+
+def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := do
+  let nat <- environmentPart Nat
+  let string <- environmentPart String
+  pure (nat, string)
 ```
 
-which is not compatible with 
+This code works, but requirement inference is manual. Automatic combination
+of environment requirements is still an open design problem.
 
-```coq
- Z (Nat × String) Empty _
+The checked examples are in [`variance.lean`](variance.lean). Run them from the
+project root:
+
+```sh
+lake env lean docs/variance.lean
 ```
-
