@@ -42,6 +42,16 @@ For this relation, `Empty` acts as the bottom type and `Unit` acts as the top
 type. The low priority on identity lets the bottom and top rules take
 precedence when they overlap.
 
+Environment conversion also uses `Environment.CanProvide`. The relation
+supplies a required environment from the complete available environment. It
+first tries `IsComponent`, then uses `CanConvert` as a low-priority fallback:
+
+```lean
+class Environment.CanProvide
+    (Available : Type u) (Required : Type v) where
+  provide : Available -> Required
+```
+
 `CanConvert` is not a Lean coercion. For example, the instance `Nat <: Unit`
 does not let Lean silently use a `Nat` as a `Unit`. This keeps the Scala-like
 relation inside the APIs that request it. It also avoids using `CoeTC` as the
@@ -96,9 +106,9 @@ Zenith uses `CoeTC` only at the boundary where a complete `Z` value becomes
 another `Z` value. The current instances are equivalent to:
 
 ```lean
-instance [conversion : R₀ <: R₁] :
+instance [conversion : Environment.CanProvide R₀ R₁] :
     CoeTC (Z R₁ E A) (Z R₀ E A) :=
-  ⟨Z.contramap conversion.coe⟩
+  ⟨Z.contramap conversion.provide⟩
 
 instance [conversion : E₀ <: E] :
     CoeTC (Z R E₀ A) (Z R E A) :=
@@ -109,11 +119,11 @@ instance [conversion : A <: B] :
   ⟨Z.map conversion.coe⟩
 
 instance (priority := low)
-    [environment : R₀ <: R₁]
+    [environment : Environment.CanProvide R₀ R₁]
     [error : E₀ <: E₁]
     [success : A₀ <: A₁] :
     CoeTC (Z R₁ E₀ A₀) (Z R₀ E₁ A₁) :=
-  ⟨Z.adapt environment.coe error.coe success.coe⟩
+  ⟨Z.adapt environment.provide error.coe success.coe⟩
 ```
 
 The first three instances change one parameter. The low-priority fallback
@@ -185,8 +195,9 @@ def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := do
   pure (environment.get Nat, environment.get String)
 ```
 
-The current monad instance fixes `R` for the complete `do` block. Therefore,
-the following form does not compile:
+The standard `do` elaborator fixes `R` for the complete block. It sends this
+type into each direct function application before it tries an outer coercion.
+Therefore, the following form does not compile:
 
 ```lean
 -- Does not compile.
@@ -196,9 +207,9 @@ def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := do
   pure (nat, string)
 ```
 
-The first statement selects `Z Nat Empty` as the monad. The second statement
-needs `Z String Empty`, while the declared result needs
-`Z (Nat × String) Empty`.
+Each `Z.environment` call returns its precise environment type. The standard
+elaborator asks the call to return `Z (Nat × String) Empty` directly, so it
+does not reach the later `Z` coercion.
 
 Zenith already has `IsComponent`, written `A ∣ R`, for environment projection.
 A helper can use it to widen each environment request explicitly:
@@ -214,8 +225,41 @@ def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := do
   pure (nat, string)
 ```
 
-This code works, but requirement inference is manual. Automatic combination
-of environment requirements is still an open design problem.
+This code works, but requirement selection is manual. Code can also use
+`Z.flatMapIn` directly:
+
+```lean
+def combinedEnvironment : Z (Nat × String) Empty (Nat × String) :=
+  Z.flatMapIn (Z.environment Nat) fun nat =>
+    (Z.environment String).map fun string =>
+      (nat, string)
+```
+
+The `zdo` elaborator removes this manual widening:
+
+```lean
+def combinedEnvironment : Z (Nat × String) Empty (Nat × String) := zdo
+  let nat <- Z.environment Nat
+  let string <- Z.environment String
+  pure (nat, string)
+```
+
+`zdo` uses the expected `Z R E A` type as the complete environment and error
+type. It first infers the precise type of each action. It then uses
+`Environment.CanProvide` and the error conversion relation to widen that
+action before `bind`.
+
+The expected type is required. A missing service is a compile error. The
+implementation also supports services in `Type 1` or higher, because it
+creates a fresh universe for each action environment.
+
+The current prototype has one control-flow limitation. A terminal action in
+an `if` or `match` branch must use `let` and end with `pure`. Lean sends the
+complete branch type into a bare terminal action before `DoOps` can widen it.
+
+This design does not calculate a GLB. The result annotation supplies the
+complete environment. Automatic inference of a canonical environment remains
+an open problem.
 
 The checked examples are in [`variance.lean`](variance.lean). Run them from the
 project root:

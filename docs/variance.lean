@@ -46,4 +46,65 @@ example : Z (Nat × String) Empty (Nat × String) := do
   let string <- environmentPart String
   pure (nat, string)
 
+example : Z (Nat × String) Empty (Nat × String) :=
+  Z.flatMapIn (Z.environment Nat) fun nat =>
+    (Z.environment String).map fun string =>
+      (nat, string)
+
+example : Z (Nat × String) Empty (Nat × String) := zdo
+  let nat <- Z.environment Nat
+  let string <- Z.environment String
+  pure (nat, string)
+
+example : Z Nat Empty (Nat × Nat) := zdo
+  let first <- Z.environment Nat
+  let second <- Z.environment Nat
+  pure (first, second)
+
+example : Z (String × Nat) Empty (Nat × String) := zdo
+  let nat <- Z.environment Nat
+  let string <- Z.environment String
+  pure (nat, string)
+
+example : Z Nat Empty Nat := zdo
+  Z.succeedNow ()
+  Z.environment Nat
+
+example : Z (Nat × String) IO.Error String := zdo
+  let _ <- Z.environment Nat
+  let _ <- Z.environment String
+  pure "ok"
+
+example (selectNat : Bool) : Z (Nat × String) Empty String := zdo
+  if selectNat then
+    let _ <- Z.environment Nat
+    pure "nat"
+  else
+    let string <- Z.environment String
+    pure string
+
+example (selection : Option Bool) : Z (Nat × String) Empty String := zdo
+  match selection with
+  | some true =>
+      let _ <- Z.environment Nat
+      pure "nat"
+  | _ =>
+      let string <- Z.environment String
+      pure string
+
+#check_failure (zdo
+  let string <- Z.environment String
+  pure string : Z Nat Empty String)
+
+#check_failure (zdo
+  pure 1)
+
+structure HighService : Type 1 where
+  value : Nat
+
+example : Z (HighService × String) Empty Nat := zdo
+  let value <- Z.serviceWith (S := HighService) (·.value)
+  let string <- Z.environment String
+  pure (value + string.length)
+
 end Variance

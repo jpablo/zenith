@@ -252,6 +252,11 @@ prove that the result is a GLB. In particular, the fallback combines two
 `Z Nat` requirements into `Z (Nat × Nat)`. A real solution must normalize this
 case to `Z Nat` and must give coherent results for three or more requirements.
 
+Zenith now uses a different first production step. `Z.flatMapIn` takes its
+complete environment from the expected result type. `IsComponent` verifies
+that this environment supplies both actions. This avoids GLB calculation and
+normalizes duplicate requirements when the declared environment does.
+
 ## `Monad` and `do` notation
 
 Lean's standard `Bind.bind` is homogeneous:
@@ -283,21 +288,24 @@ operations. The [`DoOps` source][lean-do-ops] exposes this interface. The
 [Lean 4.31 release notes][lean-do-release] describe the new elaborator as
 extensible.
 
-This is a better integration point than a macro that manually rewrites a
-small subset of `do` syntax. A Zenith term elaborator could reuse Lean's `do`
-parser and control-flow elaboration while it builds an intersection-aware
-bind. The first version should use separate `zdo` syntax. Overriding ordinary
-`do` for one expected type would be more invasive.
+Zenith now uses this integration point in `Z/Do.lean`. The `zdo` elaborator
+reuses Lean's `do` parser and control-flow elaboration. It infers a fresh
+environment and error type for each action, then widens the action to the
+expected block type before `bind`.
+
+This first version requires an expected `Z R E A` type. It verifies that `R`
+contains all requirements. It does not infer an intersection or other GLB.
+Ordinary `do` remains unchanged. A terminal action in an `if` or `match`
+branch must currently use `let` and end with `pure` so that `zdo` can widen it.
 
 ## Recommended research sequence
 
 1. Define the Scala fragment that Zenith and other target libraries need.
 2. Formalize its subtype preorder, intersection rules, and equivalence laws.
 3. Decide whether service environments use products or normalized rows.
-4. Implement environment GLB formation and prove its introduction and
-   elimination laws.
-5. Implement explicit heterogeneous `flatMap` and `zipWith` operations.
-6. Connect those operations to a `zdo` elaborator through `DoOps`.
+4. Test the expected-environment `flatMapIn` and `zdo` design on real programs.
+5. Decide whether automatic environment inference is still necessary.
+6. If it is necessary, implement GLB formation and prove its laws.
 7. Add unions and error-channel least upper bounds only after intersections
    are stable.
 

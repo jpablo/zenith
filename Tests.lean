@@ -333,6 +333,16 @@ def testAcquireReleaseZLayer : IO Unit := do
   assertTrue "acquireReleaseZ did not release its resource"
     ((<- events.get) == ["acquire-z", "release-z"])
 
+def testZDoEnvironmentComposition : IO Unit := do
+  let program : Z (String × Nat) Empty (Nat × String) := zdo
+    let nat <- Z.environment Nat
+    let string <- Z.environment String
+    pure (nat, string)
+  let closed := program.provideEnvironment ("service", 42)
+  match <- runProgram "zdo-environment-composition" closed with
+  | .success (42, "service") => pure ()
+  | _ => failTest "zdo did not project the declared environment"
+
 def main : IO Unit := do
   testFinalizerFailure
   testIOErrorCatch
@@ -356,4 +366,5 @@ def main : IO Unit := do
   testParallelLayerOverlap
   testParallelLayerFailureCleanup
   testAcquireReleaseZLayer
+  testZDoEnvironmentComposition
   IO.println "All regression tests passed."

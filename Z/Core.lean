@@ -304,6 +304,20 @@ def flatMap
       (fun value => (next value).close environment)
       md⟩
 
+/--
+Compose effects that need different parts of one complete environment.
+
+The result environment is selected by the expected type. Both component
+instances must project their required environment from that result.
+-/
+def flatMapIn
+    [left : R₁ ∣ R]
+    [right : R₂ ∣ R]
+    (effect : Z R₁ E A)
+    (next : A -> Z R₂ E B) : Z R E B :=
+  (effect.contramap left.get).flatMap fun value =>
+    (next value).contramap right.get
+
 def setInterruptStatus
     (effect : Z R E A)
     (interruptStatus : InterruptStatus)
@@ -358,9 +372,9 @@ def adapt
     |>.mapFailure error
     |>.map success
 
-instance [conversion : R₀ <: R₁] :
+instance [conversion : Environment.CanProvide R₀ R₁] :
     CoeTC (Z R₁ E A) (Z R₀ E A) :=
-  ⟨contramap conversion.coe⟩
+  ⟨contramap conversion.provide⟩
 
 instance [conversion : E₀ <: E] :
     CoeTC (Z R E₀ A) (Z R E A) :=
@@ -371,11 +385,11 @@ instance [conversion : A <: B] :
   ⟨map conversion.coe⟩
 
 instance (priority := low)
-    [environment : R₀ <: R₁]
+    [environment : Environment.CanProvide R₀ R₁]
     [error : E₀ <: E₁]
     [success : A₀ <: A₁] :
     CoeTC (Z R₁ E₀ A₀) (Z R₀ E₁ A₁) :=
-  ⟨adapt environment.coe error.coe success.coe⟩
+  ⟨adapt environment.provide error.coe success.coe⟩
 
 def widenError (self : Z R Empty A) : Z R E A :=
   self.mapFailure impossible

@@ -1,3 +1,4 @@
+import Z.Coercions
 import Z.Util
 
 /- TODO: remove duplicates?  -/
@@ -96,6 +97,25 @@ end IsComponentExamples
 
 namespace Environment 
 
+  /--
+  `CanProvide Available Required` supplies a required environment from the
+  complete environment that is available to an effect.
+  -/
+  class CanProvide (Available : Type u) (Required : Type v) where
+    provide : Available -> Required
+
+  namespace CanProvide
+
+    instance (priority := high) [component : Required ∣ Available] :
+        CanProvide Available Required :=
+      ⟨component.get⟩
+
+    instance (priority := low) [conversion : Available <: Required] :
+        CanProvide Available Required :=
+      ⟨conversion.coe⟩
+
+  end CanProvide
+
   def EmptyEnv: Type := Environment Unit
   
   def empty: EmptyEnv := 
@@ -160,4 +180,3 @@ namespace EnvExamples
   #check_failure e2.get Int
 
 end EnvExamples
-
