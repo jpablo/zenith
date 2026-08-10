@@ -62,6 +62,16 @@ instance (key : Key) (entries : List Entry) : Decidable (Fresh key entries) := b
   | [] => left
   | head :: tail => merge (insert head left) tail
 
+/-- Keep the required entries that the provided row does not contain. -/
+@[reducible] def missing
+    (required provided : List Entry) : List Entry :=
+  required.filter fun entry => isFresh entry.key provided
+
+/-- Concatenate row shapes without key normalization. -/
+@[reducible] def concat : List Entry -> List Entry -> List Entry
+  | [], right => right
+  | head :: tail, right => head :: concat tail right
+
 /-- Compute whether a merge adds only new qualified keys. -/
 def canMerge (left : List Entry) : List Entry -> Bool
   | [] => true
@@ -115,6 +125,15 @@ def merge
   | [], .empty => left
   | entry :: _, .cons value tail =>
       merge (insert entry value left) tail
+
+/-- Append environments without normalization for temporary projection. -/
+def append
+    (left : Environment leftEntries)
+    (right : Environment rightEntries) :
+    Environment (Row.concat leftEntries rightEntries) :=
+  match left with
+  | .empty => right
+  | .cons value tail => .cons value (append tail right)
 
 end Environment
 
@@ -266,6 +285,57 @@ def zipFreshMeetJoin
       |>.mapError join.right
   ⟨adaptedLeft.zipWith adaptedRight fun leftEnvironment rightEnvironment =>
     Environment.merge leftEnvironment rightEnvironment⟩
+
+/--
+Feed the output of `left` to `right`. The result input contains the input of
+`left` plus only the inputs of `right` that `left` does not produce. Output
+services take priority over external services with the same key.
+-/
+def andThenInto
+    {inputEntries : List Entry}
+    [leftInput : Environment.CanProvide inputEntries leftInputs]
+    [rightInput : Environment.CanProvide
+      (Row.concat leftEntries inputEntries) rightInputs]
+    [leftError : ErrorChannel.CanInject ELeft E]
+    [rightError : ErrorChannel.CanInject ERight E]
+    (left : KeyedLayer (Environment leftInputs) ELeft leftEntries)
+    (right : KeyedLayer (Environment rightInputs) ERight rightEntries)
+    (_inputUnion :
+      Row.merge leftInputs (Row.missing rightInputs leftEntries) =
+        inputEntries) :
+    KeyedLayer (Environment inputEntries) E rightEntries :=
+  let adaptedLeft :=
+    left.layer.contramap leftInput.provide
+      |>.mapError leftError.inject
+  ⟨adaptedLeft.flatMap fun leftEnvironment =>
+    right.layer
+      |>.contramap (fun inputEnvironment =>
+        rightInput.provide <|
+          Environment.append leftEnvironment inputEnvironment)
+      |>.mapError rightError.inject⟩
+
+/-- Infer the common error channel for vertical keyed-layer composition. -/
+def andThenMeetJoin
+    {inputEntries : List Entry}
+    [join : ErrorChannel.Join ELeft ERight E]
+    [leftInput : Environment.CanProvide inputEntries leftInputs]
+    [rightInput : Environment.CanProvide
+      (Row.concat leftEntries inputEntries) rightInputs]
+    (left : KeyedLayer (Environment leftInputs) ELeft leftEntries)
+    (right : KeyedLayer (Environment rightInputs) ERight rightEntries)
+    (_inputUnion :
+      Row.merge leftInputs (Row.missing rightInputs leftEntries) =
+        inputEntries) :
+    KeyedLayer (Environment inputEntries) E rightEntries :=
+  let adaptedLeft :=
+    left.layer.contramap leftInput.provide
+      |>.mapError join.left
+  ⟨adaptedLeft.flatMap fun leftEnvironment =>
+    right.layer
+      |>.contramap (fun inputEnvironment =>
+        rightInput.provide <|
+          Environment.append leftEnvironment inputEnvironment)
+      |>.mapError join.right⟩
 
 def toLayer (layer : KeyedLayer R E entries) :
     Layer R E (Environment entries) :=

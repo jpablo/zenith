@@ -21,11 +21,16 @@ structure Github : Type 1 where
 structure Store : Type 1 where
   label : String
 
+structure Reporter : Type 1 where
+  report : Z Unit Empty String
+
 service_key configEntry : Config
 
 service_key githubEntry : Github
 
 service_key storeEntry : Store
+
+service_key reporterEntry : Reporter
 
 namespace OtherLibrary
 
@@ -377,6 +382,106 @@ def checkHeterogeneousKeyedLayerFailure : IO Unit := do
     "release-github-from-config"
   ]
 
+/-! Vertical composition supplies generated services to a later layer. -/
+
+inductive ReporterBuildError where
+  | unavailable
+  deriving BEq, Repr
+
+abbrev ReporterInputs : List Entry.{1} :=
+  [githubEntry, storeEntry]
+
+abbrev ReporterOutputs : List Entry.{1} :=
+  [reporterEntry]
+
+def reporterFromGithubAndStoreLayer
+    (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Environment ReporterInputs)
+      ReporterBuildError
+      ReporterOutputs :=
+  KeyedLayer.singleton reporterEntry <|
+    Layer.acquireRelease
+      (fun environment =>
+        HEIO.bind
+          (recordLayerEvent events "acquire-reporter") fun _ =>
+            let github := Contains.get (target := githubEntry) environment
+            let store := Contains.get (target := storeEntry) environment
+            HEIO.pure {
+              report := github.issueCount "lean" |>.map fun count =>
+                s!"{store.label}:{count}"
+            })
+      (fun _ _ => recordLayerEvent events "release-reporter")
+
+def failingReporterFromGithubAndStoreLayer
+    (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Environment ReporterInputs)
+      ReporterBuildError
+      ReporterOutputs :=
+  KeyedLayer.singleton reporterEntry <|
+    Layer.fromHEIO fun _ =>
+      HEIO.bind (recordLayerEvent events "acquire-reporter") fun _ =>
+        HEIO.throw (.fail .unavailable)
+
+def verticalKeyedServices
+    (events : IO.Ref (List String)) :
+  KeyedLayer
+      (Environment [configEntry, storeEntry])
+      (GithubBuildError ⊕ ReporterBuildError)
+      ReporterOutputs :=
+  (githubFromConfigLayer events).andThenMeetJoin
+    (reporterFromGithubAndStoreLayer events)
+    (by rfl)
+
+def failingVerticalKeyedServices
+    (events : IO.Ref (List String)) :
+  KeyedLayer
+      (Environment [configEntry, storeEntry])
+      (GithubBuildError ⊕ ReporterBuildError)
+      ReporterOutputs :=
+  (githubFromConfigLayer events).andThenInto
+    (failingReporterFromGithubAndStoreLayer events)
+    (by rfl)
+
+def reporterProgram : Z (Environment ReporterOutputs) Empty String :=
+  withServiceZ (entries := ReporterOutputs) reporterEntry fun reporter =>
+    reporter.report
+
+def checkVerticalKeyedLayers : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect : Z
+      (Environment ReporterOutputs)
+      (GithubBuildError ⊕ ReporterBuildError)
+      String := reporterProgram
+  match <- (verticalKeyedServices events).toLayer.run
+      heterogeneousInputs.environment effect "stable-keyed-layer-vertical" with
+  | some (.success "issue:2") => pure ()
+  | _ => throw (IO.userError "The vertical keyed layers did not run.")
+  assertEvents "vertical keyed layers" events [
+    "acquire-github-from-config",
+    "acquire-reporter",
+    "release-reporter",
+    "release-github-from-config"
+  ]
+
+def checkVerticalKeyedLayerFailure : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect : Z
+      (Environment ReporterOutputs)
+      (GithubBuildError ⊕ ReporterBuildError)
+      Unit := Z.serviceWith fun _ => ()
+  match <- (failingVerticalKeyedServices events).toLayer.run
+      heterogeneousInputs.environment effect
+      "stable-keyed-layer-vertical-failure" with
+  | some (.failure (.fail (.inr .unavailable))) => pure ()
+  | _ => throw (IO.userError "The vertical layer error was not preserved.")
+  assertEvents "vertical keyed layer failure" events [
+    "acquire-github-from-config",
+    "acquire-reporter",
+    "release-github-from-config"
+  ]
+
 def demo : IO Unit := do
   match <- run with
   | some (.success "issue:2") =>
@@ -395,6 +500,9 @@ def demo : IO Unit := do
   checkHeterogeneousKeyedLayersReverse
   checkHeterogeneousKeyedLayerFailure
   IO.println "Heterogeneous keyed-layer checks passed."
+  checkVerticalKeyedLayers
+  checkVerticalKeyedLayerFailure
+  IO.println "Vertical keyed-layer checks passed."
 
 end StableServiceKeys
 

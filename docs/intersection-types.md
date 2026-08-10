@@ -424,6 +424,9 @@ The prototype provides these checked properties:
   common error channel.
 - `KeyedLayer.zipFreshInto` injects both errors into one selected stable error
   channel.
+- `Row.missing` computes the inputs that an upstream layer does not produce.
+- `KeyedLayer.andThenMeetJoin` and `andThenInto` provide vertical composition
+  with inferred or selected error channels.
 
 The checked examples show that two libraries can use the same local service
 name when their declaration namespaces differ. They also show that
@@ -458,11 +461,19 @@ have different error types. One check infers their `Sum` with
 `ErrorChannel.CanInject` to keep the same selected error sum. A failing second
 acquisition keeps its error side and releases the first resource.
 
+The vertical checks first build `Github` from `Config`. A later layer requires
+both `Github` and `Store` and builds `Reporter`. Only `Config` and `Store`
+remain in the external input row because the first layer supplies `Github`.
+The successful run releases `Reporter` before `Github`. If `Reporter`
+acquisition fails, the error stays on the right side of the selected sum and
+the acquired `Github` resource is released.
+
 The declaration command currently accepts only one named service type. It does
-not yet define identities for parameterized service types. Horizontal layer
-composition now handles different keyed inputs and errors. The next layer step
-is vertical composition: feed one keyed output row into a later keyed input row
-while preserving required external inputs and release behavior.
+not yet define identities for parameterized service types. Horizontal and
+vertical layer composition now handle different keyed inputs and errors. The
+next layer step is pass-through vertical composition. It must keep selected
+upstream outputs in the final row together with the downstream outputs and
+define the duplicate-key policy.
 
 Run the checked sketches from the project root:
 
