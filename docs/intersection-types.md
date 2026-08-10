@@ -278,8 +278,14 @@ channels. Runtime tests check both `Sum.inl` and `Sum.inr` injection.
 
 This relation is a capability join, not a complete encoding of Scala union
 types. `Sum` allocates a tag, direct joins remain order-dependent, and the
-class does not prove the universal least-upper-bound property. It is the
-runtime and type-inference foundation for a later normalized error union.
+class does not prove the universal least-upper-bound property.
+
+Plain inferred `zdo` normalizes a collection of these joins. It flattens
+nested sums, removes `Empty`, sorts the remaining types, and uses
+`ErrorChannel.CanInject` to adapt each source error to the result. Thus,
+reordered and differently associated errors infer the same error type.
+Bare `throw IO.Error` remains a defect with error type `Empty`; typed error
+inference uses `Z.fail` or `Z.attempt`.
 
 ## `Monad` and `do` notation
 
@@ -329,7 +335,18 @@ removes `Unit` and `PUnit`, and uses Lean's structural expression order.
 Thus, action order and product association do not change the inferred
 environment type. This also combines requirements across `if`, `match`,
 `try`, loops, `return`, and nested actions. The error type stays explicit
-because Zenith does not yet infer error joins.
+in this `zdo[E]` form.
+
+Without a complete expected type, plain `zdo` applies the same method to both
+the environment and the error channel. It supports binds, `if`, `match`,
+loops, `return`, and nested actions. It rejects native `catch`: Lean's
+standard elaborator fixes one monad for the complete block, while a handler
+must remove the body error before it joins the continuation error.
+
+`Z.catchAllMeet` provides the compositional form now. It combines the body and
+handler environments, removes the handled error, and exposes only the handler
+error. A future scoped `doTry` elaborator can use the same operation for native
+syntax.
 
 This is elaborator-level normalization, not a reified row type. The structural
 order is not a public service-key order. Explicit service keys are still
@@ -343,9 +360,8 @@ representation or compiler version.
 3. Test normalized `zdo[E]` inference on larger real programs.
 4. Decide whether cross-version API stability requires explicit service keys.
 5. If explicit keys are necessary, define them and prove the row meet laws.
-6. Normalize `ErrorChannel.Join` results during `zdo` inference.
-7. Define how error inference interacts with `catch` before it becomes the
-   default notation behavior.
+6. Test normalized error inference on larger real programs.
+7. Add a scoped `doTry` elaborator if native inferred `catch` is required.
 
 Run the checked sketches from the project root:
 

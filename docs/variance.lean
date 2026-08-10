@@ -249,8 +249,100 @@ example : Z Unit IO.Error Nat := zdo
   let string <- Z.environment String
   pure string : Z Nat Empty String)
 
+def inferredAllPure := zdo
+  pure 1
+
+#check inferredAllPure
+example : Z Unit Empty Nat := inferredAllPure
+
+def inferredBareThrow := zdo
+  let _ : Nat <- throw (IO.userError "defect")
+  pure 1
+
+#check inferredBareThrow
+example : Z Unit Empty Nat := inferredBareThrow
+
+def stringAction : Z Unit String Nat := Z.succeedNow 1
+
+def inferredAllErrors := zdo
+  let first <- stringAction
+  let second <- Z.attempt (pure 2)
+  pure (first + second)
+
+#check inferredAllErrors
+example : Z Unit (IO.Error ⊕ String) Nat := inferredAllErrors
+
+def inferredAllErrorsReordered := zdo
+  let second <- Z.attempt (pure 2)
+  let first <- stringAction
+  pure (first + second)
+
+#check inferredAllErrorsReordered
+example : Z Unit (IO.Error ⊕ String) Nat := inferredAllErrorsReordered
+
+def prejoinedAction : Z Unit (String ⊕ IO.Error) Nat := Z.succeedNow 1
+
+def inferredNormalizedErrorSum := zdo
+  prejoinedAction
+
+#check inferredNormalizedErrorSum
+example : Z Unit (IO.Error ⊕ String) Nat := inferredNormalizedErrorSum
+
+def inferredAllBranches (useString : Bool) := zdo
+  if useString then
+    stringAction
+  else
+    Z.attempt (pure 2)
+
+#check inferredAllBranches
+example : Bool → Z Unit (IO.Error ⊕ String) Nat := inferredAllBranches
+
+def inferredAllParameters := zdo
+  let nat <- Z.environment Nat
+  let first <- stringAction
+  let string <- Z.environment String
+  let second <- Z.attempt (pure 2)
+  pure (nat + first + string.length + second)
+
+#check inferredAllParameters
+example : Z (Nat × String) (IO.Error ⊕ String) Nat :=
+  inferredAllParameters
+
+def inferredAllLoop := zdo
+  for _ in [1, 2] do
+    let _ <- stringAction
+    pure ()
+  Z.attempt (pure 2)
+
+#check inferredAllLoop
+example : Z Unit (IO.Error ⊕ String) Nat := inferredAllLoop
+
 #check_failure (zdo
-  pure 1)
+  try
+    throw (IO.userError "expected")
+  catch _ =>
+    pure ())
+
+def explicitCaughtAction : Z Unit IO.Error Nat := zdo
+  try
+    throw (IO.userError "expected")
+  catch _ =>
+    Z.succeedNow 1
+
+def inferredAroundNestedCatch := zdo
+  explicitCaughtAction
+
+#check inferredAroundNestedCatch
+example : Z Unit IO.Error Nat := inferredAroundNestedCatch
+
+def handledBody : Z Nat String Nat := Z.fail "handled"
+
+def inferredHandledError := zdo
+  handledBody.catchAllMeet fun _ =>
+    (Z.environment String).map String.length
+
+#check inferredHandledError
+example : Z (Nat × String) Empty Nat := inferredHandledError
 
 structure HighService : Type 1 where
   value : Nat

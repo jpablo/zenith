@@ -142,6 +142,8 @@ example : ErrorChannel.Join Empty Nat Nat := inferInstance
 example : ErrorChannel.Join Nat Empty Nat := inferInstance
 example : ErrorChannel.Join Nat Nat Nat := inferInstance
 example : ErrorChannel.Join String Nat (String ⊕ Nat) := inferInstance
+example : ErrorChannel.CanInject (String ⊕ IO.Error) (IO.Error ⊕ String) :=
+  inferInstance
 
 def joinedErrors : Z Unit (String ⊕ IO.Error) Nat :=
   let first : Z Unit String Unit := Z.succeedNow ()

@@ -41,3 +41,28 @@ instance (priority := low) :
   right := Sum.inr
 
 end ErrorChannel.Join
+
+/-- Inject one error type into a normalized error-channel sum. -/
+class ErrorChannel.CanInject (Source : Type u) (Target : Type v) where
+  inject : Source -> Target
+
+namespace ErrorChannel.CanInject
+
+instance (priority := high) [conversion : Source <: Target] :
+    ErrorChannel.CanInject Source Target :=
+  ⟨conversion.coe⟩
+
+instance [left : ErrorChannel.CanInject Left Target]
+    [right : ErrorChannel.CanInject Right Target] :
+    ErrorChannel.CanInject (Sum Left Right) Target :=
+  ⟨Sum.elim left.inject right.inject⟩
+
+instance [injection : ErrorChannel.CanInject Source Left] :
+    ErrorChannel.CanInject Source (Sum Left Right) :=
+  ⟨Sum.inl ∘ injection.inject⟩
+
+instance (priority := low) [injection : ErrorChannel.CanInject Source Right] :
+    ErrorChannel.CanInject Source (Sum Left Right) :=
+  ⟨Sum.inr ∘ injection.inject⟩
+
+end ErrorChannel.CanInject

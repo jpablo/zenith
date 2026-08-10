@@ -129,6 +129,14 @@ namespace Z
       (errorHandler : E -> Z R E₁ A₁) : Z R E₁ A₁ :=
     self.foldZ errorHandler (pure <| conversion.coe ·) |>.withLabel "catchAll"
 
+  /-- Handle an error with an effect that has a different environment. -/
+  def catchAllMeet
+      [meet : Environment.Meet R R₁ R₂]
+      [conversion : A <: A₁]
+      (errorHandler : E -> Z R₁ E₁ A₁) : Z R₂ E₁ A₁ :=
+    (self.contramap meet.left).catchAll fun error =>
+      (errorHandler error).contramap meet.right
+
   def zipWith (other : Z R E A₁) (f : A -> A₁ -> A₃) : Z R E A₃ := do
     return f (<- self) (<- other)
 

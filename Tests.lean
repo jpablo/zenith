@@ -494,6 +494,59 @@ def testErrorChannelJoin : IO Unit := do
   | .failure (.fail (.inr _)) => pure ()
   | _ => failTest "error join did not inject the right error"
 
+def testZDoInferredErrors : IO Unit := do
+  let leftFailure : Z Unit String Nat := Z.fail "left"
+  let leftProgram := zdo
+    let value <- leftFailure
+    let _ <- Z.attempt (pure ())
+    pure value
+  let leftProgram : Z Unit (IO.Error ⊕ String) Nat := leftProgram
+  match <- runProgram "zdo-inferred-error-left" leftProgram with
+  | .failure (.fail (.inr "left")) => pure ()
+  | _ => failTest "zdo did not inject an inferred String error"
+
+  let stringSuccess : Z Unit String Unit := Z.succeedNow ()
+  let failingIO : IO Nat := throw (IO.userError "right")
+  let rightProgram := zdo
+    let _ <- stringSuccess
+    Z.attempt failingIO
+  let rightProgram : Z Unit (IO.Error ⊕ String) Nat := rightProgram
+  match <- runProgram "zdo-inferred-error-right" rightProgram with
+  | .failure (.fail (.inl _)) => pure ()
+  | _ => failTest "zdo did not inject an inferred IO.Error"
+
+  let swappedFailure : Z Unit (String ⊕ IO.Error) Nat :=
+    Z.failCause (R := Unit)
+      (.fail (Sum.inl "swapped" : String ⊕ IO.Error))
+  let normalizedProgram := zdo
+    swappedFailure
+  let normalizedProgram : Z Unit (IO.Error ⊕ String) Nat := normalizedProgram
+  match <- runProgram "zdo-normalized-existing-error-sum" normalizedProgram with
+  | .failure (.fail (.inr "swapped")) => pure ()
+  | _ => failTest "zdo did not normalize an existing error sum"
+
+  let handledBody : Z Nat String Nat := Z.fail "handled"
+  let handledProgram := zdo
+    handledBody.catchAllMeet fun _ =>
+      (Z.environment String).map String.length
+  let handledClosed : Z Unit Empty Nat :=
+    handledProgram.provideEnvironment (42, "done")
+  match <- runProgram "zdo-inferred-handled-error" handledClosed with
+  | .success 4 => pure ()
+  | _ => failTest "zdo retained an error handled by catchAllMeet"
+
+  let combinedProgram := zdo
+    let nat <- Z.environment Nat
+    let _ <- stringSuccess
+    let string <- Z.environment String
+    let value <- Z.attempt (pure 2)
+    pure (nat + string.length + value)
+  let combinedClosed : Z Unit (IO.Error ⊕ String) Nat :=
+    combinedProgram.provideEnvironment (42, "ok")
+  match <- runProgram "zdo-inferred-environment-and-error" combinedClosed with
+  | .success 46 => pure ()
+  | _ => failTest "zdo did not infer both environment and error parameters"
+
 def main : IO Unit := do
   testFinalizerFailure
   testIOErrorCatch
@@ -522,4 +575,5 @@ def main : IO Unit := do
   testZDoInferredEnvironment
   testZDoInferredControlFlow
   testErrorChannelJoin
+  testZDoInferredErrors
   IO.println "All regression tests passed."

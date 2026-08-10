@@ -404,6 +404,13 @@ def into
     (self : Z R₁ E₀ A) : Z R E A :=
   (self.contramap environment.provide).mapFailure error.coe
 
+/-- Widen an action into a normalized joined error channel. -/
+def intoJoined
+    [environment : Environment.CanProvide R R₁]
+    [error : ErrorChannel.CanInject E₀ E]
+    (self : Z R₁ E₀ A) : Z R E A :=
+  (self.contramap environment.provide).mapFailure error.inject
+
 instance [conversion : Environment.CanProvide R₀ R₁] :
     CoeTC (Z R₁ E A) (Z R₀ E A) :=
   ⟨contramap conversion.provide⟩

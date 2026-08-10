@@ -78,6 +78,10 @@ class ErrorChannel.Join (Left : Type u) (Right : Type v)
 a tagged runtime union. It is not a kernel union type or a proof of Scala's
 complete least-upper-bound rules.
 
+`ErrorChannel.CanInject Source Target` converts an action error into a
+normalized joined error. Its rules recurse through `Sum` on either side. This
+lets the elaborator reorder and reassociate existing error sums.
+
 ## Precise public constructors
 
 The public constructors return the most precise `Z` type:
@@ -258,8 +262,9 @@ def selected (chooseNat : Bool) : Z (Nat × String) Empty String := zdo
     Z.environment String
 ```
 
-`zdo` uses the expected `Z R E A` type as the complete environment and error
-type. It first infers the precise type of each action. It then uses
+With a complete expected type, `zdo` uses `Z R E A` as the complete
+environment and error type. It first infers the precise type of each action.
+It then uses
 `Environment.CanProvide` and the error conversion relation to widen that
 action before `bind`. A private action elaborator applies the same operation
 to terminal actions before Lean fixes their branch type.
@@ -289,19 +294,37 @@ The inferred form works across environment universes. It also removes
 non-adjacent duplicate requirements. Reordered and differently associated
 requirements now infer the same environment type.
 
-This normalization is part of the `zdo[E]` elaborator. The structural sort is
-an implementation order, not a public service-key order. Thus, it gives
-stable types for the same elaborated service types, but it is not yet a
-general keyed row encoding.
+This environment normalization is used by `zdo[E]` and by plain inferred
+`zdo`. The structural sort is an implementation order, not a public
+service-key order. Thus, it gives stable types for the same elaborated service
+types, but it is not yet a general keyed row encoding.
 
-The inferred form supports `if`, `match`, `try`, loops, `return`, and nested
-actions. Error joins are not yet inferred, which is why `zdo[E]` requires
-`E`. In particular, error inference must account for errors that `catch`
-removes before it can safely use the same syntactic collection method.
+Plain `zdo` without a complete expected type infers both the environment and
+the error. It flattens nested `Sum` errors, removes `Empty`, sorts the error
+types, and folds them with `ErrorChannel.Join`:
+
+```lean
+def inferred := zdo
+  let first <- (Z.succeedNow 1 : Z Unit String Nat)
+  let second <- Z.attempt (pure 2)
+  pure (first + second)
+
+-- inferred : Z Unit (IO.Error ⊕ String) Nat
+```
+
+A bare `throw IO.Error` keeps Zenith's existing meaning: it creates a defect
+in `Z R Empty A`. It does not add `IO.Error` to the typed error channel. Use
+`Z.fail` for a typed error value or `Z.attempt` for an `IO` failure.
+
+This form supports binds, `if`, `match`, loops, `return`, and nested actions.
+It rejects native `try/catch` because Lean fixes one monad for the complete
+standard `do` block. Use `zdo[E]` when the error type is explicit. For
+compositional inference, `Z.catchAllMeet` combines the body and handler
+environments and exposes only the handler error.
 
 This is a capability meet for Zenith environments. It is not a general Scala
 intersection type. Products remain noncommutative outside normalized
-`zdo[E]` inference.
+inference.
 
 The checked examples are in [`variance.lean`](variance.lean). Run them from the
 project root:

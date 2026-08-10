@@ -6,13 +6,17 @@ import Z.Combinators
 `zdo` elaborates each action with a fresh environment and error type. It then
 widens the action to the environment and error type of the complete block.
 
-`zdo` requires an expected `Z R E A` type. This keeps environment selection
-explicit and lets `Environment.CanProvide` verify each requirement.
+With a complete expected `Z R E A` type, `zdo` verifies that each action can
+use `R` and can convert its error to `E`.
 
 `zdo[E]` collects action requirements before it infers the complete
 environment. It flattens and sorts those requirements before it applies
-`Environment.Meet`. The error type `E` stays explicit because Zenith does not
-yet have error union inference.
+`Environment.Meet`. The error type `E` stays explicit.
+
+Without a complete expected type, plain `zdo` also collects, normalizes, and
+joins action errors. Native `catch` needs a scoped error elaborator and is
+therefore rejected in this mode. Use `zdo[E]` or `Z.catchAllMeet` for caught
+errors.
 
 The private `zdo_action%` elaborator adapts terminal actions before Lean fixes
 their branch type. This supports bare terminal actions in control-flow blocks.
@@ -74,7 +78,7 @@ private def isPureAction (action : Term) : TermElabM Bool := do
 
 syntax (name := zdoAction) "zdo_action%[" term "," term "]" term : term
 syntax (name := zdoCollectAction)
-  "zdo_collect%[" term "," term "," term "]" term : term
+  "zdo_collect%[" term "," term "," term "," term "," term "]" term : term
 
 @[term_elab zdoAction]
 private def elabZDoAction : TermElab := fun stx expectedType? => do
@@ -117,7 +121,8 @@ private def elabZDoAction : TermElab := fun stx expectedType? => do
 @[term_elab zdoCollectAction]
 private def elabZDoCollectAction : TermElab := fun stx expectedType? => do
   let `(zdo_collect%[$targetEnvironmentSyntax, $targetErrorSyntax,
-      $requirementSyntax] $action) := stx | throwUnsupportedSyntax
+      $defaultErrorSyntax, $environmentRequirementSyntax,
+      $errorRequirementSyntax] $action) := stx | throwUnsupportedSyntax
   Term.tryPostponeIfNoneOrMVar expectedType?
   let some expectedType := expectedType? | unreachable!
   let expectedType ← instantiateMVars expectedType
@@ -125,7 +130,9 @@ private def elabZDoCollectAction : TermElab := fun stx expectedType? => do
     "internal `zdo` action requires an expected `Z R E A` type"
   let targetEnvironment ← Term.elabType targetEnvironmentSyntax
   let targetError ← Term.elabType targetErrorSyntax
-  let requirement ← Term.elabType requirementSyntax
+  let defaultError ← Term.elabType defaultErrorSyntax
+  let environmentRequirement ← Term.elabType environmentRequirementSyntax
+  let errorRequirement ← Term.elabType errorRequirementSyntax
   let level ← mkFreshLevelMVar
   let environment ← mkFreshExprMVar (mkSort level.succ)
   let error ← mkFreshExprMVar (mkSort (.succ .zero))
@@ -136,22 +143,24 @@ private def elabZDoCollectAction : TermElab := fun stx expectedType? => do
   if ← hasAssignableMVar actual.environment then
     discard <| isDefEq actual.environment (mkConst ``Unit)
   if ← hasAssignableMVar actual.error then
-    discard <| isDefEq actual.error targetError
+    discard <| isDefEq actual.error defaultError
   let sourceEnvironment ← instantiateMVars actual.environment
   let sourceError ← instantiateMVars actual.error
   let success ← instantiateMVars actual.success
-  unless ← isDefEq requirement sourceEnvironment do
+  unless ← isDefEq environmentRequirement sourceEnvironment do
     throwErrorAt stx "failed to collect the `zdo` environment requirement"
+  unless ← isDefEq errorRequirement sourceError do
+    throwErrorAt stx "failed to collect the `zdo` error requirement"
   let targetLevel ← getDecLevel targetEnvironment
   let sourceLevel ← getDecLevel sourceEnvironment
   let environmentInstanceType := mkApp2
     (mkConst ``Environment.CanProvide [targetLevel, sourceLevel])
     targetEnvironment sourceEnvironment
   let errorInstanceType := mkApp2
-    (mkConst ``CanConvert [.zero, .zero]) sourceError targetError
+    (mkConst ``ErrorChannel.CanInject [.zero, .zero]) sourceError targetError
   let environmentInstance ← Term.mkInstMVar environmentInstanceType
   let errorInstance ← Term.mkInstMVar errorInstanceType
-  let adapted := mkAppN (mkConst ``Z.into [targetLevel, sourceLevel]) #[
+  let adapted := mkAppN (mkConst ``Z.intoJoined [targetLevel, sourceLevel]) #[
     targetEnvironment,
     sourceEnvironment,
     sourceError,
@@ -186,44 +195,57 @@ private partial def adaptActions
 
 private structure CollectedActions where
   raw : Syntax
-  requirements : Array Expr := #[]
+  environmentRequirements : Array Expr := #[]
+  errorRequirements : Array Expr := #[]
 
 private partial def collectActions
     (node : Syntax)
-    (environment error : Term) : TermElabM CollectedActions := do
+    (environment error defaultError : Term) : TermElabM CollectedActions := do
   if node.getKind == ``Parser.Term.do then
     return { raw := node }
   else if node.getKind == ``Parser.Term.doExpr then
     let actionElement : DoElem := ⟨node⟩
     let `(doExpr| $action:term) := actionElement |
       return { raw := node }
-    let (action, nestedRequirements) ← match action with
+    let (action, nestedEnvironments, nestedErrors) ← match action with
       | `(pure $value) => do
-          let collected ← collectActions value.raw environment error
+          let collected ← collectActions value.raw environment error defaultError
           let value : Term := ⟨collected.raw⟩
           let action ← `(Z.succeedNow $value)
-          pure (action, collected.requirements)
-      | _ => pure (action, #[])
+          pure (action, collected.environmentRequirements,
+            collected.errorRequirements)
+      | _ => pure (action, #[], #[])
     withRef action do
       let level ← mkFreshLevelMVar
-      let requirement ← mkFreshExprMVar (mkSort level.succ)
-      let requirementSyntax ← Term.exprToSyntax requirement
-      let adapted ← `(zdo_collect%[$environment, $error,
-        $requirementSyntax] $action)
+      let environmentRequirement ← mkFreshExprMVar (mkSort level.succ)
+      let errorRequirement ← mkFreshExprMVar (mkSort (.succ .zero))
+      let environmentRequirementSyntax ←
+        Term.exprToSyntax environmentRequirement
+      let errorRequirementSyntax ← Term.exprToSyntax errorRequirement
+      let adapted ← `(zdo_collect%[$environment, $error, $defaultError,
+        $environmentRequirementSyntax, $errorRequirementSyntax] $action)
       let element ← `(doElem| $adapted:term)
       return {
         raw := element.raw
-        requirements := nestedRequirements.push requirement
+        environmentRequirements :=
+          nestedEnvironments.push environmentRequirement
+        errorRequirements := nestedErrors.push errorRequirement
       }
   else
     match node with
     | .node info kind arguments =>
-      let (arguments, requirements) ← arguments.foldlM
-          (init := (#[], #[])) fun (arguments, requirements) argument => do
-        let collected ← collectActions argument environment error
+      let (arguments, environments, errors) ← arguments.foldlM
+          (init := (#[], #[], #[]))
+          fun (arguments, environments, errors) argument => do
+        let collected ← collectActions argument environment error defaultError
         pure (arguments.push collected.raw,
-          requirements ++ collected.requirements)
-      return { raw := .node info kind arguments, requirements }
+          environments ++ collected.environmentRequirements,
+          errors ++ collected.errorRequirements)
+      return {
+        raw := .node info kind arguments
+        environmentRequirements := environments
+        errorRequirements := errors
+      }
     | _ => return { raw := node }
 
 private partial def flattenEnvironmentRequirement
@@ -260,23 +282,119 @@ private def meetEnvironments (requirements : Array Expr) : TermElabM Expr := do
 private def inferEnvironment (requirements : Array Expr) : TermElabM Expr := do
   meetEnvironments (← normalizeEnvironmentRequirements requirements)
 
-@[term_elab «zdo»]
-def elabZDo : TermElab := fun stx expectedType? => do
-  let `(zdo $sequence) := stx | throwUnsupportedSyntax
-  Term.tryPostponeIfNoneOrMVar expectedType?
-  let some expectedType := expectedType? | unreachable!
-  let expectedType ← instantiateMVars expectedType
-  let some expected ← expectedZ? expectedType | throwErrorAt stx
-    "`zdo` requires an expected type of the form `Z R E A`"
-  if ← hasAssignableMVar expected.environment then
-    throwErrorAt stx
-      "`zdo` cannot infer an environment from an expected type; use `zdo[E]`"
+private partial def flattenErrorRequirement
+    (requirement : Expr) : TermElabM (Array Expr) := do
+  let requirement ← whnf (← instantiateMVars requirement)
+  if requirement.isConstOf ``Empty then
+    return #[]
+  if requirement.isAppOfArity ``Sum 2 then
+    let left ← flattenErrorRequirement requirement.getAppArgs[0]!
+    let right ← flattenErrorRequirement requirement.getAppArgs[1]!
+    return left ++ right
+  return #[requirement]
+
+private def normalizeErrorRequirements
+    (requirements : Array Expr) : TermElabM (Array Expr) := do
+  let flattened ← requirements.foldlM (init := #[]) fun result requirement => do
+    return result ++ (← flattenErrorRequirement requirement)
+  return Lean.sortExprs flattened |>.1
+
+private def joinErrors (requirements : Array Expr) : TermElabM Expr := do
+  requirements.reverse.foldlM (init := mkConst ``Empty) fun right left => do
+    let left ← instantiateMVars left
+    let right ← instantiateMVars right
+    let leftLevel ← getDecLevel left
+    let rightLevel ← getDecLevel right
+    let resultLevel ← mkFreshLevelMVar
+    let result ← mkFreshExprMVar (mkSort resultLevel.succ)
+    let joinType := mkApp3
+      (mkConst ``ErrorChannel.Join [leftLevel, rightLevel, resultLevel])
+      left right result
+    let _ ← synthInstance joinType
+    instantiateMVars result
+
+private def inferError (requirements : Array Expr) : TermElabM Expr := do
+  joinErrors (← normalizeErrorRequirements requirements)
+
+private partial def findCatch? (node : Syntax) : Option Syntax :=
+  if node.getKind == ``Parser.Term.do ||
+      node.getKind == ``Parser.Term.doExpr then
+    none
+  else if node.getKind == ``Parser.Term.doCatch ||
+      node.getKind == ``Parser.Term.doCatchMatch then
+    some node
+  else
+    match node with
+    | .node _ _ arguments => arguments.findSome? findCatch?
+    | _ => none
+
+private def successTypeFromExpected? (expectedType? : Option Expr) : TermElabM Expr := do
+  if let some expectedType := expectedType? then
+    if let some expected ← expectedZ? expectedType then
+      return expected.success
+  mkFreshExprMVar (mkSort (.succ .zero))
+
+private def elabZDoFixed
+    (sequence : DoSeq)
+    (expectedType : Expr)
+    (expected : ExpectedZ) : TermElabM Expr := do
   let environment ← Term.exprToSyntax expected.environment
   let error ← Term.exprToSyntax expected.error
   let sequence : DoSeq :=
     ⟨← adaptActions sequence.raw environment error⟩
-  let result ← elabDoWith (zDoOps expected) sequence expectedType?
+  let result ← elabDoWith (zDoOps expected) sequence (some expectedType)
   Term.ensureHasType expectedType result
+
+private def elabZDoInferAll
+    (stx : Syntax)
+    (sequence : DoSeq)
+    (expectedType? : Option Expr) : TermElabM Expr := do
+  if let some catchSyntax := findCatch? sequence.raw then
+    throwErrorAt catchSyntax
+      "plain `zdo` cannot infer errors across `catch`; use `zdo[E]`"
+  let level ← mkFreshLevelMVar
+  let environment ← mkFreshExprMVar (mkSort level.succ)
+  let error ← mkFreshExprMVar (mkSort (.succ .zero))
+  let success ← successTypeFromExpected? expectedType?
+  let expected : ExpectedZ := { level, environment, error, success }
+  let environmentSyntax ← Term.exprToSyntax environment
+  let errorSyntax ← Term.exprToSyntax error
+  let emptyErrorSyntax ← Term.exprToSyntax (mkConst ``Empty)
+  let collected ← collectActions sequence.raw environmentSyntax errorSyntax
+    emptyErrorSyntax
+  let sequence : DoSeq := ⟨collected.raw⟩
+  let internalExpectedType := mkZType level environment error success
+  let result ← elabDoWith (zDoOps expected) sequence internalExpectedType
+  let result ← Term.ensureHasType internalExpectedType result
+  let inferredEnvironment ← inferEnvironment collected.environmentRequirements
+  unless ← isDefEq environment inferredEnvironment do
+    throwErrorAt stx "failed to infer the complete `zdo` environment"
+  let inferredError ← inferError collected.errorRequirements
+  unless ← isDefEq error inferredError do
+    throwErrorAt stx "failed to infer the complete `zdo` error type"
+  Term.synthesizeSyntheticMVarsNoPostponing
+  let result ← instantiateMVars result
+  match expectedType? with
+  | some expectedType => Term.ensureHasType expectedType result
+  | none => pure result
+
+@[term_elab «zdo»]
+def elabZDo : TermElab := fun stx expectedType? => do
+  let `(zdo $sequence) := stx | throwUnsupportedSyntax
+  match expectedType? with
+  | none => elabZDoInferAll stx sequence none
+  | some expectedType =>
+      let expectedType ← instantiateMVars expectedType
+      if ← hasAssignableMVar expectedType then
+        elabZDoInferAll stx sequence (some expectedType)
+      else
+        let some expected ← expectedZ? expectedType | throwErrorAt stx
+          "`zdo` requires an expected type of the form `Z R E A`"
+        if ← hasAssignableMVar expected.environment <||>
+            hasAssignableMVar expected.error then
+          elabZDoInferAll stx sequence (some expectedType)
+        else
+          elabZDoFixed sequence expectedType expected
 
 @[term_elab zdoInfer]
 def elabZDoInfer : TermElab := fun stx expectedType? => do
@@ -293,12 +411,12 @@ def elabZDoInfer : TermElab := fun stx expectedType? => do
   let expected : ExpectedZ := { level, environment, error, success }
   let environmentSyntax ← Term.exprToSyntax environment
   let errorSyntax ← Term.exprToSyntax error
-  let collected ← collectActions sequence.raw environmentSyntax errorSyntax
+  let collected ← collectActions sequence.raw environmentSyntax errorSyntax errorSyntax
   let sequence : DoSeq := ⟨collected.raw⟩
   let internalExpectedType := mkZType level environment error success
   let result ← elabDoWith (zDoOps expected) sequence internalExpectedType
   let result ← Term.ensureHasType internalExpectedType result
-  let inferredEnvironment ← inferEnvironment collected.requirements
+  let inferredEnvironment ← inferEnvironment collected.environmentRequirements
   unless ← isDefEq environment inferredEnvironment do
     throwErrorAt stx "failed to infer the complete `zdo` environment"
   Term.synthesizeSyntheticMVarsNoPostponing
