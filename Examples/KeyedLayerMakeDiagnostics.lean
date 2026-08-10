@@ -39,6 +39,12 @@ private def reporterFromGithub :
       report := pure "report"
     }
 
+private def reporterFromGithubWithError :
+    KeyedLayer
+      (Environment [githubEntry]) ReporterBuildError [reporterEntry] :=
+  KeyedLayer.singleton reporterEntry <|
+    Layer.failCause (.fail ReporterBuildError.unavailable)
+
 private def reporterFromGithubAndMetrics :
     KeyedLayer
       (Environment [githubEntry, metricsEntry]) Empty [reporterEntry] :=
@@ -184,11 +190,33 @@ unused candidates:
 -/
 #guard_msgs in
 #keyed_layer_graph
-  (KeyedLayer
-    (Environment [])
-    Empty
-    [metricsEntry, reporterEntry])
+  ([metricsEntry, reporterEntry])
   [metricsFromGithub, reporterFromGithub, githubFromNothing]
+
+/--
+info: Keyed layer graph
+error type: ReporterBuildError
+external inputs: githubEntry
+final outputs: reporterEntry
+selected providers:
+  reporterEntry <- [0] reporterFromGithubWithError
+selected candidates:
+  [0] reporterFromGithubWithError
+    inputs: githubEntry
+    outputs: reporterEntry
+dependency edges:
+  (none)
+parallel groups:
+  (none)
+shared nodes:
+  (none)
+unused candidates:
+  (none)
+-/
+#guard_msgs in
+#keyed_layer_graph
+  ([reporterEntry])
+  [reporterFromGithubWithError]
 
 /--
 error: no layer provides required service

@@ -588,19 +588,20 @@ a layer value:
 
 ```lean
 #keyed_layer_graph
-  (KeyedLayer
-    (Environment [configEntry, storeEntry])
-    SharedGraphError
-    [metricsEntry, reporterEntry])
+  ([metricsEntry, reporterEntry])
   [metricsLayer, reporterLayer, githubLayer]
 ```
 
-The report lists the error type, external inputs, final outputs, selected
-providers, selected candidates, dependency edges, parallel groups, shared
-nodes, and unused candidates. Candidate numbers follow the supplied list.
-Selected candidates appear in dependency order. The command uses the same
-provider checks and errors as `KeyedLayer.make`, so the report describes the
-graph that the constructor will generate for that target type.
+The output row defines the graph roots. The command infers the external input
+row and normalized error type. The report lists these types, the selected
+providers and candidates, dependency edges, parallel groups, shared nodes,
+and unused candidates. Candidate numbers follow the supplied list. Selected
+candidates appear in dependency order. The command uses the same provider
+checks and errors as `KeyedLayer.make`, so the report describes the graph that
+the constructor will generate.
+
+The command also accepts a complete `KeyedLayer` type in the first
+parentheses. This form selects an explicit input or error boundary.
 
 The program-level form does not require an intermediate layer declaration or
 a result annotation:
@@ -630,12 +631,12 @@ explicit scope, `keyed_graph` generates that scope automatically, and
 the requested output row. It uses exact stable-key matching and
 `ErrorChannel.CanInject` instances for the inferred or selected error type.
 Independent horizontal branches now lower to `zipFreshPar`. The
-`#keyed_layer_graph` command prints the compile-time plan, including parallel
-and shared nodes. A child `HEIO` interruption scope cancels sibling branches
-after failure or interruption, waits for their completion, and releases
-completed resources. The constructor infers canonical external input rows and
-normalized graph errors. The experimental `Z.provide` bridge runs the closed
-program in a nested fiber because `ZCore`
+`#keyed_layer_graph` command infers and prints the compile-time plan, including
+parallel and shared nodes. A child `HEIO` interruption scope cancels sibling
+branches after failure or interruption, waits for their completion, and
+releases completed resources. The constructor infers canonical external input
+rows and normalized graph errors. The experimental `Z.provide` bridge runs the
+closed program in a nested fiber because `ZCore`
 cannot store high-universe services. `ZCore.asyncInterrupt` connects outer
 interruption to the layer scope and waits for release before it completes the
 outer fiber. `HEIO` now carries a separate interruption signal and result, so

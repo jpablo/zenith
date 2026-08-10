@@ -13,8 +13,9 @@ The dependency graph exists only while Lean elaborates the term.
 the joined program-and-layer error channel, and scopes the generated layer
 around the program.
 
-`#keyed_layer_graph` runs the same analysis for an explicit target
-`KeyedLayer` type and prints the selected graph without building a value.
+`#keyed_layer_graph (outputs) [layers]` infers the graph input and error type
+and prints the selected graph without building a value. An explicit target
+`KeyedLayer` type keeps the boundary form.
 -/
 
 open Lean Meta Elab Term Command
@@ -596,10 +597,20 @@ def elabKeyedLayerMakeInferred : TermElab := fun stx expectedType? => do
 
 @[command_elab keyedLayerGraph]
 meta def elabKeyedLayerGraph : CommandElab
-  | stx@`(#keyed_layer_graph ($expectedType) [$layers,*]) =>
+  | stx@`(#keyed_layer_graph ($target) [$layers,*]) =>
       liftTermElabM do
-        let expectedType ← Term.elabType expectedType
+        let target ← Term.elabTerm target none
         Term.synthesizeSyntheticMVarsNoPostponing
+        let target ← instantiateMVars target
+        let expectedType ←
+          match ← KeyedLayerMake.keyedLayerType? target with
+          | some _ => pure target
+          | none =>
+              let inputLevel ← mkFreshLevelMVar
+              let input ← mkFreshExprMVar (mkSort inputLevel.succ)
+              let errorType ←
+                mkFreshExprMVar (mkSort (.succ .zero))
+              mkAppM ``KeyedLayer #[input, errorType, target]
         let analysis ← KeyedLayerMake.analyze stx "`#keyed_layer_graph`"
           expectedType layers.getElems
         logInfoAt stx (← KeyedLayerMake.renderAnalysis analysis)
