@@ -47,9 +47,11 @@ private def acquireAfter
     (first : Resource E A)
     (second : HEIO (Cause E) (Resource E B)) :
     HEIO (Cause E) (Resource E B) :=
-  second.fold
+  (HEIO.bind HEIO.checkInterrupted fun _ => second).foldAll
     (fun cause =>
       (HEIO.throw cause).ensuring first.release)
+    ((HEIO.interrupt : HEIO (Cause E) (Resource E B)).ensuring
+      first.release)
     (fun acquired =>
       HEIO.pure {
         value := acquired.value
@@ -102,7 +104,8 @@ def fromHEIO
     (build : RIn -> HEIO (Cause E) ROut) :
     Layer RIn E ROut :=
   ⟨fun environment =>
-    (build environment).map Resource.make⟩
+    HEIO.bind HEIO.checkInterrupted fun _ =>
+      (build environment).map Resource.make⟩
 
 /--
 Acquire a service and attach its release action. The release action runs once
@@ -113,8 +116,9 @@ def acquireRelease
     (release : R -> A -> HEIO (Cause E) Unit) :
     Layer R E A :=
   ⟨fun environment =>
-    (acquire environment).map fun value =>
-      Resource.make value (release environment value)⟩
+    HEIO.bind HEIO.checkInterrupted fun _ =>
+      (acquire environment).map fun value =>
+        Resource.make value (release environment value)⟩
 
 /--
 Create a layer that shares one build of `self` inside its scope. The returned
@@ -246,6 +250,14 @@ def zipWithPar
                 (HEIO.throw cause).ensuring acquiredLeft.release
             | .error cause, .ok acquiredRight =>
                 (HEIO.throw cause).ensuring acquiredRight.release
+            | .ok acquiredLeft, .interrupted =>
+                (HEIO.interrupt : HEIO (Cause E) (Resource E C)).ensuring
+                  acquiredLeft.release
+            | .interrupted, .ok acquiredRight =>
+                (HEIO.interrupt : HEIO (Cause E) (Resource E C)).ensuring
+                  acquiredRight.release
+            | .interrupted, _ | _, .interrupted =>
+                HEIO.interrupt
             | .error leftCause, .error _ =>
                 HEIO.throw leftCause⟩
 

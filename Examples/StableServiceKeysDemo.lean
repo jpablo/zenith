@@ -275,31 +275,6 @@ def githubFromConfigLayer
       (fun _ _ =>
         recordLayerEvent events "release-github-from-config")
 
-def slowGithubFromConfigLayer
-    (events : IO.Ref (List String))
-    (started : IO.Ref Bool) :
-    KeyedLayer
-      (Environment [configEntry])
-      GithubBuildError
-      [githubEntry] :=
-  KeyedLayer.singleton githubEntry <|
-    Layer.acquireRelease
-      (fun environment =>
-        HEIO.bind
-          (recordLayerEvent events "acquire-slow-github") fun _ =>
-            HEIO.bind
-              (HEIO.liftIO.{0} Cause.die (started.set true)) fun _ =>
-                HEIO.bind
-                  (HEIO.liftIO.{0} Cause.die (IO.sleep 20)) fun _ =>
-                    let config :=
-                      Contains.get (target := configEntry) environment
-                    HEIO.pure {
-                      issueCount := fun organization =>
-                        Z.succeedNow <|
-                          if organization == config.organization then 2 else 0
-                    })
-      (fun _ _ => recordLayerEvent events "release-slow-github")
-
 def otherConfigFromStoreLayer
     (events : IO.Ref (List String)) :
     KeyedLayer
@@ -632,6 +607,29 @@ def metricsFromGithubLayer
           HEIO.pure { count := github.issueCount "lean" })
       (fun _ _ => recordLayerEvent events "release-metrics")
 
+def slowMetricsFromGithubLayer
+    (events : IO.Ref (List String))
+    (started : IO.Ref Bool) :
+    KeyedLayer
+      (Environment MetricsInputs)
+      MetricsBuildError
+      MetricsOutputs :=
+  KeyedLayer.singleton metricsEntry <|
+    Layer.fromHEIO fun environment =>
+      HEIO.bind (recordLayerEvent events "acquire-slow-metrics") fun _ =>
+        HEIO.bind
+          (HEIO.liftIO.{0} Cause.die (started.set true)) fun _ =>
+            let pending : HEIO
+                (Cause MetricsBuildError)
+                (ULift.{1} Unit) :=
+              HEIO.asyncInterrupt Cause.die fun _ =>
+                pure <| events.modify fun current =>
+                  current ++ ["cancel-slow-metrics"]
+            HEIO.bind pending fun _ =>
+              let github := Contains.get
+                (target := githubEntry) environment
+              HEIO.pure { count := github.issueCount "lean" }
+
 def failingMetricsFromGithubLayer
     (events : IO.Ref (List String)) :
     KeyedLayer
@@ -720,8 +718,8 @@ def waitingSharedGraphProgram
     Z (Environment SharedGraphOutputs) Empty Unit :=
   Z.async fun _ => started.set true
 
-def githubUnitProgram :
-    Z (Environment [githubEntry]) Empty Unit :=
+def metricsUnitProgram :
+    Z (Environment [metricsEntry]) Empty Unit :=
   Z.serviceWith fun _ => ()
 
 def automaticallyProvidedSharedGraph
@@ -769,12 +767,13 @@ def automaticallyProvidedWaitingProgram
   githubFromConfigLayer events
 ]
 
-def automaticallyProvidedSlowGithub
+def automaticallyProvidedSlowMetrics
     (events : IO.Ref (List String))
     (started : IO.Ref Bool) :
-    Z (Environment [configEntry]) GithubBuildError Unit :=
-  Z.provide githubUnitProgram [
-    slowGithubFromConfigLayer events started
+    Z (Environment [configEntry]) SharedGraphError Unit :=
+  Z.provide metricsUnitProgram [
+    slowMetricsFromGithubLayer events started,
+    githubFromConfigLayer events
   ]
 
 def checkSharedDependencyGraph : IO Unit := do
@@ -929,7 +928,7 @@ def checkZProvideAcquisitionInterruption : IO Unit := do
   let input : Builder [configEntry] :=
     Builder.empty.addFresh configEntry config (by decide)
   let effect :=
-    (automaticallyProvidedSlowGithub events started).provideEnvironment
+    (automaticallyProvidedSlowMetrics events started).provideEnvironment
       input.environment
   let fiber ← Z.unsafeFork effect
     "stable-keyed-z-provide-acquisition-interruption"
@@ -941,8 +940,10 @@ def checkZProvideAcquisitionInterruption : IO Unit := do
       "Z.provide did not preserve acquisition interruption.")
   fiber.awaitTask
   assertEvents "Z.provide acquisition interruption" events [
-    "acquire-slow-github",
-    "release-slow-github"
+    "acquire-github-from-config",
+    "acquire-slow-metrics",
+    "cancel-slow-metrics",
+    "release-github-from-config"
   ]
 
 def demo : IO Unit := do

@@ -579,12 +579,16 @@ It does not yet infer an external input row, infer a graph error, create a
 debug graph, or build independent layers in parallel. The experimental
 `Z.provide` bridge runs the closed program in a nested fiber because `ZCore`
 cannot store high-universe services. `ZCore.asyncInterrupt` connects outer
-interruption to that nested fiber and waits for layer release before it
-completes the outer fiber. An `HEIO` layer acquisition cannot yet be preempted.
-If interruption occurs during acquisition, `Z.provide` waits for acquisition
-to return, interrupts the new program fiber, and then releases the acquired
-scope. The checked examples cover interruption during both acquisition and
-program execution.
+interruption to the layer scope and waits for release before it completes the
+outer fiber. `HEIO` now carries a separate interruption signal and result, so
+typed layer errors do not include cancellation. `HEIO.asyncInterrupt` lets an
+acquisition register its own cancellation action. Layer composition checks the
+signal before a new acquisition, releases earlier resources when a later
+acquisition is interrupted, and protects all release actions from interruption.
+A plain `HEIO.liftIO` action remains cooperative: it must return before the
+next interruption check. Use `HEIO.asyncInterrupt` when an operation can cancel
+its active work. The checked examples cover interruption before acquisition,
+during a cancellable acquisition, and during program execution.
 
 Run the checked sketches from the project root:
 

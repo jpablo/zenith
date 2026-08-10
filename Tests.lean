@@ -118,6 +118,89 @@ def testAsyncInterruptCancelerFailure : IO Unit := do
   | _ => failTest "a cancellable async canceler defect did not complete the fiber"
   fiber.awaitTask
 
+def testHEIOAsyncInterruption : IO Unit := do
+  let registered ← IO.mkRef false
+  let cancelled ← IO.mkRef false
+  let finalized ← IO.mkRef false
+  let pending : HEIO (Cause IO.Error) (ULift.{1} Unit) :=
+    HEIO.asyncInterrupt Cause.die fun _ => do
+      registered.set true
+      IO.sleep 20
+      pure (cancelled.set true)
+  let finalizer : HEIO (Cause IO.Error) Unit :=
+    HEIO.bind
+      (HEIO.liftIO.{0} Cause.die (finalized.set true))
+      fun _ => HEIO.pure ()
+  let interruption ← HEIO.Interruption.new
+  let worker ← IO.asTask <|
+    HEIO.toIOResultInterruptible
+      interruption (Cause.interrupt : Cause IO.Error)
+      (pending.ensuring finalizer)
+  waitForFlag "HEIO asynchronous registration" registered
+  interruption.request
+  match ← IO.wait worker with
+  | .ok (.error .interrupt) => pure ()
+  | _ => failTest "HEIO interruption returned the wrong result"
+  assertTrue "HEIO interruption did not run its cancellation action"
+    (← cancelled.get)
+  assertTrue "HEIO interruption did not run its protected finalizer"
+    (← finalized.get)
+
+def testPreInterruptedLayerBuild : IO Unit := do
+  let acquired ← IO.mkRef false
+  let layer : Layer Unit IO.Error Unit :=
+    Layer.fromHEIO fun _ =>
+      HEIO.bind
+        (HEIO.liftIO.{0} Cause.die (acquired.set true))
+        fun _ => HEIO.pure ()
+  let interruption ← HEIO.Interruption.new
+  interruption.request
+  let build := (layer.build ()).map (ULift.up :
+    Layer.Resource IO.Error Unit ->
+      ULift.{0} (Layer.Resource IO.Error Unit))
+  match ← HEIO.toIOResultInterruptible
+      interruption (Cause.interrupt : Cause IO.Error) build with
+  | .error .interrupt => pure ()
+  | _ => failTest "a pre-interrupted layer build returned the wrong result"
+  assertTrue "a layer started after interruption was requested"
+    !(← acquired.get)
+
+def testParallelLayerInterruption : IO Unit := do
+  let leftStarted ← IO.mkRef false
+  let rightStarted ← IO.mkRef false
+  let leftCancelled ← IO.mkRef false
+  let rightCancelled ← IO.mkRef false
+  let pendingLayer
+      (started : IO.Ref Bool)
+      (cancelled : IO.Ref Bool) : Layer Unit IO.Error Unit :=
+    Layer.fromHEIO fun _ =>
+      let pending : HEIO (Cause IO.Error) (ULift.{0} Unit) :=
+        HEIO.asyncInterrupt Cause.die fun _ => do
+          started.set true
+          pure (cancelled.set true)
+      HEIO.bind pending fun _ => HEIO.pure ()
+  let combined :=
+    (pendingLayer leftStarted leftCancelled).zipWithPar
+      (pendingLayer rightStarted rightCancelled)
+      (fun _ _ => ())
+  let build := (combined.build ()).map (ULift.up :
+    Layer.Resource IO.Error Unit ->
+      ULift.{0} (Layer.Resource IO.Error Unit))
+  let interruption ← HEIO.Interruption.new
+  let worker ← IO.asTask <|
+    HEIO.toIOResultInterruptible
+      interruption (Cause.interrupt : Cause IO.Error) build
+  waitForFlag "left parallel layer acquisition" leftStarted
+  waitForFlag "right parallel layer acquisition" rightStarted
+  interruption.request
+  match ← IO.wait worker with
+  | .ok (.error .interrupt) => pure ()
+  | _ => failTest "parallel layer interruption returned the wrong result"
+  assertTrue "the left parallel acquisition was not cancelled"
+    (← leftCancelled.get)
+  assertTrue "the right parallel acquisition was not cancelled"
+    (← rightCancelled.get)
+
 def testObserverRace : IO Unit := do
   for index in [0:100] do
     assertTrue s!"observer race failed at iteration {index}" (<- observerRaceOnce index)
@@ -1031,6 +1114,9 @@ def main : IO Unit := do
   testAsyncInterruption
   testAsyncInterruptCanceler
   testAsyncInterruptCancelerFailure
+  testHEIOAsyncInterruption
+  testPreInterruptedLayerBuild
+  testParallelLayerInterruption
   testObserverRace
   testGraphVizEscaping
   testChildDiagramLifetime

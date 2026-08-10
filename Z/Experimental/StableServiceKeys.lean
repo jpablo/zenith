@@ -439,7 +439,8 @@ layer after the program completes.
 
 The current implementation runs the closed program in a nested fiber because
 `ZCore` cannot store a service environment from an arbitrary universe. Outer
-interruption cancels that fiber and waits for this layer scope to release.
+interruption cancels layer acquisition or that fiber, and waits for this layer
+scope to release.
 -/
 def provide
     (self : KeyedLayer.{uin, uout} R E entries)
@@ -447,39 +448,36 @@ def provide
     (fiberId : FiberId := "Z.provide") : Z R E A :=
   Z.fromCore fun input =>
     ZCore.asyncInterrupt fun observer => do
-      let cancelled ← IO.mkRef false
-      let nestedFiber ← IO.mkRef (none : Option (Fiber E A))
+      let interruption ← HEIO.Interruption.new
       let builtAndRun :
           HEIO (Cause E) (ULift.{uout} (Exit E A)) :=
         HEIO.bind (self.layer.build input) fun resource =>
           let runProgram :
               HEIO (Cause E) (ULift.{uout} (Exit E A)) :=
-            HEIO.liftIO.{uout} Cause.die do
-              let fiber ← Z.unsafeFork
-                (program.provideEnvironment resource.value)
-                fiberId
-              nestedFiber.set (some fiber)
-              if ← cancelled.get then
-                fiber.requestInterrupt
-              match ← fiber.awaitPoll (fiberId := fiber.fiberId) with
-              | some exit =>
+            HEIO.bind HEIO.checkInterrupted fun _ =>
+              HEIO.asyncInterrupt.{uout} Cause.die fun callback => do
+                let fiber ← Z.unsafeFork
+                  (program.provideEnvironment resource.value)
+                  fiberId
+                let waiter ← IO.asTask do
+                  match ← fiber.awaitPoll (fiberId := fiber.fiberId) with
+                  | some exit => callback (.ok exit)
+                  | none => callback (.error (.die <| IO.userError
+                      "the provided program did not return an exit value"))
                   fiber.awaitTask
-                  pure exit
-              | none =>
-                  throw <| IO.userError
-                    "the provided program did not return an exit value"
+                pure do
+                  fiber.requestInterrupt
+                  fiber.awaitTask
+                  let _ ← IO.wait waiter
+                  pure ()
           runProgram.ensuring resource.release
       let worker ← IO.asTask do
-        match ← HEIO.toIOResult builtAndRun with
+        match ← HEIO.toIOResultInterruptible
+            interruption .interrupt builtAndRun with
         | .ok exit => observer exit
         | .error cause => observer (.failure cause)
       pure do
-        let first ← cancelled.modifyGet fun wasCancelled =>
-          (!wasCancelled, true)
-        if first then
-          match ← nestedFiber.get with
-          | some fiber => fiber.requestInterrupt
-          | none => pure ()
+        interruption.request
         let _ ← IO.wait worker
         pure ()
 
