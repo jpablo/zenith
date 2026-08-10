@@ -9,9 +9,12 @@ dependency graph exists only while Lean elaborates the term.
 
 `Z.provide` reads the program's keyed environment, constructs that environment
 with `KeyedLayer.make`, and scopes the generated layer around the program.
+
+`#keyed_layer_graph` runs the same analysis for an explicit target
+`KeyedLayer` type and prints the selected graph without building a value.
 -/
 
-open Lean Meta Elab Term
+open Lean Meta Elab Term Command
 
 namespace StableServiceKeys
 
@@ -20,6 +23,9 @@ syntax (name := keyedLayerMake)
 
 syntax (name := zProvide)
   "Z.provide" term:max "[" term,* "]" : term
+
+syntax (name := keyedLayerGraph)
+  "#keyed_layer_graph" "(" term ")" "[" term,* "]" : command
 
 namespace KeyedLayerMake
 
@@ -44,6 +50,16 @@ private structure Candidate where
 private structure Plan where
   candidate : Nat
   dependencies : Array Nat
+
+private structure Analysis where
+  expected : KeyedLayerType
+  inputRow : Expr
+  external : Array Expr
+  requested : Array Expr
+  candidates : Array Candidate
+  roots : Array Nat
+  plans : Array Plan
+  provider : Expr
 
 private def keyedLayerType? (type : Expr) : MetaM (Option KeyedLayerType) := do
   let type ← whnf type
@@ -261,43 +277,40 @@ private def generateGraph
         (required := $outputSyntax) (provider := $providerSyntax) $root
     })
 
-end KeyedLayerMake
-
-@[term_elab keyedLayerMake]
-def elabKeyedLayerMake : TermElab := fun stx expectedType? => do
-  let `(KeyedLayer.make [$layers,*]) := stx | throwUnsupportedSyntax
-  Term.tryPostponeIfNoneOrMVar expectedType?
-  let some expectedType := expectedType? | throwErrorAt stx
-    "`KeyedLayer.make` requires an expected `KeyedLayer` type"
+private def analyze
+    (reference : Syntax)
+    (caller : String)
+    (expectedType : Expr)
+    (layers : Array Term) : TermElabM Analysis := do
   let expectedType ← instantiateMVars expectedType
-  let some expected ← KeyedLayerMake.keyedLayerType? expectedType |
-    throwErrorAt stx
-      "`KeyedLayer.make` requires an expected `KeyedLayer` type"
+  let some expected ← keyedLayerType? expectedType |
+    throwErrorAt reference m!
+      "{caller} requires a `KeyedLayer` type"
   if ← hasAssignableMVar expected.errorType <||>
       hasAssignableMVar expected.output then
-    throwErrorAt stx
-      "`KeyedLayer.make` requires known error and output rows"
-  let some inputRow ← KeyedLayerMake.environmentRow? expected.input |
-    throwErrorAt stx
-      "`KeyedLayer.make` requires a keyed `Environment` input"
-  let external ← KeyedLayerMake.rowEntries inputRow
-  let requested ← KeyedLayerMake.rowEntries expected.output
+    throwErrorAt reference m!
+      "{caller} requires known error and output rows"
+  let some inputRow ← environmentRow? expected.input |
+    throwErrorAt reference m!
+      "{caller} requires a keyed `Environment` input"
+  let external ← rowEntries inputRow
+  let requested ← rowEntries expected.output
   if requested.isEmpty then
-    throwErrorAt stx
-      "`KeyedLayer.make` requires at least one requested output service"
+    throwErrorAt reference m!
+      "{caller} requires at least one requested output service"
   let mut candidates := #[]
-  for layer in layers.getElems do
+  for layer in layers do
     let expression ← Term.elabTerm layer none
     Term.synthesizeSyntheticMVarsNoPostponing
     let type ← instantiateMVars (← inferType expression)
-    let some candidateType ← KeyedLayerMake.keyedLayerType? type |
-      throwErrorAt layer "an automatic layer candidate must have type `KeyedLayer R E entries`"
-    let some candidateInputRow ←
-        KeyedLayerMake.environmentRow? candidateType.input |
+    let some candidateType ← keyedLayerType? type |
+      throwErrorAt layer
+        "an automatic layer candidate must have type `KeyedLayer R E entries`"
+    let some candidateInputRow ← environmentRow? candidateType.input |
       throwErrorAt layer
         "an automatic layer candidate must use a keyed `Environment` input"
-    let inputs ← KeyedLayerMake.rowEntries candidateInputRow
-    let outputs ← KeyedLayerMake.rowEntries candidateType.output
+    let inputs ← rowEntries candidateInputRow
+    let outputs ← rowEntries candidateType.output
     let index := candidates.size
     candidates := candidates.push {
       index
@@ -308,40 +321,161 @@ def elabKeyedLayerMake : TermElab := fun stx expectedType? => do
     }
   let mut roots := #[]
   for output in requested do
-    let providers ← KeyedLayerMake.providersFor candidates output
+    let providers ← providersFor candidates output
     if providers.isEmpty then
-      throwErrorAt stx m!
-        "no layer provides requested service {(← KeyedLayerMake.entryMessage output)}"
+      throwErrorAt reference m!
+        "no layer provides requested service {(← entryMessage output)}"
     if providers.size > 1 then
-      throwErrorAt stx m!
-        "more than one layer provides requested service {(← KeyedLayerMake.entryMessage output)}"
+      throwErrorAt reference m!
+        "more than one layer provides requested service {(← entryMessage output)}"
     let (providerIndex, providedEntry) := providers[0]!
-    unless ← KeyedLayerMake.sameEntry providedEntry output do
-      throwErrorAt stx m!
-        "provided service {(← KeyedLayerMake.entryMessage providedEntry)} has the requested key, but it has a different service type from {(← KeyedLayerMake.entryMessage output)}"
+    unless ← sameEntry providedEntry output do
+      throwErrorAt reference m!
+        "provided service {(← entryMessage providedEntry)} has the requested key, but it has a different service type from {(← entryMessage output)}"
     unless roots.contains providerIndex do
       roots := roots.push providerIndex
   let mut plans := #[]
   for root in roots do
-    plans ← KeyedLayerMake.resolveCandidate candidates external root [] plans
+    plans ← resolveCandidate candidates external root [] plans
   for plan in plans do
-    KeyedLayerMake.checkDisjointOutputs candidates plan.dependencies stx
-  KeyedLayerMake.checkDisjointOutputs candidates roots stx
+    checkDisjointOutputs candidates plan.dependencies reference
+  checkDisjointOutputs candidates roots reference
   for candidate in candidates do
-    unless KeyedLayerMake.planContains plans candidate.index do
+    unless planContains plans candidate.index do
       logWarningAt candidate.stx "unused automatic layer candidate"
-  let availableOutputRow ←
-    KeyedLayerMake.mergedOutputRow candidates roots
-  let availableOutputs ←
-    KeyedLayerMake.rowEntries availableOutputRow
-  let availableRow ← KeyedLayerMake.explicitRow availableOutputs
-  let requestedRow ← KeyedLayerMake.explicitRow requested
+  let availableOutputRow ← mergedOutputRow candidates roots
+  let availableOutputs ← rowEntries availableOutputRow
+  let availableRow ← explicitRow availableOutputs
+  let requestedRow ← explicitRow requested
   let providerType ← mkAppM ``Environment.CanProvide #[
     availableRow, requestedRow]
   let provider ← synthInstance providerType
-  let generated ← KeyedLayerMake.generateGraph stx candidates plans roots
-    inputRow expected.errorType expected.output provider
+  return {
+    expected
+    inputRow
+    external
+    requested
+    candidates
+    roots
+    plans
+    provider
+  }
+
+private def entriesMessage (entries : Array Expr) : MessageData :=
+  if entries.isEmpty then
+    "(none)"
+  else
+    MessageData.joinSep (entries.toList.map fun entry => m!"{entry}") ", "
+
+private def candidateMessage
+    (candidates : Array Candidate)
+    (index : Nat) : MessageData :=
+  let candidate := candidateAt candidates index
+  m!"[{index}] {candidate.stx}"
+
+private def candidatesMessage
+    (candidates : Array Candidate)
+    (indices : Array Nat) : MessageData :=
+  if indices.isEmpty then
+    "(none)"
+  else
+    MessageData.joinSep
+      (indices.toList.map fun index => candidateMessage candidates index)
+      " | "
+
+private def renderAnalysis (analysis : Analysis) : MetaM MessageData := do
+  let mut lines : Array MessageData := #[
+    "Keyed layer graph",
+    m!"error type: {analysis.expected.errorType}",
+    m!"external inputs: {entriesMessage analysis.external}",
+    m!"final outputs: {entriesMessage analysis.requested}",
+    "selected providers:"
+  ]
+  for output in analysis.requested do
+    let providers ← providersFor analysis.candidates output
+    let provider := providers[0]!.1
+    lines := lines.push m!
+      "  {output} <- {candidateMessage analysis.candidates provider}"
+  lines := lines.push "selected candidates:"
+  for plan in analysis.plans do
+    let candidate := candidateAt analysis.candidates plan.candidate
+    lines := lines.push m!"  {candidateMessage analysis.candidates plan.candidate}"
+    lines := lines.push m!"    inputs: {entriesMessage candidate.inputs}"
+    lines := lines.push m!"    outputs: {entriesMessage candidate.outputs}"
+  lines := lines.push "dependency edges:"
+  let mut edgeCount : Nat := 0
+  for plan in analysis.plans do
+    for dependency in plan.dependencies do
+      edgeCount := edgeCount + 1
+      lines := lines.push m!
+        "  {candidateMessage analysis.candidates dependency} -> {candidateMessage analysis.candidates plan.candidate}"
+  if edgeCount == 0 then
+    lines := lines.push "  (none)"
+  lines := lines.push "parallel groups:"
+  let mut parallelCount : Nat := 0
+  for plan in analysis.plans do
+    if plan.dependencies.size > 1 then
+      parallelCount := parallelCount + 1
+      lines := lines.push m!
+        "  inputs of {candidateMessage analysis.candidates plan.candidate}: {candidatesMessage analysis.candidates plan.dependencies}"
+  if analysis.roots.size > 1 then
+    parallelCount := parallelCount + 1
+    lines := lines.push m!
+      "  final providers: {candidatesMessage analysis.candidates analysis.roots}"
+  if parallelCount == 0 then
+    lines := lines.push "  (none)"
+  let mut consumers : Array Nat :=
+    Array.replicate analysis.candidates.size 0
+  for plan in analysis.plans do
+    for dependency in plan.dependencies do
+      consumers := consumers.set! dependency (consumers[dependency]! + 1)
+  lines := lines.push "shared nodes:"
+  let mut sharedCount : Nat := 0
+  for plan in analysis.plans do
+    let count := consumers[plan.candidate]!
+    if count > 1 then
+      sharedCount := sharedCount + 1
+      lines := lines.push m!
+        "  {candidateMessage analysis.candidates plan.candidate} ({count} consumers)"
+  if sharedCount == 0 then
+    lines := lines.push "  (none)"
+  lines := lines.push "unused candidates:"
+  let mut unusedCount : Nat := 0
+  for candidate in analysis.candidates do
+    unless planContains analysis.plans candidate.index do
+      unusedCount := unusedCount + 1
+      lines := lines.push m!"  {candidateMessage analysis.candidates candidate.index}"
+  if unusedCount == 0 then
+    lines := lines.push "  (none)"
+  return MessageData.joinSep lines.toList "\n"
+
+end KeyedLayerMake
+
+@[term_elab keyedLayerMake]
+def elabKeyedLayerMake : TermElab := fun stx expectedType? => do
+  let `(KeyedLayer.make [$layers,*]) := stx | throwUnsupportedSyntax
+  Term.tryPostponeIfNoneOrMVar expectedType?
+  let some expectedType := expectedType? | throwErrorAt stx
+    "`KeyedLayer.make` requires an expected `KeyedLayer` type"
+  let expectedType ← instantiateMVars expectedType
+  let analysis ← KeyedLayerMake.analyze stx "`KeyedLayer.make`"
+    expectedType layers.getElems
+  let generated ← KeyedLayerMake.generateGraph stx
+    analysis.candidates analysis.plans analysis.roots
+    analysis.inputRow analysis.expected.errorType analysis.expected.output
+    analysis.provider
   Term.elabTerm generated expectedType
+
+@[command_elab keyedLayerGraph]
+meta def elabKeyedLayerGraph : CommandElab
+  | stx@`(#keyed_layer_graph ($expectedType) [$layers,*]) =>
+      liftTermElabM do
+        let expectedType ← Term.elabType expectedType
+        Term.synthesizeSyntheticMVarsNoPostponing
+        let analysis ← KeyedLayerMake.analyze stx "`#keyed_layer_graph`"
+          expectedType layers.getElems
+        logInfoAt stx (← KeyedLayerMake.renderAnalysis analysis)
+  | _ => throwUnsupportedSyntax
 
 @[term_elab zProvide]
 def elabZProvide : TermElab := fun stx expectedType? => do

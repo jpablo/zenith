@@ -70,6 +70,50 @@ private def metricsFromGithub :
     }
 
 /--
+info: Keyed layer graph
+error type: Empty
+external inputs: (none)
+final outputs: metricsEntry, reporterEntry
+selected providers:
+  metricsEntry <- [0] metricsFromGithub
+  reporterEntry <- [1] reporterFromGithub
+selected candidates:
+  [2] githubFromNothing
+    inputs: (none)
+    outputs: githubEntry
+  [0] metricsFromGithub
+    inputs: githubEntry
+    outputs: metricsEntry
+  [1] reporterFromGithub
+    inputs: githubEntry
+    outputs: reporterEntry
+dependency edges:
+  [2] githubFromNothing -> [0] metricsFromGithub
+  [2] githubFromNothing -> [1] reporterFromGithub
+parallel groups:
+  final providers: [0] metricsFromGithub | [1] reporterFromGithub
+shared nodes:
+  [2] githubFromNothing (2 consumers)
+unused candidates:
+  (none)
+-/
+#guard_msgs in
+#keyed_layer_graph
+  (KeyedLayer
+    (Environment [])
+    Empty
+    [metricsEntry, reporterEntry])
+  [metricsFromGithub, reporterFromGithub, githubFromNothing]
+
+/--
+error: no layer provides required service
+-/
+#guard_msgs (error, substring := true) in
+#keyed_layer_graph
+  (KeyedLayer (Environment []) Empty [reporterEntry])
+  [reporterFromGithub]
+
+/--
 error: no layer provides required service
 -/
 #guard_msgs (error, substring := true) in

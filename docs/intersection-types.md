@@ -549,6 +549,25 @@ node. The checked diamond graph therefore acquires and releases `Github` once.
 The failure check confirms that an acquisition failure releases the shared
 upstream service.
 
+The compile-time inspection command runs the same planner without constructing
+a layer value:
+
+```lean
+#keyed_layer_graph
+  (KeyedLayer
+    (Environment [configEntry, storeEntry])
+    SharedGraphError
+    [metricsEntry, reporterEntry])
+  [metricsLayer, reporterLayer, githubLayer]
+```
+
+The report lists the error type, external inputs, final outputs, selected
+providers, selected candidates, dependency edges, parallel groups, shared
+nodes, and unused candidates. Candidate numbers follow the supplied list.
+Selected candidates appear in dependency order. The command uses the same
+provider checks and errors as `KeyedLayer.make`, so the report describes the
+graph that the constructor will generate for that target type.
+
 The program-level form does not require an intermediate layer declaration:
 
 ```lean
@@ -577,11 +596,12 @@ explicit scope, `keyed_graph` generates that scope automatically, and
 `KeyedLayer.make` now generates the graph. The first automatic version
 requires a complete expected `KeyedLayer` type. It uses exact stable-key
 matching and the selected error type's `ErrorChannel.CanInject` instances.
-Independent horizontal branches now lower to `zipFreshPar`. A child `HEIO`
+Independent horizontal branches now lower to `zipFreshPar`. The
+`#keyed_layer_graph` command prints the compile-time plan, including parallel
+and shared nodes. A child `HEIO`
 interruption scope cancels sibling branches after failure or interruption,
 waits for their completion, and releases completed resources. The constructor
-does not yet infer an external input row, infer a graph error, or create a
-debug graph. The experimental
+does not yet infer an external input row or infer a graph error. The experimental
 `Z.provide` bridge runs the closed program in a nested fiber because `ZCore`
 cannot store high-universe services. `ZCore.asyncInterrupt` connects outer
 interruption to the layer scope and waits for release before it completes the
