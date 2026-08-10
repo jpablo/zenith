@@ -400,7 +400,10 @@ normalized errors, and ordered catch chains in a larger program.
 
 The reusable experiment is in
 [`Z/Experimental/StableServiceKeys.lean`](../Z/Experimental/StableServiceKeys.lean).
-The checked client is [`stable-service-keys.lean`](stable-service-keys.lean).
+The native checked example is
+[`Examples/StableServiceKeysDemo.lean`](../Examples/StableServiceKeysDemo.lean).
+[`stable-service-keys.lean`](stable-service-keys.lean) is its documentation
+import.
 The experiment does not change the production `Z` environment. Each service
 entry contains an owner, a local name, and its service type. A lexical
 insertion sort gives service rows a stable order and removes duplicate keys.
@@ -429,6 +432,9 @@ The prototype provides these checked properties:
   with inferred or selected error channels.
 - `KeyedLayer.andThenKeepFreshMeetJoin` and `andThenKeepFreshInto` keep the
   upstream outputs in the final row.
+- `KeyedLayer.widenInput` lets one layer read its row from a larger graph input.
+- `KeyedLayer.shareInto` gives repeated branches one explicit memoization
+  scope.
 
 The checked examples show that two libraries can use the same local service
 name when their declaration namespaces differ. They also show that
@@ -446,7 +452,7 @@ avoid this cost, but a closed key type is not extensible across libraries.
 Run the checked runtime example with:
 
 ```sh
-lake env lean --run docs/stable-service-keys.lean
+lake exe stableServiceKeys
 ```
 
 The runtime checks compose effectful keyed layers through the production
@@ -476,12 +482,20 @@ evidence for the two output rows. Thus, two acquired values cannot silently
 claim the same service key. Successful and failed downstream acquisition keep
 the same release behavior as ordinary vertical composition.
 
+The shared graph checks use one `Github` layer in both the `Reporter` and
+`Metrics` branches. `shareInto` acquires and releases `Github` once. If the
+second branch fails during acquisition, the first branch and the shared
+upstream resource are both released. This sharing scope must be explicit. A
+shallow layer is a function value and does not expose a node identity that the
+runtime can use for automatic graph memoization.
+
 The declaration command currently accepts only one named service type. It does
 not yet define identities for parameterized service types. Horizontal and
 vertical layer composition now handle different keyed inputs and errors, and
-pass-through uses a strict duplicate-key policy. The next layer step is a
-shared dependency graph. Two downstream branches must be able to use one
-upstream service while that service is acquired and released only once.
+pass-through uses a strict duplicate-key policy. Shared graphs work with an
+explicit scope. The next design decision is whether explicit sharing is
+acceptable. Automatic sharing would require a small reified graph layer or a
+macro that assigns stable node identities before it builds shallow layers.
 
 Run the checked sketches from the project root:
 

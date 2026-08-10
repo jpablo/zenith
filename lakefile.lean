@@ -18,6 +18,10 @@ lean_exe githubIssueSync {
   root := `Examples.GithubIssueSyncDemo
 }
 
+lean_exe stableServiceKeys {
+  root := `Examples.StableServiceKeysDemo
+}
+
 lean_lib Z
 lean_lib Examples
 

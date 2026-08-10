@@ -219,6 +219,27 @@ def singleton
     KeyedLayer R E [entry] :=
   ⟨layer.map fun value => .cons value .empty⟩
 
+/-- Let a keyed layer read its required row from a larger input row. -/
+def widenInput
+    [provider : Environment.CanProvide available required]
+    (self : KeyedLayer (Environment required) E entries) :
+    KeyedLayer (Environment available) E entries :=
+  ⟨self.layer.contramap provider.provide⟩
+
+/--
+Build a keyed layer once inside `use`, even when `use` refers to it more than
+once. Shallow layer values require this explicit sharing scope because they do
+not expose node identity for automatic graph memoization.
+-/
+def shareInto
+    [error : ErrorChannel.CanInject E EOut]
+    (self : KeyedLayer R E entries)
+    (use : KeyedLayer R EOut entries -> KeyedLayer R EOut outEntries) :
+    KeyedLayer R EOut outEntries :=
+  let adapted := self.layer.mapError error.inject
+  ⟨adapted.share fun shared =>
+    (use { layer := shared }).layer⟩
+
 /--
 Build two keyed layers in sequence and merge their outputs by stable key.
 The existing `Layer.zipWith` keeps acquisition failure and release behavior.
