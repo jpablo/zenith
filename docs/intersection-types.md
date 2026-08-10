@@ -435,6 +435,8 @@ The prototype provides these checked properties:
 - `KeyedLayer.widenInput` lets one layer read its row from a larger graph input.
 - `KeyedLayer.shareInto` gives repeated branches one explicit memoization
   scope.
+- `keyed_graph` gives every lexical node a sharing scope and lowers `>>>` and
+  `++` graph bindings to the checked vertical and horizontal combinators.
 
 The checked examples show that two libraries can use the same local service
 name when their declaration namespaces differ. They also show that
@@ -482,20 +484,38 @@ evidence for the two output rows. Thus, two acquired values cannot silently
 claim the same service key. Successful and failed downstream acquisition keep
 the same release behavior as ordinary vertical composition.
 
-The shared graph checks use one `Github` layer in both the `Reporter` and
-`Metrics` branches. `shareInto` acquires and releases `Github` once. If the
-second branch fails during acquisition, the first branch and the shared
-upstream resource are both released. This sharing scope must be explicit. A
-shallow layer is a function value and does not expose a node identity that the
-runtime can use for automatic graph memoization.
+The shared graph checks use this form:
+
+```lean
+keyed_graph (error := SharedGraphError) {
+  let github := githubLayer.widenInput;
+  let reporter := github >>> reporterLayer;
+  let metrics := github >>> metricsLayer;
+  let outputs := reporter ++ metrics;
+  yield outputs
+}
+```
+
+Each lexical binding becomes one `shareInto` scope. Thus, both downstream
+branches use the same `Github` acquisition and release. `>>>` supplies the
+selected graph error type and generates the input-row equality proof. `++`
+generates the disjoint-output proof. If the second branch fails during
+acquisition, the first branch and the shared upstream resource are both
+released.
+
+The macro shares every binding, not only bindings that occur more than once.
+Acquisition remains lazy, so an unused binding does not build its service. The
+node identity is lexical and exists only inside one `keyed_graph` block. The
+runtime `Layer` remains a shallow function value.
 
 The declaration command currently accepts only one named service type. It does
 not yet define identities for parameterized service types. Horizontal and
 vertical layer composition now handle different keyed inputs and errors, and
 pass-through uses a strict duplicate-key policy. Shared graphs work with an
-explicit scope. The next design decision is whether explicit sharing is
-acceptable. Automatic sharing would require a small reified graph layer or a
-macro that assigns stable node identities before it builds shallow layers.
+explicit scope, and `keyed_graph` generates that scope automatically. The
+first macro version still requires an explicit graph error type and an initial
+`widenInput` call. The next ergonomics step is an elaborator that reads the
+expected `KeyedLayer` result type and supplies both values automatically.
 
 Run the checked sketches from the project root:
 

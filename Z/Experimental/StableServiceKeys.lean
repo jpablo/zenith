@@ -429,6 +429,55 @@ def toLayer (layer : KeyedLayer R E entries) :
 end KeyedLayer
 
 /-!
+`keyed_graph` gives each lexical binding one explicit sharing scope. The macro
+keeps `Layer` shallow and lowers graph nodes to `KeyedLayer.shareInto`.
+-/
+
+declare_syntax_cat keyedGraphBinding
+syntax "let " ident " := " term ";" : keyedGraphBinding
+syntax "let " ident " := " ident " >>> " term ";" : keyedGraphBinding
+syntax "let " ident " := " ident " ++ " ident ";" : keyedGraphBinding
+syntax "keyed_graph" "{" keyedGraphBinding* "yield " term "}" : term
+syntax "keyed_graph" "(" "error" " := " term ")"
+  "{" keyedGraphBinding* "yield " term "}" : term
+
+macro_rules
+  | `(keyed_graph { yield $result:term }) => `($result)
+  | `(keyed_graph {
+      let $name:ident := $value:term;
+      $rest:keyedGraphBinding*
+      yield $result:term
+    }) =>
+      `(KeyedLayer.shareInto $value fun $name =>
+        keyed_graph { $rest* yield $result })
+  | `(keyed_graph (error := $errorType:term) { yield $result:term }) =>
+      `(show KeyedLayer _ $errorType _ from $result)
+  | `(keyed_graph (error := $errorType:term) {
+      let $name:ident := $left:ident >>> $right:term;
+      $rest:keyedGraphBinding*
+      yield $result:term
+    }) =>
+      `(KeyedLayer.shareInto (EOut := $errorType)
+          (KeyedLayer.andThenInto (E := $errorType)
+            $left $right (by rfl)) fun $name =>
+        keyed_graph (error := $errorType) { $rest* yield $result })
+  | `(keyed_graph (error := $errorType:term) {
+      let $name:ident := $left:ident ++ $right:ident;
+      $rest:keyedGraphBinding*
+      yield $result:term
+    }) =>
+      `(KeyedLayer.shareInto (EOut := $errorType)
+          (KeyedLayer.zipFresh $left $right (by decide)) fun $name =>
+        keyed_graph (error := $errorType) { $rest* yield $result })
+  | `(keyed_graph (error := $errorType:term) {
+      let $name:ident := $value:term;
+      $rest:keyedGraphBinding*
+      yield $result:term
+    }) =>
+      `(KeyedLayer.shareInto (EOut := $errorType) $value fun $name =>
+        keyed_graph (error := $errorType) { $rest* yield $result })
+
+/-!
 `service_key entryName : ServiceType` resolves `ServiceType` and uses its full
 Lean declaration name. Normal code does not write an owner string.
 -/

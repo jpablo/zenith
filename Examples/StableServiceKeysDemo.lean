@@ -611,56 +611,26 @@ def sharedDependencyGraph
     KeyedLayer
       (Environment [configEntry, storeEntry])
       SharedGraphError
-      SharedGraphOutputs :=
-  let upstream : KeyedLayer
-      (Environment [configEntry, storeEntry])
-      GithubBuildError
-      [githubEntry] :=
-    (githubFromConfigLayer events).widenInput
-  upstream.shareInto fun shared =>
-    let reporterBranch : KeyedLayer
-        (Environment [configEntry, storeEntry])
-        SharedGraphError
-        ReporterOutputs :=
-      shared.andThenInto
-        (reporterFromGithubAndStoreLayer events)
-        (by rfl)
-    let metricsBranch : KeyedLayer
-        (Environment [configEntry, storeEntry])
-        SharedGraphError
-        MetricsOutputs :=
-      shared.andThenInto
-        (metricsFromGithubLayer events)
-        (by rfl)
-    reporterBranch.zipFresh metricsBranch (by decide)
+      SharedGraphOutputs := keyed_graph (error := SharedGraphError) {
+  let github := (githubFromConfigLayer events).widenInput;
+  let reporter := github >>> reporterFromGithubAndStoreLayer events;
+  let metrics := github >>> metricsFromGithubLayer events;
+  let outputs := reporter ++ metrics;
+  yield outputs
+}
 
 def failingSharedDependencyGraph
     (events : IO.Ref (List String)) :
     KeyedLayer
       (Environment [configEntry, storeEntry])
       SharedGraphError
-      SharedGraphOutputs :=
-  let upstream : KeyedLayer
-      (Environment [configEntry, storeEntry])
-      GithubBuildError
-      [githubEntry] :=
-    (githubFromConfigLayer events).widenInput
-  upstream.shareInto fun shared =>
-    let reporterBranch : KeyedLayer
-        (Environment [configEntry, storeEntry])
-        SharedGraphError
-        ReporterOutputs :=
-      shared.andThenInto
-        (reporterFromGithubAndStoreLayer events)
-        (by rfl)
-    let metricsBranch : KeyedLayer
-        (Environment [configEntry, storeEntry])
-        SharedGraphError
-        MetricsOutputs :=
-      shared.andThenInto
-        (failingMetricsFromGithubLayer events)
-        (by rfl)
-    reporterBranch.zipFresh metricsBranch (by decide)
+      SharedGraphOutputs := keyed_graph (error := SharedGraphError) {
+  let github := (githubFromConfigLayer events).widenInput;
+  let reporter := github >>> reporterFromGithubAndStoreLayer events;
+  let metrics := github >>> failingMetricsFromGithubLayer events;
+  let outputs := reporter ++ metrics;
+  yield outputs
+}
 
 def sharedGraphProgram :
     Z (Environment SharedGraphOutputs) Empty String := zdo
