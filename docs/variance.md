@@ -317,7 +317,7 @@ in `Z R Empty A`. It does not add `IO.Error` to the typed error channel. Use
 `Z.fail` for a typed error value or `Z.attempt` for an `IO` failure.
 
 This form supports binds, `if`, `match`, loops, `return`, nested actions, and
-native `try/catch`. A catch creates separate inference scopes for the
+native `try/catch/finally`. A catch creates separate inference scopes for the
 protected body and the handler. The body error is handled. Thus, only the
 handler error contributes to the enclosing block. The two environment
 requirements are combined and then included in the enclosing normalized
@@ -328,8 +328,13 @@ The scoped catch forwards early `return`, mutable variables, `break`, and
 `do` notation. A protected body with error type `Empty` uses the existing
 `IO.Error` defect catch behavior. A body with a nonempty error channel catches
 that typed error. Catch patterns are supported. Plain inferred `zdo` currently
-requires one catch clause and does not support `finally`; `zdo[E]` remains
-available when the complete error type must be explicit.
+supports at most one catch clause.
+
+A finalizer has its own inferred environment and error. Its requirements are
+combined with the protected effect. It runs after success or failure and
+before an early `return`, `break`, or `continue` resumes. If both the protected
+effect and finalizer fail, the finalizer failure takes precedence. `zdo[E]`
+remains available when the complete error type must be explicit.
 
 `Z.catchAllMeet` remains the direct compositional form. It combines the body
 and handler environments and exposes only the handler error.

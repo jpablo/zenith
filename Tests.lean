@@ -652,6 +652,111 @@ def testZDoInferredCatch : IO Unit := do
   | .success 7 => pure ()
   | _ => failTest "zdo did not elaborate a catch pattern"
 
+def testZDoInferredFinally : IO Unit := do
+  let environmentProgram := zdo
+    try
+      Z.environment Nat
+    finally
+      (Z.environment String).map (fun _ => ())
+  let environmentProgram : Z (Nat × String) Empty Nat := environmentProgram
+  let environmentProgramClosed : Z Unit Empty Nat :=
+    environmentProgram.provideEnvironment (42, "finalizer")
+  match ← runProgram "zdo-inferred-finally-environment"
+      environmentProgramClosed with
+  | .success 42 => pure ()
+  | _ => failTest "zdo did not infer the finalizer environment"
+
+  let successEvents ← IO.mkRef ([] : List String)
+  let successProgram := zdo
+    try
+      let _ ← Z.succeed <| successEvents.modify (fun events =>
+        events ++ ["body"])
+      pure 1
+    finally
+      Z.succeed <| successEvents.modify (fun events =>
+        events ++ ["finalizer"])
+  let successProgram : Z Unit Empty Nat := successProgram
+  match ← runProgram "zdo-inferred-finally-success" successProgram with
+  | .success 1 => pure ()
+  | _ => failTest "zdo finally changed a successful value"
+  assertTrue "zdo finally did not run after success"
+    ((← successEvents.get) == ["body", "finalizer"])
+
+  let failureEvents ← IO.mkRef ([] : List String)
+  let bodyFailure := zdo
+    try
+      let _ : Nat ← (Z.fail "body" : Z Unit String Nat)
+      pure 0
+    finally
+      Z.succeed <| failureEvents.modify (fun events =>
+        events ++ ["finalizer"])
+  let bodyFailure : Z Unit String Nat := bodyFailure
+  match ← runProgram "zdo-inferred-finally-body-failure" bodyFailure with
+  | .failure (.fail "body") => pure ()
+  | _ => failTest "zdo finally did not preserve the body failure"
+  assertTrue "zdo finally did not run after failure"
+    ((← failureEvents.get) == ["finalizer"])
+
+  let finalizerFailure := zdo
+    try
+      let _ : Nat ← (Z.fail "body" : Z Unit String Nat)
+      pure 0
+    finally
+      let _ : Unit ← (Z.fail 5 : Z Unit Nat Unit)
+      pure ()
+  let finalizerFailure : Z Unit (Nat ⊕ String) Nat := finalizerFailure
+  match ← runProgram "zdo-inferred-finalizer-failure" finalizerFailure with
+  | .failure (.fail (.inl 5)) => pure ()
+  | _ => failTest "the finalizer failure did not take precedence"
+
+  let caughtThenFinalized := zdo
+    try
+      let _ : Nat ← (Z.fail "handled" : Z Unit String Nat)
+      pure 0
+    catch _ =>
+      pure 1
+    finally
+      Z.attempt (pure ())
+  let caughtThenFinalized : Z Unit IO.Error Nat := caughtThenFinalized
+  match ← runProgram "zdo-inferred-catch-finally" caughtThenFinalized with
+  | .success 1 => pure ()
+  | _ => failTest "zdo finally retained an error handled by catch"
+
+  let returnEvents ← IO.mkRef ([] : List String)
+  let returnProgram (stop : Bool) := zdo
+    try
+      if stop then return 7
+      pure ()
+    finally
+      Z.succeed <| returnEvents.modify (fun events =>
+        events ++ ["finalizer"])
+    pure 9
+  let returnProgram : Z Unit Empty Nat := returnProgram true
+  match ← runProgram "zdo-inferred-finally-return" returnProgram with
+  | .success 7 => pure ()
+  | _ => failTest "zdo finally did not forward an early return"
+  assertTrue "zdo finally did not run before an early return"
+    ((← returnEvents.get) == ["finalizer"])
+
+  let finalizerCount ← IO.mkRef 0
+  let loopProgram := zdo
+    let mut total := 0
+    for value in [1, 2, 3] do
+      try
+        if value == 1 then continue
+        if value == 3 then break
+        total := total + value
+        pure ()
+      finally
+        Z.succeed <| finalizerCount.modify (fun count => count + 1)
+    pure total
+  let loopProgram : Z Unit Empty Nat := loopProgram
+  match ← runProgram "zdo-inferred-finally-loop-control" loopProgram with
+  | .success 2 => pure ()
+  | _ => failTest "zdo finally did not forward loop control"
+  assertTrue "zdo finally did not run before loop control resumed"
+    ((← finalizerCount.get) == 3)
+
 def main : IO Unit := do
   testFinalizerFailure
   testIOErrorCatch
@@ -682,4 +787,5 @@ def main : IO Unit := do
   testErrorChannelJoin
   testZDoInferredErrors
   testZDoInferredCatch
+  testZDoInferredFinally
   IO.println "All regression tests passed."

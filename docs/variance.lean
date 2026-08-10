@@ -337,6 +337,28 @@ def inferredDefectCatch := zdo
 #check inferredDefectCatch
 example : Z Unit Empty Nat := inferredDefectCatch
 
+def inferredFinally := zdo
+  try
+    let _ : Nat <- (Z.fail "body" : Z Unit String Nat)
+    pure 0
+  finally
+    Z.attempt (pure ())
+
+#check inferredFinally
+example : Z Unit (IO.Error ⊕ String) Nat := inferredFinally
+
+def inferredCatchFinally := zdo
+  try
+    let _ : Nat <- (Z.fail "handled" : Z Unit String Nat)
+    pure 0
+  catch _ =>
+    pure 1
+  finally
+    Z.attempt (pure ())
+
+#check inferredCatchFinally
+example : Z Unit IO.Error Nat := inferredCatchFinally
+
 def explicitCaughtAction : Z Unit IO.Error Nat := zdo
   try
     throw (IO.userError "expected")

@@ -220,6 +220,33 @@ namespace Z
             (fun _ => .failCause (R := R) cause))
         (fun a     => finalizer.foldCauseZ finalizerFailure (fun _ => pure a))
 
+  /--
+  Run a finalizer with different environment and error requirements.
+
+  A finalizer failure takes precedence over a failure from the protected
+  effect, as required by Lean's `try/finally` semantics.
+  -/
+  def ensuringMeetJoin
+      [meet : Environment.Meet R R₁ R₂]
+      [join : ErrorChannel.Join E E₁ E₂]
+      (finalizer : Z R₁ E₁ A₀) : Z R₂ E₂ A :=
+    let effect := self.contramap meet.left
+    let finalizer := finalizer.contramap meet.right
+    effect.foldCauseZ
+      (fun cause =>
+        finalizer.foldCauseZ
+          (fun finalizerCause =>
+            (Z.failCause (R := R₂) (finalizerCause.map join.right)).map
+              impossible)
+          (fun _ =>
+            (Z.failCause (R := R₂) (cause.map join.left)).map impossible))
+      (fun value =>
+        finalizer.foldCauseZ
+          (fun finalizerCause =>
+            (Z.failCause (R := R₂) (finalizerCause.map join.right)).map
+              impossible)
+          (fun _ => Z.internal.succeedNow value))
+
   def interruptible : Z R E A :=
     self.setInterruptStatus .interruptible |>.withLabel "🛡 ↓ interruptible"
 
