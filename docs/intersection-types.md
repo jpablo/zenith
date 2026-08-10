@@ -443,8 +443,10 @@ The prototype provides these checked properties:
   provider produces but the expected result does not request.
 - `keyed_graph` gives every lexical node a sharing scope and lowers `>>>` and
   `++` graph bindings to the checked vertical and horizontal combinators.
-- `keyed_layer_make` reads its expected keyed input, error, and output rows. It
+- `KeyedLayer.make` reads its expected keyed input, error, and output rows. It
   selects and composes an unordered list of candidate layers automatically.
+- `Z.provide` reads the program environment and uses the same graph solver to
+  construct, supply, and release the required services.
 
 The checked examples show that two libraries can use the same local service
 name when their declaration namespaces differ. They also show that
@@ -524,7 +526,7 @@ def applicationLayer :
     KeyedLayer
       (Environment [configEntry, storeEntry])
       SharedGraphError
-      [metricsEntry, reporterEntry] := keyed_layer_make [
+      [metricsEntry, reporterEntry] := KeyedLayer.make [
   metricsLayer,
   reporterLayer,
   githubLayer
@@ -545,17 +547,40 @@ node. The checked diamond graph therefore acquires and releases `Github` once.
 The failure check confirms that an acquisition failure releases the shared
 upstream service.
 
+The program-level form does not require an intermediate layer declaration:
+
+```lean
+def runnable :
+    Z
+      (Environment [configEntry, storeEntry])
+      SharedGraphError
+      String := Z.provide sharedGraphProgram [
+  metricsLayer,
+  reporterLayer,
+  githubLayer
+]
+```
+
+`Z.provide` uses the program's environment row as the graph target. Its
+expected result type supplies the external input row and final error channel.
+The runtime checks confirm successful provision, layer acquisition failure,
+program failure, and reverse-order release.
+
 The declaration command currently accepts only one named service type. It does
 not yet define identities for parameterized service types. Horizontal and
 vertical layer composition now handle different keyed inputs and errors, and
 pass-through uses a strict duplicate-key policy. Shared graphs work with an
 explicit scope, `keyed_graph` generates that scope automatically, and
-`keyed_layer_make` now generates the graph. The first automatic version
+`KeyedLayer.make` now generates the graph. The first automatic version
 requires a complete expected `KeyedLayer` type. It uses exact stable-key
 matching and the selected error type's `ErrorChannel.CanInject` instances.
 Horizontal construction remains sequential because it lowers to `zipFresh`.
 It does not yet infer an external input row, infer a graph error, create a
-debug graph, or build independent layers in parallel.
+debug graph, or build independent layers in parallel. The experimental
+`Z.provide` bridge runs the closed program in a nested fiber because `ZCore`
+cannot store high-universe services. Outer-fiber interruption does not yet
+cancel that nested task. This must be resolved before this API moves into the
+production layer implementation.
 
 Run the checked sketches from the project root:
 

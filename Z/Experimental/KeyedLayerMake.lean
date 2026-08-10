@@ -3,9 +3,12 @@ import Z.Experimental.StableServiceKeys
 /-!
 Automatic construction for keyed layers.
 
-`keyed_layer_make` reads the expected `KeyedLayer` type, finds one provider for
+`KeyedLayer.make` reads the expected `KeyedLayer` type, finds one provider for
 each requested service, and emits ordinary `KeyedLayer` compositions. The
 dependency graph exists only while Lean elaborates the term.
+
+`Z.provide` reads the program's keyed environment, constructs that environment
+with `KeyedLayer.make`, and scopes the generated layer around the program.
 -/
 
 open Lean Meta Elab Term
@@ -13,7 +16,10 @@ open Lean Meta Elab Term
 namespace StableServiceKeys
 
 syntax (name := keyedLayerMake)
-  "keyed_layer_make" "[" term,* "]" : term
+  "KeyedLayer.make" "[" term,* "]" : term
+
+syntax (name := zProvide)
+  "Z.provide" term:max "[" term,* "]" : term
 
 namespace KeyedLayerMake
 
@@ -21,6 +27,11 @@ private structure KeyedLayerType where
   input : Expr
   errorType : Expr
   output : Expr
+
+private structure ZType where
+  environment : Expr
+  errorType : Expr
+  success : Expr
 
 private structure Candidate where
   index : Nat
@@ -40,6 +51,13 @@ private def keyedLayerType? (type : Expr) : MetaM (Option KeyedLayerType) := do
   unless name == ``KeyedLayer do return none
   let #[input, errorType, output] := type.getAppArgs | return none
   return some { input, errorType, output }
+
+private def zType? (type : Expr) : MetaM (Option ZType) := do
+  let type ← whnf type
+  let .const name _ := type.getAppFn | return none
+  unless name == ``Z do return none
+  let #[environment, errorType, success] := type.getAppArgs | return none
+  return some { environment, errorType, success }
 
 private def environmentRow? (type : Expr) : MetaM (Option Expr) := do
   let type ← whnf type
@@ -247,26 +265,26 @@ end KeyedLayerMake
 
 @[term_elab keyedLayerMake]
 def elabKeyedLayerMake : TermElab := fun stx expectedType? => do
-  let `(keyed_layer_make [$layers,*]) := stx | throwUnsupportedSyntax
+  let `(KeyedLayer.make [$layers,*]) := stx | throwUnsupportedSyntax
   Term.tryPostponeIfNoneOrMVar expectedType?
   let some expectedType := expectedType? | throwErrorAt stx
-    "`keyed_layer_make` requires an expected `KeyedLayer` type"
+    "`KeyedLayer.make` requires an expected `KeyedLayer` type"
   let expectedType ← instantiateMVars expectedType
   let some expected ← KeyedLayerMake.keyedLayerType? expectedType |
     throwErrorAt stx
-      "`keyed_layer_make` requires an expected `KeyedLayer` type"
+      "`KeyedLayer.make` requires an expected `KeyedLayer` type"
   if ← hasAssignableMVar expected.errorType <||>
       hasAssignableMVar expected.output then
     throwErrorAt stx
-      "`keyed_layer_make` requires known error and output rows"
+      "`KeyedLayer.make` requires known error and output rows"
   let some inputRow ← KeyedLayerMake.environmentRow? expected.input |
     throwErrorAt stx
-      "`keyed_layer_make` requires a keyed `Environment` input"
+      "`KeyedLayer.make` requires a keyed `Environment` input"
   let external ← KeyedLayerMake.rowEntries inputRow
   let requested ← KeyedLayerMake.rowEntries expected.output
   if requested.isEmpty then
     throwErrorAt stx
-      "`keyed_layer_make` requires at least one requested output service"
+      "`KeyedLayer.make` requires at least one requested output service"
   let mut candidates := #[]
   for layer in layers.getElems do
     let expression ← Term.elabTerm layer none
@@ -323,6 +341,46 @@ def elabKeyedLayerMake : TermElab := fun stx expectedType? => do
   let provider ← synthInstance providerType
   let generated ← KeyedLayerMake.generateGraph stx candidates plans roots
     inputRow expected.errorType expected.output provider
+  Term.elabTerm generated expectedType
+
+@[term_elab zProvide]
+def elabZProvide : TermElab := fun stx expectedType? => do
+  let `(Z.provide $program [$layers,*]) := stx | throwUnsupportedSyntax
+  Term.tryPostponeIfNoneOrMVar expectedType?
+  let some expectedType := expectedType? | throwErrorAt stx
+    "`Z.provide` requires an expected `Z R E A` type"
+  let expectedType ← instantiateMVars expectedType
+  let some expected ← KeyedLayerMake.zType? expectedType |
+    throwErrorAt stx "`Z.provide` requires an expected `Z R E A` type"
+  if ← hasAssignableMVar expected.errorType <||>
+      hasAssignableMVar expected.success then
+    throwErrorAt stx "`Z.provide` requires known error and success types"
+  let some _ ← KeyedLayerMake.environmentRow? expected.environment |
+    throwErrorAt stx
+      "`Z.provide` requires a keyed `Environment` in its expected type"
+  let programExpression ← Term.elabTerm program none
+  Term.synthesizeSyntheticMVarsNoPostponing
+  let programType ← instantiateMVars (← inferType programExpression)
+  let some actual ← KeyedLayerMake.zType? programType |
+    throwErrorAt program "the program supplied to `Z.provide` must have type `Z R E A`"
+  let some outputRow ←
+      KeyedLayerMake.environmentRow? actual.environment |
+    throwErrorAt program
+      "the program supplied to `Z.provide` must require a keyed `Environment`"
+  unless ← isDefEq actual.success expected.success do
+    throwErrorAt program
+      "the program success type does not match the expected `Z.provide` success type"
+  let inputSyntax ← Term.exprToSyntax expected.environment
+  let errorSyntax ← Term.exprToSyntax expected.errorType
+  let successSyntax ← Term.exprToSyntax expected.success
+  let programEnvironmentSyntax ←
+    Term.exprToSyntax actual.environment
+  let outputSyntax ← Term.exprToSyntax outputRow
+  let generated ← `(KeyedLayer.provide
+    (show KeyedLayer $inputSyntax $errorSyntax $outputSyntax from
+      KeyedLayer.make [$layers,*])
+    (show Z $programEnvironmentSyntax $errorSyntax $successSyntax from
+      Z.intoJoined $program))
   Term.elabTerm generated expectedType
 
 end StableServiceKeys

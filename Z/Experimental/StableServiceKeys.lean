@@ -433,6 +433,43 @@ def toLayer (layer : KeyedLayer R E entries) :
     Layer R E (Environment entries) :=
   layer.layer
 
+/--
+Build a keyed layer, supply its environment to a program, and release the
+layer after the program completes.
+
+The current implementation runs the closed program in a nested fiber because
+`ZCore` cannot store a service environment from an arbitrary universe.
+-/
+def provide
+    (self : KeyedLayer.{uin, uout} R E entries)
+    (program : Z (Environment entries) E A)
+    (fiberId : FiberId := "Z.provide") : Z R E A :=
+  Z.fromCore fun input =>
+    ZCore.async fun observer => do
+      let builtAndRun :
+          HEIO (Cause E) (ULift.{uout} (Exit E A)) :=
+        HEIO.bind (self.layer.build input) fun resource =>
+          let runProgram :
+              HEIO (Cause E) (ULift.{uout} (Exit E A)) :=
+            HEIO.bind
+              (HEIO.liftIO.{uout} Cause.die <|
+                Z.unsafeRunSync
+                  (program.provideEnvironment resource.value)
+                  fiberId)
+              fun result =>
+                match result.down with
+                | some exit => HEIO.pure (ULift.up exit)
+                | none =>
+                    HEIO.throw <| .die <|
+                      IO.userError
+                        "the provided program did not return an exit value"
+          runProgram.ensuring resource.release
+      let _task ← IO.asTask do
+        match ← HEIO.toIOResult builtAndRun with
+        | .ok exit => observer exit
+        | .error cause => observer (.failure cause)
+      pure ()
+
 end KeyedLayer
 
 /-!

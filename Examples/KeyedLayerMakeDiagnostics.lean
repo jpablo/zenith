@@ -30,7 +30,7 @@ private def githubAndMetricsFromNothing :=
 
 private def projectedMultiOutput :
     KeyedLayer (Environment []) Empty [githubEntry] :=
-  keyed_layer_make [githubAndMetricsFromNothing]
+  KeyedLayer.make [githubAndMetricsFromNothing]
 
 private def reporterFromGithub :
     KeyedLayer (Environment [githubEntry]) Empty [reporterEntry] :=
@@ -49,7 +49,7 @@ private def reporterFromGithubAndMetrics :
 
 private def twoInternalDependencies :
     KeyedLayer (Environment []) Empty [reporterEntry] :=
-  keyed_layer_make [
+  KeyedLayer.make [
     reporterFromGithubAndMetrics,
     metricsFromNothing,
     githubFromNothing
@@ -75,7 +75,7 @@ error: no layer provides required service
 #guard_msgs (error, substring := true) in
 private def missingProvider :
     KeyedLayer (Environment []) Empty [reporterEntry] :=
-  keyed_layer_make [reporterFromGithub]
+  KeyedLayer.make [reporterFromGithub]
 
 /--
 error: more than one layer provides requested service
@@ -83,7 +83,7 @@ error: more than one layer provides requested service
 #guard_msgs (error, substring := true) in
 private def ambiguousProvider :
     KeyedLayer (Environment []) Empty [githubEntry] :=
-  keyed_layer_make [githubFromNothing, anotherGithubFromNothing]
+  KeyedLayer.make [githubFromNothing, anotherGithubFromNothing]
 
 /--
 error: automatic keyed-layer construction found a dependency cycle
@@ -91,7 +91,7 @@ error: automatic keyed-layer construction found a dependency cycle
 #guard_msgs (error, substring := true) in
 private def cyclicGraph :
     KeyedLayer (Environment []) Empty [metricsEntry] :=
-  keyed_layer_make [githubFromMetrics, metricsFromGithub]
+  KeyedLayer.make [githubFromMetrics, metricsFromGithub]
 
 /--
 warning: unused automatic layer candidate
@@ -99,6 +99,6 @@ warning: unused automatic layer candidate
 #guard_msgs (warning, substring := true) in
 private def unusedCandidate :
     KeyedLayer (Environment []) Empty [githubEntry] :=
-  keyed_layer_make [githubFromNothing, metricsFromNothing]
+  KeyedLayer.make [githubFromNothing, metricsFromNothing]
 
 end StableServiceKeys.KeyedLayerMakeDiagnostics

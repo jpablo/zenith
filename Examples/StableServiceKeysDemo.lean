@@ -642,7 +642,7 @@ def automaticSharedDependencyGraph
     KeyedLayer
       (Environment [configEntry, storeEntry])
       SharedGraphError
-      SharedGraphOutputs := keyed_layer_make [
+      SharedGraphOutputs := KeyedLayer.make [
   metricsFromGithubLayer events,
   reporterFromGithubAndStoreLayer events,
   githubFromConfigLayer events
@@ -653,7 +653,7 @@ def automaticFailingSharedDependencyGraph
     KeyedLayer
       (Environment [configEntry, storeEntry])
       SharedGraphError
-      SharedGraphOutputs := keyed_layer_make [
+      SharedGraphOutputs := KeyedLayer.make [
   failingMetricsFromGithubLayer events,
   githubFromConfigLayer events,
   reporterFromGithubAndStoreLayer events
@@ -668,6 +668,48 @@ def sharedGraphProgram :
     (entries := SharedGraphOutputs) metricsEntry fun metrics =>
       metrics.count
   pure s!"{report}:{count}"
+
+def sharedGraphUnitProgram :
+    Z (Environment SharedGraphOutputs) Empty Unit :=
+  Z.serviceWith fun _ => ()
+
+def failingSharedGraphProgram :
+    Z (Environment SharedGraphOutputs) SharedGraphError Unit :=
+  (Z.failCause (R := Environment SharedGraphOutputs)
+    (.fail (.inl .unavailable))).map impossible
+
+def automaticallyProvidedSharedGraph
+    (events : IO.Ref (List String)) :
+    Z
+      (Environment [configEntry, storeEntry])
+      SharedGraphError
+      String := Z.provide sharedGraphProgram [
+  metricsFromGithubLayer events,
+  reporterFromGithubAndStoreLayer events,
+  githubFromConfigLayer events
+]
+
+def automaticallyProvidedFailingSharedGraph
+    (events : IO.Ref (List String)) :
+    Z
+      (Environment [configEntry, storeEntry])
+      SharedGraphError
+      Unit := Z.provide sharedGraphUnitProgram [
+  failingMetricsFromGithubLayer events,
+  githubFromConfigLayer events,
+  reporterFromGithubAndStoreLayer events
+]
+
+def automaticallyProvidedFailingProgram
+    (events : IO.Ref (List String)) :
+    Z
+      (Environment [configEntry, storeEntry])
+      SharedGraphError
+      Unit := Z.provide failingSharedGraphProgram [
+  metricsFromGithubLayer events,
+  reporterFromGithubAndStoreLayer events,
+  githubFromConfigLayer events
+]
 
 def checkSharedDependencyGraph : IO Unit := do
   let events <- IO.mkRef ([] : List String)
@@ -745,6 +787,54 @@ def checkAutomaticSharedDependencyGraphFailure : IO Unit := do
     "release-github-from-config"
   ]
 
+def checkZProvide : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect :=
+    (automaticallyProvidedSharedGraph events).provideEnvironment
+      heterogeneousInputs.environment
+  match <- Z.unsafeRunSync effect "stable-keyed-z-provide" with
+  | some (.success "issue:2:2") => pure ()
+  | _ => throw (IO.userError "Z.provide did not run the program.")
+  assertEvents "Z.provide" events [
+    "acquire-github-from-config",
+    "acquire-metrics",
+    "acquire-reporter",
+    "release-reporter",
+    "release-metrics",
+    "release-github-from-config"
+  ]
+
+def checkZProvideFailure : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect :=
+    (automaticallyProvidedFailingSharedGraph events).provideEnvironment
+      heterogeneousInputs.environment
+  match <- Z.unsafeRunSync effect "stable-keyed-z-provide-failure" with
+  | some (.failure (.fail (.inr (.inr .unavailable)))) => pure ()
+  | _ => throw (IO.userError "Z.provide did not preserve the layer error.")
+  assertEvents "Z.provide failure" events [
+    "acquire-github-from-config",
+    "acquire-metrics",
+    "release-github-from-config"
+  ]
+
+def checkZProvideProgramFailure : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect :=
+    (automaticallyProvidedFailingProgram events).provideEnvironment
+      heterogeneousInputs.environment
+  match <- Z.unsafeRunSync effect "stable-keyed-z-provide-program-failure" with
+  | some (.failure (.fail (.inl .unavailable))) => pure ()
+  | _ => throw (IO.userError "Z.provide did not preserve the program error.")
+  assertEvents "Z.provide program failure" events [
+    "acquire-github-from-config",
+    "acquire-metrics",
+    "acquire-reporter",
+    "release-reporter",
+    "release-metrics",
+    "release-github-from-config"
+  ]
+
 def demo : IO Unit := do
   match <- run with
   | some (.success "issue:2") =>
@@ -775,6 +865,10 @@ def demo : IO Unit := do
   checkAutomaticSharedDependencyGraph
   checkAutomaticSharedDependencyGraphFailure
   IO.println "Automatic keyed-layer graph checks passed."
+  checkZProvide
+  checkZProvideFailure
+  checkZProvideProgramFailure
+  IO.println "Z.provide checks passed."
 
 end StableServiceKeys
 
