@@ -482,6 +482,82 @@ def checkVerticalKeyedLayerFailure : IO Unit := do
     "release-github-from-config"
   ]
 
+/-! Pass-through composition keeps upstream and downstream outputs. -/
+
+abbrev PassThroughOutputs : List Entry.{1} :=
+  [githubEntry, reporterEntry]
+
+example : Row.Disjoint [githubEntry] [reporterEntry] := by decide
+
+example : ¬ Row.Disjoint [githubEntry] [githubEntry] := by decide
+
+def passThroughKeyedServices
+    (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Environment [configEntry, storeEntry])
+      (GithubBuildError ⊕ ReporterBuildError)
+      PassThroughOutputs :=
+  (githubFromConfigLayer events).andThenKeepFreshMeetJoin
+    (reporterFromGithubAndStoreLayer events)
+    (by rfl)
+    (by decide)
+
+def failingPassThroughKeyedServices
+    (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Environment [configEntry, storeEntry])
+      (GithubBuildError ⊕ ReporterBuildError)
+      PassThroughOutputs :=
+  (githubFromConfigLayer events).andThenKeepFreshInto
+    (failingReporterFromGithubAndStoreLayer events)
+    (by rfl)
+    (by decide)
+
+def passThroughProgram :
+    Z (Environment PassThroughOutputs) Empty String := zdo
+  let report <- withServiceZ
+    (entries := PassThroughOutputs) reporterEntry fun reporter =>
+      reporter.report
+  let count <- withServiceZ
+    (entries := PassThroughOutputs) githubEntry fun github =>
+      github.issueCount "lean"
+  pure s!"{report}:{count}"
+
+def checkPassThroughKeyedLayers : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect : Z
+      (Environment PassThroughOutputs)
+      (GithubBuildError ⊕ ReporterBuildError)
+      String := passThroughProgram
+  match <- (passThroughKeyedServices events).toLayer.run
+      heterogeneousInputs.environment effect
+      "stable-keyed-layer-pass-through" with
+  | some (.success "issue:2:2") => pure ()
+  | _ => throw (IO.userError "The pass-through keyed layers did not run.")
+  assertEvents "pass-through keyed layers" events [
+    "acquire-github-from-config",
+    "acquire-reporter",
+    "release-reporter",
+    "release-github-from-config"
+  ]
+
+def checkPassThroughKeyedLayerFailure : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect : Z
+      (Environment PassThroughOutputs)
+      (GithubBuildError ⊕ ReporterBuildError)
+      Unit := Z.serviceWith fun _ => ()
+  match <- (failingPassThroughKeyedServices events).toLayer.run
+      heterogeneousInputs.environment effect
+      "stable-keyed-layer-pass-through-failure" with
+  | some (.failure (.fail (.inr .unavailable))) => pure ()
+  | _ => throw (IO.userError "The pass-through layer error was not preserved.")
+  assertEvents "pass-through keyed layer failure" events [
+    "acquire-github-from-config",
+    "acquire-reporter",
+    "release-github-from-config"
+  ]
+
 def demo : IO Unit := do
   match <- run with
   | some (.success "issue:2") =>
@@ -503,6 +579,9 @@ def demo : IO Unit := do
   checkVerticalKeyedLayers
   checkVerticalKeyedLayerFailure
   IO.println "Vertical keyed-layer checks passed."
+  checkPassThroughKeyedLayers
+  checkPassThroughKeyedLayerFailure
+  IO.println "Pass-through keyed-layer checks passed."
 
 end StableServiceKeys
 

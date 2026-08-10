@@ -337,6 +337,70 @@ def andThenMeetJoin
           Environment.append leftEnvironment inputEnvironment)
       |>.mapError join.right⟩
 
+/--
+Vertically compose two keyed layers and keep both output rows. The rows must
+be disjoint so that pass-through does not silently select one duplicate value.
+-/
+def andThenKeepFreshInto
+    {inputEntries : List Entry}
+    [leftInput : Environment.CanProvide inputEntries leftInputs]
+    [rightInput : Environment.CanProvide
+      (Row.concat leftEntries inputEntries) rightInputs]
+    [leftError : ErrorChannel.CanInject ELeft E]
+    [rightError : ErrorChannel.CanInject ERight E]
+    (left : KeyedLayer (Environment leftInputs) ELeft leftEntries)
+    (right : KeyedLayer (Environment rightInputs) ERight rightEntries)
+    (_inputUnion :
+      Row.merge leftInputs (Row.missing rightInputs leftEntries) =
+        inputEntries)
+    (_disjoint : Row.Disjoint leftEntries rightEntries) :
+    KeyedLayer
+      (Environment inputEntries)
+      E
+      (Row.merge leftEntries rightEntries) :=
+  let adaptedLeft :=
+    left.layer.contramap leftInput.provide
+      |>.mapError leftError.inject
+  ⟨adaptedLeft.flatMap fun leftEnvironment =>
+    let adaptedRight :=
+      right.layer
+        |>.contramap (fun inputEnvironment =>
+          rightInput.provide <|
+            Environment.append leftEnvironment inputEnvironment)
+        |>.mapError rightError.inject
+    adaptedRight.map fun rightEnvironment =>
+      Environment.merge leftEnvironment rightEnvironment⟩
+
+/-- Infer the error channel for pass-through vertical composition. -/
+def andThenKeepFreshMeetJoin
+    {inputEntries : List Entry}
+    [join : ErrorChannel.Join ELeft ERight E]
+    [leftInput : Environment.CanProvide inputEntries leftInputs]
+    [rightInput : Environment.CanProvide
+      (Row.concat leftEntries inputEntries) rightInputs]
+    (left : KeyedLayer (Environment leftInputs) ELeft leftEntries)
+    (right : KeyedLayer (Environment rightInputs) ERight rightEntries)
+    (_inputUnion :
+      Row.merge leftInputs (Row.missing rightInputs leftEntries) =
+        inputEntries)
+    (_disjoint : Row.Disjoint leftEntries rightEntries) :
+    KeyedLayer
+      (Environment inputEntries)
+      E
+      (Row.merge leftEntries rightEntries) :=
+  let adaptedLeft :=
+    left.layer.contramap leftInput.provide
+      |>.mapError join.left
+  ⟨adaptedLeft.flatMap fun leftEnvironment =>
+    let adaptedRight :=
+      right.layer
+        |>.contramap (fun inputEnvironment =>
+          rightInput.provide <|
+            Environment.append leftEnvironment inputEnvironment)
+        |>.mapError join.right
+    adaptedRight.map fun rightEnvironment =>
+      Environment.merge leftEnvironment rightEnvironment⟩
+
 def toLayer (layer : KeyedLayer R E entries) :
     Layer R E (Environment entries) :=
   layer.layer

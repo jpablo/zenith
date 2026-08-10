@@ -427,6 +427,8 @@ The prototype provides these checked properties:
 - `Row.missing` computes the inputs that an upstream layer does not produce.
 - `KeyedLayer.andThenMeetJoin` and `andThenInto` provide vertical composition
   with inferred or selected error channels.
+- `KeyedLayer.andThenKeepFreshMeetJoin` and `andThenKeepFreshInto` keep the
+  upstream outputs in the final row.
 
 The checked examples show that two libraries can use the same local service
 name when their declaration namespaces differ. They also show that
@@ -468,12 +470,18 @@ The successful run releases `Reporter` before `Github`. If `Reporter`
 acquisition fails, the error stays on the right side of the selected sum and
 the acquired `Github` resource is released.
 
+The pass-through checks keep both `Github` and `Reporter` in the final output
+row. The program uses both services. Pass-through requires `Row.Disjoint`
+evidence for the two output rows. Thus, two acquired values cannot silently
+claim the same service key. Successful and failed downstream acquisition keep
+the same release behavior as ordinary vertical composition.
+
 The declaration command currently accepts only one named service type. It does
 not yet define identities for parameterized service types. Horizontal and
-vertical layer composition now handle different keyed inputs and errors. The
-next layer step is pass-through vertical composition. It must keep selected
-upstream outputs in the final row together with the downstream outputs and
-define the duplicate-key policy.
+vertical layer composition now handle different keyed inputs and errors, and
+pass-through uses a strict duplicate-key policy. The next layer step is a
+shared dependency graph. Two downstream branches must be able to use one
+upstream service while that service is acquired and released only once.
 
 Run the checked sketches from the project root:
 
