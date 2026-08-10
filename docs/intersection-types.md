@@ -256,6 +256,31 @@ provide the same services through `Environment.CanProvide`, but they are not
 definitionally equal. Direct uses of `Environment.Meet` and `Z.flatMapMeet`
 therefore remain order-dependent.
 
+## Error join in Zenith
+
+Zenith now has the dual production relation for error channels:
+
+```lean
+class ErrorChannel.Join (Left : Type u) (Right : Type v)
+    (Result : outParam (Type w)) where
+  left : Left → Result
+  right : Right → Result
+```
+
+The first rule keeps `Right` when `Left <: Right`. The second rule keeps
+`Left` when `Right <: Left`. A low-priority fallback returns `Sum Left Right`.
+Thus, `Empty` is the identity, equal errors collapse, and unrelated errors
+get separate tagged cases.
+
+`Z.flatMapJoin` combines different error channels for one environment.
+`Z.flatMapMeetJoin` combines both environment requirements and error
+channels. Runtime tests check both `Sum.inl` and `Sum.inr` injection.
+
+This relation is a capability join, not a complete encoding of Scala union
+types. `Sum` allocates a tag, direct joins remain order-dependent, and the
+class does not prove the universal least-upper-bound property. It is the
+runtime and type-inference foundation for a later normalized error union.
+
 ## `Monad` and `do` notation
 
 Lean's standard `Bind.bind` is homogeneous:
@@ -292,10 +317,10 @@ Lean's `do` parser and control-flow elaboration. It infers a fresh environment
 and error type for each action, then widens the action to the expected block
 type before `bind`.
 
-This version requires an expected `Z R E A` type. It verifies that `R`
-contains all requirements. It does not infer an intersection or other GLB.
-Ordinary `do` remains unchanged. A private action elaborator also widens bare
-terminal actions in control-flow branches before Lean fixes the branch type.
+The expected-type form requires an expected `Z R E A` type. It verifies that
+`R` contains all requirements. Ordinary `do` remains unchanged. A private
+action elaborator also widens bare terminal actions in control-flow branches
+before Lean fixes the branch type.
 
 The `zdo[E]` form gives each action a requirement slot, elaborates the block
 against one temporary environment, and normalizes the requirements before it
@@ -304,7 +329,7 @@ removes `Unit` and `PUnit`, and uses Lean's structural expression order.
 Thus, action order and product association do not change the inferred
 environment type. This also combines requirements across `if`, `match`,
 `try`, loops, `return`, and nested actions. The error type stays explicit
-because Zenith does not yet infer unions.
+because Zenith does not yet infer error joins.
 
 This is elaborator-level normalization, not a reified row type. The structural
 order is not a public service-key order. Explicit service keys are still
@@ -318,8 +343,9 @@ representation or compiler version.
 3. Test normalized `zdo[E]` inference on larger real programs.
 4. Decide whether cross-version API stability requires explicit service keys.
 5. If explicit keys are necessary, define them and prove the row meet laws.
-6. Add unions and error-channel least upper bounds after environment
-   meets are stable.
+6. Normalize `ErrorChannel.Join` results during `zdo` inference.
+7. Define how error inference interacts with `catch` before it becomes the
+   default notation behavior.
 
 Run the checked sketches from the project root:
 

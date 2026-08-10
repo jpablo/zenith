@@ -326,6 +326,23 @@ def flatMapMeet
   (effect.contramap meet.left).flatMap fun value =>
     (next value).contramap meet.right
 
+/-- Compose effects with different error types and infer their joined error. -/
+def flatMapJoin
+    [join : ErrorChannel.Join E₁ E₂ E]
+    (effect : Z R E₁ A)
+    (next : A -> Z R E₂ B) : Z R E B :=
+  (effect.mapFailure join.left).flatMap fun value =>
+    (next value).mapFailure join.right
+
+/-- Compose effects with different environment and error requirements. -/
+def flatMapMeetJoin
+    [meet : Environment.Meet R₁ R₂ R]
+    [join : ErrorChannel.Join E₁ E₂ E]
+    (effect : Z R₁ E₁ A)
+    (next : A -> Z R₂ E₂ B) : Z R E B :=
+  (effect.contramap meet.left).mapFailure join.left |>.flatMap fun value =>
+    (next value).contramap meet.right |>.mapFailure join.right
+
 def setInterruptStatus
     (effect : Z R E A)
     (interruptStatus : InterruptStatus)

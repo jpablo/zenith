@@ -60,6 +60,24 @@ its coercion system and recommends that users do not implement it directly.
 Zenith now limits its direct `CoeTC` instances to the `Z` and `Layer`
 boundaries.
 
+## Error-channel joins
+
+`ErrorChannel.Join Left Right Result` contains two injections into a common
+error type. It keeps one side when `CanConvert` can contain the other side.
+For unrelated errors, it uses `Sum Left Right`:
+
+```lean
+class ErrorChannel.Join (Left : Type u) (Right : Type v)
+    (Result : outParam (Type w)) where
+  left : Left → Result
+  right : Right → Result
+```
+
+`Z.flatMapJoin` uses this relation for effects with one environment.
+`Z.flatMapMeetJoin` also combines different environment requirements. This is
+a tagged runtime union. It is not a kernel union type or a proof of Scala's
+complete least-upper-bound rules.
+
 ## Precise public constructors
 
 The public constructors return the most precise `Z` type:
@@ -277,7 +295,9 @@ stable types for the same elaborated service types, but it is not yet a
 general keyed row encoding.
 
 The inferred form supports `if`, `match`, `try`, loops, `return`, and nested
-actions. Error unions are not inferred, which is why `zdo[E]` requires `E`.
+actions. Error joins are not yet inferred, which is why `zdo[E]` requires
+`E`. In particular, error inference must account for errors that `catch`
+removes before it can safely use the same syntactic collection method.
 
 This is a capability meet for Zenith environments. It is not a general Scala
 intersection type. Products remain noncommutative outside normalized

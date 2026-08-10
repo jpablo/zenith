@@ -478,6 +478,22 @@ def testZDoInferredControlFlow : IO Unit := do
   | .success "early" => pure ()
   | _ => failTest "zdo did not preserve return during environment inference"
 
+def testErrorChannelJoin : IO Unit := do
+  let leftFailure : Z Unit String Unit := Z.fail "left"
+  let leftProgram : Z Unit (String ⊕ IO.Error) Unit :=
+    Z.flatMapJoin leftFailure fun _ => Z.attempt (pure ())
+  match <- runProgram "error-join-left" leftProgram with
+  | .failure (.fail (.inl "left")) => pure ()
+  | _ => failTest "error join did not inject the left error"
+
+  let leftSuccess : Z Unit String Unit := Z.succeedNow ()
+  let rightProgram : Z Unit (String ⊕ IO.Error) Unit :=
+    Z.flatMapMeetJoin leftSuccess fun _ =>
+      Z.attempt (throw (IO.userError "right"))
+  match <- runProgram "error-join-right" rightProgram with
+  | .failure (.fail (.inr _)) => pure ()
+  | _ => failTest "error join did not inject the right error"
+
 def main : IO Unit := do
   testFinalizerFailure
   testIOErrorCatch
@@ -505,4 +521,5 @@ def main : IO Unit := do
   testZDoControlFlow
   testZDoInferredEnvironment
   testZDoInferredControlFlow
+  testErrorChannelJoin
   IO.println "All regression tests passed."

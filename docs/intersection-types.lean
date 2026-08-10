@@ -138,6 +138,15 @@ example : Environment.Meet Nat Nat Nat := inferInstance
 example : Environment.Meet Unit Nat Nat := inferInstance
 example : Environment.Meet Nat (String × Nat) (String × Nat) := inferInstance
 
+example : ErrorChannel.Join Empty Nat Nat := inferInstance
+example : ErrorChannel.Join Nat Empty Nat := inferInstance
+example : ErrorChannel.Join Nat Nat Nat := inferInstance
+example : ErrorChannel.Join String Nat (String ⊕ Nat) := inferInstance
+
+def joinedErrors : Z Unit (String ⊕ IO.Error) Nat :=
+  let first : Z Unit String Unit := Z.succeedNow ()
+  Z.flatMapMeetJoin first fun _ => Z.attempt (pure 42)
+
 abbrev InferredEnvironment
     {R : Type u} {E A : Type} (_ : Z R E A) : Type u := R
 
