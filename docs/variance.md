@@ -246,8 +246,7 @@ type. It first infers the precise type of each action. It then uses
 action before `bind`. A private action elaborator applies the same operation
 to terminal actions before Lean fixes their branch type.
 
-For linear blocks, `zdo[E]` infers the environment. `E` is the explicit error
-type:
+The `zdo[E]` form infers the environment. `E` is the explicit error type:
 
 ```lean
 def combinedEnvironment := zdo[Empty]
@@ -258,20 +257,21 @@ def combinedEnvironment := zdo[Empty]
 -- combinedEnvironment : Z (Nat × String) Empty (Nat × String)
 ```
 
-`Environment.Meet` combines the requirements at each bind. It keeps one side
-when that side already provides the other side. This removes duplicate
-requirements and makes `Unit` the identity. Otherwise, it uses a product.
-`Z.flatMapMeet` exposes the same operation without notation.
+The elaborator gives each action a private requirement slot. It elaborates
+the complete control-flow block against one temporary environment. It then
+combines the collected slots with `Environment.Meet` and resolves the
+environment projections. `Environment.Meet` keeps one side when that side
+already provides the other side. This removes duplicate requirements and
+makes `Unit` the identity. Otherwise, it uses a product. `Z.flatMapMeet`
+exposes the binary operation without notation.
 
 The inferred form works across environment universes. It also removes
 non-adjacent duplicate requirements. Product order follows the program's bind
 order, so reversed programs can infer different but mutually usable product
 types.
 
-The inferred form does not yet combine the requirements of separate
-control-flow branches. Use expected-environment `zdo` for `if`, `match`,
-`try`, loops, and `return`. Error unions are also not inferred, which is why
-`zdo[E]` requires `E`.
+The inferred form supports `if`, `match`, `try`, loops, `return`, and nested
+actions. Error unions are not inferred, which is why `zdo[E]` requires `E`.
 
 This is a capability meet for Zenith environments. It is not a general Scala
 intersection type and does not make products definitionally commutative.

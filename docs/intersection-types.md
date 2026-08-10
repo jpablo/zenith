@@ -297,21 +297,21 @@ contains all requirements. It does not infer an intersection or other GLB.
 Ordinary `do` remains unchanged. A private action elaborator also widens bare
 terminal actions in control-flow branches before Lean fixes the branch type.
 
-The `zdo[E]` form uses `Z.flatMapMeet` at each bind and infers the complete
-environment of a linear block. The error type stays explicit because Zenith
-does not yet infer unions. The inferred form does not yet merge separate
-control-flow branches.
+The `zdo[E]` form gives each action a requirement slot, elaborates the block
+against one temporary environment, and combines the slots with
+`Environment.Meet`. This also combines requirements across `if`, `match`,
+`try`, loops, `return`, and nested actions. The error type stays explicit
+because Zenith does not yet infer unions.
 
 ## Recommended research sequence
 
 1. Define the Scala fragment that Zenith and other target libraries need.
 2. Formalize its subtype preorder, intersection rules, and equivalence laws.
-3. Test the product-based `Environment.Meet` on real programs.
-4. Add meet operations for separate control-flow branches.
-5. Decide whether stable cross-program type equality requires normalized rows.
-6. If normalized rows are necessary, define stable service keys and prove the
+3. Test the product-based `Environment.Meet` on larger real programs.
+4. Decide whether stable cross-program type equality requires normalized rows.
+5. If normalized rows are necessary, define stable service keys and prove the
    meet laws.
-7. Add unions and error-channel least upper bounds only after environment
+6. Add unions and error-channel least upper bounds only after environment
    meets are stable.
 
 Run the checked sketches from the project root:

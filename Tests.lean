@@ -401,6 +401,65 @@ def testZDoInferredEnvironment : IO Unit := do
   | .success 4 => pure ()
   | _ => failTest "zdo did not infer a high-universe environment"
 
+def testZDoInferredControlFlow : IO Unit := do
+  let branchProgram (selectNat : Bool) := zdo[Empty]
+    if selectNat then
+      let _ <- Z.environment Nat
+      pure "number"
+    else
+      Z.environment String
+  let branchClosed : Z Unit Empty String :=
+    (branchProgram false).provideEnvironment (42, "service")
+  match <- runProgram "zdo-inferred-branch" branchClosed with
+  | .success "service" => pure ()
+  | _ => failTest "zdo did not infer the environment of an if branch"
+
+  let matchProgram (selection : Option Bool) := zdo[Empty]
+    match selection with
+    | some true =>
+        let _ <- Z.environment Nat
+        pure "number"
+    | _ => Z.environment String
+  let matchClosed : Z Unit Empty String :=
+    (matchProgram none).provideEnvironment (42, "matched")
+  match <- runProgram "zdo-inferred-match" matchClosed with
+  | .success "matched" => pure ()
+  | _ => failTest "zdo did not infer the environment of a match branch"
+
+  let catchProgram := zdo[IO.Error]
+    try
+      let _ <- Z.environment Nat
+      throw (IO.userError "expected")
+    catch _ =>
+      Z.environment String
+  let catchClosed : Z Unit IO.Error String :=
+    catchProgram.provideEnvironment (42, "recovered")
+  match <- runProgram "zdo-inferred-catch" catchClosed with
+  | .success "recovered" => pure ()
+  | _ => failTest "zdo did not infer the environment of a catch handler"
+
+  let loopProgram := zdo[Empty]
+    for _ in [1, 2] do
+      let _ <- Z.environment Nat
+      pure ()
+    Z.environment String
+  let loopClosed : Z Unit Empty String :=
+    loopProgram.provideEnvironment (42, "looped")
+  match <- runProgram "zdo-inferred-loop" loopClosed with
+  | .success "looped" => pure ()
+  | _ => failTest "zdo did not infer the environment of a loop"
+
+  let returnProgram (stopEarly : Bool) := zdo[Empty]
+    if stopEarly then
+      return "early"
+    let _ <- Z.environment Nat
+    Z.environment String
+  let returnClosed : Z Unit Empty String :=
+    (returnProgram true).provideEnvironment (42, "late")
+  match <- runProgram "zdo-inferred-return" returnClosed with
+  | .success "early" => pure ()
+  | _ => failTest "zdo did not preserve return during environment inference"
+
 def main : IO Unit := do
   testFinalizerFailure
   testIOErrorCatch
@@ -427,4 +486,5 @@ def main : IO Unit := do
   testZDoEnvironmentComposition
   testZDoControlFlow
   testZDoInferredEnvironment
+  testZDoInferredControlFlow
   IO.println "All regression tests passed."

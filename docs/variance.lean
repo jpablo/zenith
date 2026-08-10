@@ -106,12 +106,59 @@ def inferredPure := zdo[Empty]
 #check inferredPure
 example : Z Unit Empty Nat := inferredPure
 
-#check_failure (zdo[Empty]
-  if true then
+def inferredIf (selectNat : Bool) := zdo[Empty]
+  if selectNat then
     let _ <- Z.environment Nat
     pure "nat"
   else
-    Z.environment String)
+    Z.environment String
+
+#check inferredIf
+example : Bool → Z (Nat × String) Empty String := inferredIf
+
+def inferredMatch (selection : Option Bool) := zdo[Empty]
+  match selection with
+  | some true =>
+      let _ <- Z.environment Nat
+      pure "nat"
+  | _ => Z.environment String
+
+#check inferredMatch
+example : Option Bool → Z (Nat × String) Empty String := inferredMatch
+
+def inferredTry := zdo[IO.Error]
+  try
+    let _ <- Z.environment Nat
+    throw (IO.userError "expected")
+  catch _ =>
+    Z.environment String
+
+#check inferredTry
+example : Z (Nat × String) IO.Error String := inferredTry
+
+def inferredLoop := zdo[Empty]
+  for _ in [1, 2] do
+    let _ <- Z.environment Nat
+    pure ()
+  Z.environment String
+
+#check inferredLoop
+example : Z (Nat × String) Empty String := inferredLoop
+
+def inferredReturn (stopEarly : Bool) := zdo[Empty]
+  if stopEarly then
+    return "early"
+  let _ <- Z.environment Nat
+  Z.environment String
+
+#check inferredReturn
+example : Bool → Z (Nat × String) Empty String := inferredReturn
+
+def inferredNestedActions := zdo[Empty]
+  pure ((<- Z.environment Nat), (<- Z.environment String))
+
+#check inferredNestedActions
+example : Z (Nat × String) Empty (Nat × String) := inferredNestedActions
 
 example : Z Nat Empty (Nat × Nat) := zdo
   let first <- Z.environment Nat
