@@ -240,6 +240,13 @@ def shareInto
   ⟨adapted.share fun shared =>
     (use { layer := shared }).layer⟩
 
+/-- Keep only the requested output services. -/
+def projectOutput
+    [provider : Environment.CanProvide available required]
+    (self : KeyedLayer R E available) :
+    KeyedLayer R E required :=
+  ⟨self.layer.map provider.provide⟩
+
 /--
 Build two keyed layers in sequence and merge their outputs by stable key.
 The existing `Layer.zipWith` keeps acquisition failure and release behavior.

@@ -400,8 +400,12 @@ normalized errors, and ordered catch chains in a larger program.
 
 The reusable experiment is in
 [`Z/Experimental/StableServiceKeys.lean`](../Z/Experimental/StableServiceKeys.lean).
+The automatic graph elaborator is in
+[`Z/Experimental/KeyedLayerMake.lean`](../Z/Experimental/KeyedLayerMake.lean).
 The native checked example is
 [`Examples/StableServiceKeysDemo.lean`](../Examples/StableServiceKeysDemo.lean).
+Its compile-time diagnostic checks are in
+[`Examples/KeyedLayerMakeDiagnostics.lean`](../Examples/KeyedLayerMakeDiagnostics.lean).
 [`stable-service-keys.lean`](stable-service-keys.lean) is its documentation
 import.
 The experiment does not change the production `Z` environment. Each service
@@ -435,8 +439,12 @@ The prototype provides these checked properties:
 - `KeyedLayer.widenInput` lets one layer read its row from a larger graph input.
 - `KeyedLayer.shareInto` gives repeated branches one explicit memoization
   scope.
+- `KeyedLayer.projectOutput` removes services that a selected multi-output
+  provider produces but the expected result does not request.
 - `keyed_graph` gives every lexical node a sharing scope and lowers `>>>` and
   `++` graph bindings to the checked vertical and horizontal combinators.
+- `keyed_layer_make` reads its expected keyed input, error, and output rows. It
+  selects and composes an unordered list of candidate layers automatically.
 
 The checked examples show that two libraries can use the same local service
 name when their declaration namespaces differ. They also show that
@@ -508,19 +516,52 @@ Acquisition remains lazy, so an unused binding does not build its service. The
 node identity is lexical and exists only inside one `keyed_graph` block. The
 runtime `Layer` remains a shallow function value.
 
+The automatic graph check expresses the same graph as an unordered candidate
+list:
+
+```lean
+def applicationLayer :
+    KeyedLayer
+      (Environment [configEntry, storeEntry])
+      SharedGraphError
+      [metricsEntry, reporterEntry] := keyed_layer_make [
+  metricsLayer,
+  reporterLayer,
+  githubLayer
+]
+```
+
+The elaborator starts from the requested output row. It finds one provider for
+each output, and then repeats the search for that provider's inputs. An input
+that occurs in the expected input row stays external. The elaborator lowers
+the resulting graph to `keyed_graph`, `widenInput`, `andThenInto`, `zipFresh`,
+`shareInto`, and `projectOutput`. Candidate order does not define dependency
+order.
+
+The elaborator reports missing providers, multiple providers, dependency
+cycles, service-type conflicts, and overlapping selected outputs. It warns
+about unused candidates. Each selected candidate becomes one shared lexical
+node. The checked diamond graph therefore acquires and releases `Github` once.
+The failure check confirms that an acquisition failure releases the shared
+upstream service.
+
 The declaration command currently accepts only one named service type. It does
 not yet define identities for parameterized service types. Horizontal and
 vertical layer composition now handle different keyed inputs and errors, and
 pass-through uses a strict duplicate-key policy. Shared graphs work with an
-explicit scope, and `keyed_graph` generates that scope automatically. The
-first macro version still requires an explicit graph error type and an initial
-`widenInput` call. The next ergonomics step is an elaborator that reads the
-expected `KeyedLayer` result type and supplies both values automatically.
+explicit scope, `keyed_graph` generates that scope automatically, and
+`keyed_layer_make` now generates the graph. The first automatic version
+requires a complete expected `KeyedLayer` type. It uses exact stable-key
+matching and the selected error type's `ErrorChannel.CanInject` instances.
+Horizontal construction remains sequential because it lowers to `zipFresh`.
+It does not yet infer an external input row, infer a graph error, create a
+debug graph, or build independent layers in parallel.
 
 Run the checked sketches from the project root:
 
 ```sh
 lake env lean docs/intersection-types.lean
+lake build Examples.KeyedLayerMakeDiagnostics
 ```
 
 [scala-intersection-rules]: https://docs.scala-lang.org/scala3/reference/new-types/intersection-types-spec.html

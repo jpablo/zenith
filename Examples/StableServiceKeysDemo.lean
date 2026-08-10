@@ -1,4 +1,4 @@
-import Z.Experimental.StableServiceKeys
+import Z.Experimental.KeyedLayerMake
 
 /-!
 A separate experiment for stable, normalized service rows.
@@ -632,6 +632,33 @@ def failingSharedDependencyGraph
   yield outputs
 }
 
+/-!
+The automatic constructor accepts the same layers in dependency-independent
+order. The expected type supplies the external input, error, and output rows.
+-/
+
+def automaticSharedDependencyGraph
+    (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Environment [configEntry, storeEntry])
+      SharedGraphError
+      SharedGraphOutputs := keyed_layer_make [
+  metricsFromGithubLayer events,
+  reporterFromGithubAndStoreLayer events,
+  githubFromConfigLayer events
+]
+
+def automaticFailingSharedDependencyGraph
+    (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Environment [configEntry, storeEntry])
+      SharedGraphError
+      SharedGraphOutputs := keyed_layer_make [
+  failingMetricsFromGithubLayer events,
+  githubFromConfigLayer events,
+  reporterFromGithubAndStoreLayer events
+]
+
 def sharedGraphProgram :
     Z (Environment SharedGraphOutputs) Empty String := zdo
   let report <- withServiceZ
@@ -681,6 +708,43 @@ def checkSharedDependencyGraphFailure : IO Unit := do
     "release-github-from-config"
   ]
 
+def checkAutomaticSharedDependencyGraph : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect : Z
+      (Environment SharedGraphOutputs)
+      SharedGraphError
+      String := sharedGraphProgram
+  match <- (automaticSharedDependencyGraph events).toLayer.run
+      heterogeneousInputs.environment effect
+      "stable-keyed-layer-automatic-graph" with
+  | some (.success "issue:2:2") => pure ()
+  | _ => throw (IO.userError "The automatic dependency graph did not run.")
+  assertEvents "automatic dependency graph" events [
+    "acquire-github-from-config",
+    "acquire-metrics",
+    "acquire-reporter",
+    "release-reporter",
+    "release-metrics",
+    "release-github-from-config"
+  ]
+
+def checkAutomaticSharedDependencyGraphFailure : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect : Z
+      (Environment SharedGraphOutputs)
+      SharedGraphError
+      Unit := Z.serviceWith fun _ => ()
+  match <- (automaticFailingSharedDependencyGraph events).toLayer.run
+      heterogeneousInputs.environment effect
+      "stable-keyed-layer-automatic-graph-failure" with
+  | some (.failure (.fail (.inr (.inr .unavailable)))) => pure ()
+  | _ => throw (IO.userError "The automatic graph error was not preserved.")
+  assertEvents "automatic dependency graph failure" events [
+    "acquire-github-from-config",
+    "acquire-metrics",
+    "release-github-from-config"
+  ]
+
 def demo : IO Unit := do
   match <- run with
   | some (.success "issue:2") =>
@@ -708,6 +772,9 @@ def demo : IO Unit := do
   checkSharedDependencyGraph
   checkSharedDependencyGraphFailure
   IO.println "Shared keyed-layer graph checks passed."
+  checkAutomaticSharedDependencyGraph
+  checkAutomaticSharedDependencyGraphFailure
+  IO.println "Automatic keyed-layer graph checks passed."
 
 end StableServiceKeys
 
