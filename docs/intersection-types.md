@@ -396,6 +396,42 @@ representation or compiler version.
 The issue-sync case gives the first combined test of normalized environments,
 normalized errors, and ordered catch chains in a larger program.
 
+## Stable service-key prototype
+
+[`stable-service-keys.lean`](stable-service-keys.lean) is a separate prototype.
+It does not change the production `Z` environment. Each service entry contains
+an explicit numeric key and its service type. An insertion sort gives service
+rows a stable order and removes duplicate keys.
+
+The prototype provides these checked properties:
+
+- Opposite insertion orders produce the same row type.
+- A repeated service key produces one row entry.
+- `Contains` returns only the service type assigned to the selected entry.
+- `Builder.add` lets layer code add services without tuple-order knowledge.
+- A `Type 1` GitHub service runs through the existing `Z` and `Layer` types.
+
+The prototype also exposes the next design problem. Two different service
+entries can use the same numeric key. Normalization keeps one entry, but it
+does not report the conflict. A production design needs an extensible key
+identity and a compile-time conflict check. It must also define how separate
+libraries allocate keys without a central numeric registry.
+
+The entry stores a service type as data. Thus, a row uses one universe level
+above its service ceiling. Low-universe services must also be placed at that
+common ceiling. A closed key type with a separate service interpretation can
+avoid this cost, but a closed key type is not extensible across libraries.
+
+Run the checked runtime example with:
+
+```sh
+lake env lean --run docs/stable-service-keys.lean
+```
+
+The next step is to select and test a key identity scheme. Good candidates are
+qualified names, user-defined key types with stable ranks, or a registry that
+assigns unique identifiers.
+
 Run the checked sketches from the project root:
 
 ```sh
