@@ -375,6 +375,12 @@ The tests use local fake layers. They check normal sync, dry-run branching,
 source-error recovery, handler-error recovery, finalizer execution, and an
 uncaught store error from `syncRaw`.
 
+Run the standalone in-memory demo with:
+
+```sh
+lake exe githubIssueSync
+```
+
 This is elaborator-level normalization, not a reified row type. The structural
 order is not a public service-key order. Explicit service keys are still
 necessary if the API needs an order that is independent of Lean's expression

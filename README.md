@@ -48,6 +48,12 @@ find . -name "*.lean" | entr -s 'lake build'
 lake exe z
 ```
 
+Run the standalone GitHub issue-sync demo:
+
+```bash
+lake exe githubIssueSync
+```
+
 #### Regenerate svg diagrams
 
 (Graphviz needs to be installed)

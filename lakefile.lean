@@ -14,6 +14,10 @@ lean_exe tests {
   root := `Tests
 }
 
+lean_exe githubIssueSync {
+  root := `Examples.GithubIssueSyncDemo
+}
+
 lean_lib Z
 lean_lib Examples
 
