@@ -14,9 +14,9 @@ environment. It flattens and sorts those requirements before it applies
 `Environment.Meet`. The error type `E` stays explicit.
 
 Without a complete expected type, plain `zdo` also collects, normalizes, and
-joins action errors. Native `catch` needs a scoped error elaborator and is
-therefore rejected in this mode. Use `zdo[E]` or `Z.catchAllMeet` for caught
-errors.
+joins action errors. A native `catch` gets private environment and error
+inference scopes for its body and handler. The body error is handled, so only
+the handler error contributes to the enclosing block.
 
 The private `zdo_action%` elaborator adapts terminal actions before Lean fixes
 their branch type. This supports bare terminal actions in control-flow blocks.
@@ -28,6 +28,8 @@ open Lean.Parser.Term
 
 syntax (name := zdo) "zdo " doSeq : term
 syntax (name := zdoInfer) "zdo[" term "]" doSeq : term
+syntax (name := zdoScopedTry)
+  "zdo_scoped_try%[" term "," term "," term "," term "] " doElem : doElem
 
 namespace Z.Elab
 
@@ -200,9 +202,27 @@ private structure CollectedActions where
 
 private partial def collectActions
     (node : Syntax)
-    (environment error defaultError : Term) : TermElabM CollectedActions := do
+    (environment error defaultError : Term)
+    (scopeCatches : Bool) : TermElabM CollectedActions := do
   if node.getKind == ``Parser.Term.do then
     return { raw := node }
+  else if scopeCatches && node.getKind == ``Parser.Term.doTry then
+    let original : DoElem := ⟨node⟩
+    let environmentLevel ← mkFreshLevelMVar
+    let environmentRequirement ←
+      mkFreshExprMVar (mkSort environmentLevel.succ)
+    let errorRequirement ← mkFreshExprMVar (mkSort (.succ .zero))
+    let environmentRequirementSyntax ←
+      Term.exprToSyntax environmentRequirement
+    let errorRequirementSyntax ← Term.exprToSyntax errorRequirement
+    let wrapped ← `(doElem| zdo_scoped_try%[
+      $environment, $error, $environmentRequirementSyntax,
+      $errorRequirementSyntax] $original:doElem)
+    return {
+      raw := wrapped.raw
+      environmentRequirements := #[environmentRequirement]
+      errorRequirements := #[errorRequirement]
+    }
   else if node.getKind == ``Parser.Term.doExpr then
     let actionElement : DoElem := ⟨node⟩
     let `(doExpr| $action:term) := actionElement |
@@ -210,6 +230,7 @@ private partial def collectActions
     let (action, nestedEnvironments, nestedErrors) ← match action with
       | `(pure $value) => do
           let collected ← collectActions value.raw environment error defaultError
+            scopeCatches
           let value : Term := ⟨collected.raw⟩
           let action ← `(Z.succeedNow $value)
           pure (action, collected.environmentRequirements,
@@ -238,6 +259,7 @@ private partial def collectActions
           (init := (#[], #[], #[]))
           fun (arguments, environments, errors) argument => do
         let collected ← collectActions argument environment error defaultError
+          scopeCatches
         pure (arguments.push collected.raw,
           environments ++ collected.environmentRequirements,
           errors ++ collected.errorRequirements)
@@ -316,23 +338,298 @@ private def joinErrors (requirements : Array Expr) : TermElabM Expr := do
 private def inferError (requirements : Array Expr) : TermElabM Expr := do
   joinErrors (← normalizeErrorRequirements requirements)
 
-private partial def findCatch? (node : Syntax) : Option Syntax :=
-  if node.getKind == ``Parser.Term.do ||
-      node.getKind == ``Parser.Term.doExpr then
-    none
-  else if node.getKind == ``Parser.Term.doCatch ||
-      node.getKind == ``Parser.Term.doCatchMatch then
-    some node
-  else
-    match node with
-    | .node _ _ arguments => arguments.findSome? findCatch?
-    | _ => none
-
 private def successTypeFromExpected? (expectedType? : Option Expr) : TermElabM Expr := do
   if let some expectedType := expectedType? then
     if let some expected ← expectedZ? expectedType then
       return expected.success
   mkFreshExprMVar (mkSort (.succ .zero))
+
+/-- Run a nested `do` region with one fixed Zenith monad. -/
+private def withZMonad
+    (expected : ExpectedZ)
+    (action : DoElabM α) : DoElabM α := do
+  let expectedType := mkZType expected.level expected.environment
+    expected.error expected.success
+  let ops := { zDoOps expected with
+    mkMonadApp := fun success =>
+      pure (mkZType expected.level expected.environment expected.error success)
+  }
+  let localContext ← mkContext (some expectedType) ops
+  withReader (fun context => { context with
+    monadInfo := localContext.monadInfo
+    ops := localContext.ops
+  }) action
+
+private structure ScopedSequence where
+  effect : Expr
+  environment : Expr
+  error : Expr
+  lifter : EffectForwarder
+
+/-
+Lean's standard return forwarder leaves the normal result of `Except` fresh.
+The body and handler use separate monads, so use the concrete packed result
+that both scopes share.
+-/
+private def mkScopedReturn
+    (base : ControlStack)
+    (liftedResultType returnValue : Expr) : DoElabM Expr := do
+  let monadInfo := { (← read).monadInfo with m := (← base.m) }
+  let monadInstance ← Term.mkInstMVar <|
+    mkApp (mkConst ``Monad [monadInfo.u, monadInfo.v]) monadInfo.m
+  let returnType ← inferType returnValue
+  let liftedResultType ← whnf liftedResultType
+  unless liftedResultType.isAppOfArity ``Except 2 do
+    throwError "an early-return scope must have an `Except` control result"
+  let continuationType := liftedResultType.getAppArgs[1]!
+  let expected ← mkMonadApp (← read).doBlockResultType
+  let actual := mkApp monadInfo.m <| mkApp2
+    (mkConst ``Except [monadInfo.u, monadInfo.u])
+    returnType continuationType
+  unless ← isDefEq expected actual do
+    throwError "failed to build a scoped early return"
+  base.runInBase <| mkApp5
+    (mkConst ``EarlyReturnT.return [monadInfo.u, monadInfo.v])
+    returnType monadInfo.m continuationType monadInstance returnValue
+
+/-- Forward `return`, mutable state, `break`, and `continue` into a scoped monad. -/
+private def liftScopedEffects
+    (lifter : EffectForwarder)
+    (elaborate : DoElemCont → DoElabM Expr) : DoElabM Expr := do
+  let oldBreakCont ← getBreakCont
+  let oldContinueCont ← getContinueCont
+  let oldReturnCont ← getReturnCont
+  let breakCont := match oldBreakCont, lifter.breakBase? with
+    | some _, some breakBase =>
+        some <| breakBase.mkBreak (lifter.continueBase?.isSome)
+    | _, _ => oldBreakCont
+  let continueCont := match oldContinueCont, lifter.continueBase? with
+    | some _, some continueBase => some <| continueBase.mkContinue
+    | _, _ => oldContinueCont
+  let returnCont := match lifter.returnBase? with
+    | some returnBase => { oldReturnCont with
+        k := mkScopedReturn returnBase lifter.liftedDoBlockResultType }
+    | none => oldReturnCont
+  let contInfo := ContInfo.toContInfoRef {
+    breakCont
+    continueCont
+    returnCont
+  }
+  let pureCont := { lifter.origCont with
+    k := lifter.liftedStack.mkPure lifter.origCont.resultName
+    kind := .duplicable
+  }
+  withReader (fun context => { context with
+    contInfo
+    doBlockResultType := lifter.liftedDoBlockResultType
+  }) <| elaborate pureCont
+
+private def elabScopedSequence
+    (sequence : DoSeq)
+    (continuation : DoElemCont)
+    (controlInfo : ControlInfo) : DoElabM ScopedSequence := do
+  let level ← mkFreshLevelMVar
+  let environment ← mkFreshExprMVar (mkSort level.succ)
+  let error ← mkFreshExprMVar (mkSort (.succ .zero))
+  let environmentSyntax ← Term.exprToSyntax environment
+  let errorSyntax ← Term.exprToSyntax error
+  let emptyErrorSyntax ← Term.exprToSyntax (mkConst ``Empty)
+  let collected ← collectActions sequence.raw environmentSyntax errorSyntax
+    emptyErrorSyntax true
+  let sequence : DoSeq := ⟨collected.raw⟩
+  let expected : ExpectedZ := {
+    level
+    environment
+    error
+    success := continuation.resultType
+  }
+  let lifter ← withZMonad expected <|
+    EffectForwarder.ofCont controlInfo continuation
+  let effect ← withZMonad expected <|
+    liftScopedEffects lifter (elabDoSeq sequence)
+  let inferredEnvironment ←
+    inferEnvironment collected.environmentRequirements
+  unless ← isDefEq environment inferredEnvironment do
+    throwErrorAt sequence "failed to infer a scoped `zdo` environment"
+  let inferredError ← inferError collected.errorRequirements
+  unless ← isDefEq error inferredError do
+    throwErrorAt sequence "failed to infer a scoped `zdo` error type"
+  return {
+    effect
+    environment := ← instantiateMVars environment
+    error := ← instantiateMVars error
+    lifter
+  }
+
+private structure ScopedHandler where
+  function : Expr
+  environment : Expr
+  error : Expr
+  lifter : EffectForwarder
+  catchesIOError : Bool
+
+private def elabScopedHandler
+    (catchClause : TSyntax ``doCatch)
+    (bodyError : Expr)
+    (continuation : DoElemCont)
+    (controlInfo : ControlInfo) : DoElabM ScopedHandler := do
+  let `(doCatch| catch $name $[: $errorType?]? => $sequence) := catchClause |
+    throwUnsupportedSyntax
+  let bodyError ← whnf (← instantiateMVars bodyError)
+  let annotatedError? ← match errorType? with
+    | some errorType => pure (some (← Term.elabType errorType))
+    | none => pure none
+  let catchesIOError ← match annotatedError? with
+    | some annotatedError =>
+        if ← isDefEq annotatedError bodyError then
+          pure false
+        else if ← isDefEq annotatedError (mkConst ``IO.Error) then
+          unless bodyError.isConstOf ``Empty do
+            throwErrorAt catchClause
+              "an `IO.Error` catch requires an `Empty` typed error channel"
+          pure true
+        else
+          throwErrorAt catchClause
+            "the catch type must match the protected `zdo` error type"
+    | none => pure (bodyError.isConstOf ``Empty)
+  let caughtError :=
+    if catchesIOError then Lean.mkConst ``IO.Error else bodyError
+  let caughtErrorSyntax ← Term.exprToSyntax caughtError
+  let binder := Term.mkExplicitBinder name caughtErrorSyntax
+  controlAtTermElabM fun runInBase => do
+    Term.elabBinder binder fun error => runInBase do
+      let handler ←
+        elabScopedSequence sequence continuation controlInfo
+      let function ← mkLambdaFVars #[error] handler.effect
+      return {
+        function
+        environment := handler.environment
+        error := handler.error
+        lifter := handler.lifter
+        catchesIOError
+      }
+
+private def combineScopedCatch
+    (body : ScopedSequence)
+    (handler : ScopedHandler) : DoElabM (Expr × Expr) := do
+  let bodyLevel ← getDecLevel body.environment
+  let handlerLevel ← getDecLevel handler.environment
+  let combinedLevel ← mkFreshLevelMVar
+  let combinedEnvironment ← mkFreshExprMVar (mkSort combinedLevel.succ)
+  let meetType := mkApp3
+    (mkConst ``Environment.Meet [bodyLevel, handlerLevel, combinedLevel])
+    body.environment handler.environment combinedEnvironment
+  let meet ← Term.mkInstMVar meetType
+  let packedType := body.lifter.liftedDoBlockResultType
+  unless ← isDefEq packedType handler.lifter.liftedDoBlockResultType do
+    throwError "the protected body and catch handler use different control types"
+  let conversionType := mkApp2 (mkConst ``CanConvert [.zero, .zero])
+    packedType packedType
+  let conversion ← Term.mkInstMVar conversionType
+  let effect := if handler.catchesIOError then
+      mkAppN (mkConst ``Z.catchIOErrorMeet
+          [bodyLevel, handlerLevel, combinedLevel]) #[
+        body.environment,
+        packedType,
+        handler.environment,
+        combinedEnvironment,
+        packedType,
+        handler.error,
+        body.effect,
+        meet,
+        conversion,
+        handler.function]
+    else
+      mkAppN (mkConst ``Z.catchAllMeet
+          [bodyLevel, handlerLevel, combinedLevel]) #[
+        body.environment,
+        body.error,
+        packedType,
+        body.effect,
+        handler.environment,
+        combinedEnvironment,
+        packedType,
+        handler.error,
+        meet,
+        conversion,
+        handler.function]
+  return (effect, combinedEnvironment)
+
+@[doElem_control_info zdoScopedTry]
+private def inferScopedTryControlInfo : ControlInfoHandler := fun stx => do
+  let `(doElem| zdo_scoped_try%[$_, $_, $_, $_] $original:doElem) := stx |
+    throwUnsupportedSyntax
+  inferControlInfoElem original
+
+@[doElem_elab zdoScopedTry]
+private def elabZDoScopedTry : DoElab := fun stx continuation => do
+  let `(doElem| zdo_scoped_try%[
+      $targetEnvironmentSyntax, $targetErrorSyntax,
+      $environmentRequirementSyntax, $errorRequirementSyntax]
+      $original:doElem) := stx | throwUnsupportedSyntax
+  let `(doTry| try $bodySequence:doSeq $[$catches]*
+      $[finally $finallySequence?]?) := original | throwUnsupportedSyntax
+  if finallySequence?.isSome then
+    throwErrorAt original
+      "plain inferred `zdo` does not yet support a native `finally` block"
+  unless catches.size == 1 do
+    throwErrorAt original
+      "plain inferred `zdo` requires exactly one catch clause"
+  checkMutVarsForShadowing <| catches.filterMap (fun
+    | `(doCatch| catch $name:ident $[: $_]? => $_) => some name
+    | _ => none)
+  let controlInfo ← inferControlInfoElem original
+  let body ← elabScopedSequence bodySequence continuation controlInfo
+  let catchClause : TSyntax ``doCatch ← match catches[0]! with
+    | `(doCatchMatch| catch $alternatives) =>
+        `(doCatch| catch error => match error with $alternatives)
+    | `(doCatch| $catchClause) => pure catchClause
+  let handler ← elabScopedHandler catchClause body.error
+    continuation controlInfo
+  let (caught, combinedEnvironment) ← combineScopedCatch body handler
+  let environmentRequirement ←
+    Term.elabType environmentRequirementSyntax
+  unless ← isDefEq environmentRequirement combinedEnvironment do
+    throwErrorAt stx "failed to collect a scoped `zdo` environment"
+  let errorRequirement ← Term.elabType errorRequirementSyntax
+  unless ← isDefEq errorRequirement handler.error do
+    throwErrorAt stx "failed to collect a scoped `zdo` error type"
+  let packedType := body.lifter.liftedDoBlockResultType
+  let targetEnvironment ← Term.elabType targetEnvironmentSyntax
+  let targetError ← Term.elabType targetErrorSyntax
+  let targetLevel ← getDecLevel targetEnvironment
+  let combinedEnvironment ← instantiateMVars combinedEnvironment
+  let handlerError ← instantiateMVars handler.error
+  let combinedLevel ← getDecLevel combinedEnvironment
+  let environmentInstanceType := mkApp2
+    (mkConst ``Environment.CanProvide [targetLevel, combinedLevel])
+    targetEnvironment combinedEnvironment
+  let errorInstanceType := mkApp2
+    (mkConst ``ErrorChannel.CanInject [.zero, .zero])
+    handlerError targetError
+  let environmentInstance ← Term.mkInstMVar environmentInstanceType
+  let errorInstance ← Term.mkInstMVar errorInstanceType
+  let adapted := mkAppN
+    (mkConst ``Z.intoJoined [targetLevel, combinedLevel]) #[
+      targetEnvironment,
+      combinedEnvironment,
+      handlerError,
+      targetError,
+      packedType,
+      environmentInstance,
+      errorInstance,
+      caught]
+  let currentType := mkApp (← read).monadInfo.m packedType
+  let adapted ← Term.ensureHasType currentType adapted
+  let restoreExpected : ExpectedZ := {
+    level := targetLevel
+    environment := targetEnvironment
+    error := targetError
+    success := (← read).doBlockResultType
+  }
+  withZMonad restoreExpected do
+    let restored ← body.lifter.restoreCont
+    (restored.withDeadCodeFromInfo controlInfo).mkBindUnlessPure adapted
 
 private def elabZDoFixed
     (sequence : DoSeq)
@@ -349,9 +646,6 @@ private def elabZDoInferAll
     (stx : Syntax)
     (sequence : DoSeq)
     (expectedType? : Option Expr) : TermElabM Expr := do
-  if let some catchSyntax := findCatch? sequence.raw then
-    throwErrorAt catchSyntax
-      "plain `zdo` cannot infer errors across `catch`; use `zdo[E]`"
   let level ← mkFreshLevelMVar
   let environment ← mkFreshExprMVar (mkSort level.succ)
   let error ← mkFreshExprMVar (mkSort (.succ .zero))
@@ -361,7 +655,7 @@ private def elabZDoInferAll
   let errorSyntax ← Term.exprToSyntax error
   let emptyErrorSyntax ← Term.exprToSyntax (mkConst ``Empty)
   let collected ← collectActions sequence.raw environmentSyntax errorSyntax
-    emptyErrorSyntax
+    emptyErrorSyntax true
   let sequence : DoSeq := ⟨collected.raw⟩
   let internalExpectedType := mkZType level environment error success
   let result ← elabDoWith (zDoOps expected) sequence internalExpectedType
@@ -412,6 +706,7 @@ def elabZDoInfer : TermElab := fun stx expectedType? => do
   let environmentSyntax ← Term.exprToSyntax environment
   let errorSyntax ← Term.exprToSyntax error
   let collected ← collectActions sequence.raw environmentSyntax errorSyntax errorSyntax
+    false
   let sequence : DoSeq := ⟨collected.raw⟩
   let internalExpectedType := mkZType level environment error success
   let result ← elabDoWith (zDoOps expected) sequence internalExpectedType

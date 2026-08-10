@@ -137,6 +137,20 @@ namespace Z
     (self.contramap meet.left).catchAll fun error =>
       (errorHandler error).contramap meet.right
 
+  /-- Handle an `IO.Error` defect with an effect that has a different environment. -/
+  def catchIOErrorMeet
+      (self : Z R Empty A)
+      [meet : Environment.Meet R R₁ R₂]
+      [conversion : A <: A₁]
+      (errorHandler : IO.Error -> Z R₁ E₁ A₁) : Z R₂ E₁ A₁ :=
+    (self.contramap meet.left).foldCauseZ
+      (fun
+        | .die error => (errorHandler error).contramap meet.right
+        | .interrupt =>
+            (Z.failCause (R := R₂) (E := E₁) .interrupt).map impossible
+        | .fail error => nomatch error)
+      (fun value => pure (conversion.coe value))
+
   def zipWith (other : Z R E A₁) (f : A -> A₁ -> A₃) : Z R E A₃ := do
     return f (<- self) (<- other)
 

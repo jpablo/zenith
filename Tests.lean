@@ -547,6 +547,111 @@ def testZDoInferredErrors : IO Unit := do
   | .success 46 => pure ()
   | _ => failTest "zdo did not infer both environment and error parameters"
 
+def testZDoInferredCatch : IO Unit := do
+  let typedCaught := zdo
+    try
+      let _ <- Z.environment Nat
+      let _ : Nat <- (Z.fail "handled" : Z Unit String Nat)
+      pure 0
+    catch _ =>
+      (Z.environment String).map String.length
+  let typedCaughtClosed : Z Unit Empty Nat :=
+    typedCaught.provideEnvironment (42, "done")
+  match <- runProgram "zdo-inferred-typed-catch" typedCaughtClosed with
+  | .success 4 => pure ()
+  | _ => failTest "zdo retained a handled typed error"
+
+  let failingHandler := zdo
+    try
+      let _ : Nat <- (Z.fail "handled" : Z Unit String Nat)
+      pure 0
+    catch _ =>
+      Z.attempt (throw (IO.userError "handler"))
+  let failingHandler : Z Unit IO.Error Nat := failingHandler
+  match <- runProgram "zdo-inferred-catch-handler-error" failingHandler with
+  | .failure (.fail _) => pure ()
+  | _ => failTest "zdo did not expose a catch handler error"
+
+  let defectCaught := zdo
+    try
+      let _ : Nat <- throw (IO.userError "defect")
+      pure 0
+    catch _ =>
+      Z.succeedNow 7
+  let defectCaught : Z Unit Empty Nat := defectCaught
+  match <- runProgram "zdo-inferred-defect-catch" defectCaught with
+  | .success 7 => pure ()
+  | _ => failTest "zdo did not catch an IO.Error defect"
+
+  let earlyReturn (stop : Bool) := zdo
+    try
+      if stop then return 7
+      let _ : Nat <- (Z.fail "handled" : Z Unit String Nat)
+      pure ()
+    catch _ =>
+      pure ()
+    pure 9
+  let earlyReturn : Z Unit Empty Nat := earlyReturn true
+  match <- runProgram "zdo-inferred-catch-return" earlyReturn with
+  | .success 7 => pure ()
+  | _ => failTest "zdo did not forward an early return through catch"
+
+  let handlerReturn := zdo
+    try
+      let _ : Nat <- (Z.fail "handled" : Z Unit String Nat)
+      pure ()
+    catch _ =>
+      return 8
+    pure 9
+  let handlerReturn : Z Unit Empty Nat := handlerReturn
+  match <- runProgram "zdo-inferred-handler-return" handlerReturn with
+  | .success 8 => pure ()
+  | _ => failTest "zdo did not forward a return from a catch handler"
+
+  let mutableState := zdo
+    let mut value := 0
+    try
+      value := 1
+      let _ : Nat <- (Z.fail "handled" : Z Unit String Nat)
+      pure ()
+    catch _ =>
+      value := 2
+      pure ()
+    pure value
+  let mutableState : Z Unit Empty Nat := mutableState
+  match <- runProgram "zdo-inferred-catch-state" mutableState with
+  | .success 2 => pure ()
+  | _ => failTest "zdo did not forward mutable state through catch"
+
+  let loopControl := zdo
+    let mut total := 0
+    for value in [1, 2, 3] do
+      try
+        if value == 1 then continue
+        if value == 3 then break
+        total := total + value
+        pure ()
+      catch _ =>
+        pure ()
+    pure total
+  let loopControl : Z Unit Empty Nat := loopControl
+  match <- runProgram "zdo-inferred-catch-loop-control" loopControl with
+  | .success 2 => pure ()
+  | _ => failTest "zdo did not forward loop control through catch"
+
+  let patternCatch := zdo
+    try
+      let _ : Nat <-
+        (Z.fail (some "handled") : Z Unit (Option String) Nat)
+      pure 0
+    catch
+      | some text => pure text.length
+      | none => pure 0
+  let patternCatch : Z Unit Empty Nat := patternCatch
+  match <- runProgram "zdo-inferred-pattern-catch" patternCatch with
+  | .success 7 => pure ()
+  | _ => failTest "zdo did not elaborate a catch pattern"
+
 def main : IO Unit := do
   testFinalizerFailure
   testIOErrorCatch
@@ -576,4 +681,5 @@ def main : IO Unit := do
   testZDoInferredControlFlow
   testErrorChannelJoin
   testZDoInferredErrors
+  testZDoInferredCatch
   IO.println "All regression tests passed."

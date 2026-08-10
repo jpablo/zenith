@@ -339,14 +339,16 @@ in this `zdo[E]` form.
 
 Without a complete expected type, plain `zdo` applies the same method to both
 the environment and the error channel. It supports binds, `if`, `match`,
-loops, `return`, and nested actions. It rejects native `catch`: Lean's
-standard elaborator fixes one monad for the complete block, while a handler
-must remove the body error before it joins the continuation error.
+loops, `return`, nested actions, and native `catch`. The scoped `doTry`
+elaborator gives the protected body and handler different monads. It removes
+the body error before it joins the handler and continuation errors. It also
+forwards mutable state and nonlocal control effects through Lean's control
+transformers.
 
-`Z.catchAllMeet` provides the compositional form now. It combines the body and
-handler environments, removes the handled error, and exposes only the handler
-error. A future scoped `doTry` elaborator can use the same operation for native
-syntax.
+`Z.catchAllMeet` provides the direct compositional form. It combines the body
+and handler environments, removes the handled error, and exposes only the
+handler error. Plain inferred native syntax currently requires one catch
+clause and does not support `finally`.
 
 This is elaborator-level normalization, not a reified row type. The structural
 order is not a public service-key order. Explicit service keys are still
@@ -361,7 +363,8 @@ representation or compiler version.
 4. Decide whether cross-version API stability requires explicit service keys.
 5. If explicit keys are necessary, define them and prove the row meet laws.
 6. Test normalized error inference on larger real programs.
-7. Add a scoped `doTry` elaborator if native inferred `catch` is required.
+7. Extend scoped `doTry` inference to multiple catch clauses and `finally` if
+   real programs require these forms.
 
 Run the checked sketches from the project root:
 

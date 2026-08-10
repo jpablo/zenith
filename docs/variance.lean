@@ -317,11 +317,25 @@ def inferredAllLoop := zdo
 #check inferredAllLoop
 example : Z Unit (IO.Error ⊕ String) Nat := inferredAllLoop
 
-#check_failure (zdo
+def inferredTypedCatch := zdo
   try
-    throw (IO.userError "expected")
+    let _ : Nat <- (Z.fail "expected" : Z Nat String Nat)
+    pure 0
   catch _ =>
-    pure ())
+    (Z.environment String).map String.length
+
+#check inferredTypedCatch
+example : Z (Nat × String) Empty Nat := inferredTypedCatch
+
+def inferredDefectCatch := zdo
+  try
+    let _ : Nat <- throw (IO.userError "expected")
+    pure 0
+  catch _ =>
+    Z.succeedNow 1
+
+#check inferredDefectCatch
+example : Z Unit Empty Nat := inferredDefectCatch
 
 def explicitCaughtAction : Z Unit IO.Error Nat := zdo
   try

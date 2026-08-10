@@ -316,11 +316,23 @@ A bare `throw IO.Error` keeps Zenith's existing meaning: it creates a defect
 in `Z R Empty A`. It does not add `IO.Error` to the typed error channel. Use
 `Z.fail` for a typed error value or `Z.attempt` for an `IO` failure.
 
-This form supports binds, `if`, `match`, loops, `return`, and nested actions.
-It rejects native `try/catch` because Lean fixes one monad for the complete
-standard `do` block. Use `zdo[E]` when the error type is explicit. For
-compositional inference, `Z.catchAllMeet` combines the body and handler
-environments and exposes only the handler error.
+This form supports binds, `if`, `match`, loops, `return`, nested actions, and
+native `try/catch`. A catch creates separate inference scopes for the
+protected body and the handler. The body error is handled. Thus, only the
+handler error contributes to the enclosing block. The two environment
+requirements are combined and then included in the enclosing normalized
+environment.
+
+The scoped catch forwards early `return`, mutable variables, `break`, and
+`continue` through the same control transformers that Lean uses for standard
+`do` notation. A protected body with error type `Empty` uses the existing
+`IO.Error` defect catch behavior. A body with a nonempty error channel catches
+that typed error. Catch patterns are supported. Plain inferred `zdo` currently
+requires one catch clause and does not support `finally`; `zdo[E]` remains
+available when the complete error type must be explicit.
+
+`Z.catchAllMeet` remains the direct compositional form. It combines the body
+and handler environments and exposes only the handler error.
 
 This is a capability meet for Zenith environments. It is not a general Scala
 intersection type. Products remain noncommutative outside normalized
