@@ -656,24 +656,19 @@ private def elabZDoScopedTry : DoElab := fun stx continuation => do
   if catches.isEmpty && finallySequence?.isNone then
     throwErrorAt original
       "a native `try` requires a catch or finally clause"
-  unless catches.size ≤ 1 do
-    throwErrorAt original
-      "plain inferred `zdo` supports at most one catch clause"
   checkMutVarsForShadowing <| catches.filterMap (fun
     | `(doCatch| catch $name:ident $[: $_]? => $_) => some name
     | _ => none)
   let controlInfo ← inferControlInfoElem original
   let body ← elabScopedSequence bodySequence continuation controlInfo
-  let caught ← if catches.isEmpty then
-      pure body
-    else do
-      let catchClause : TSyntax ``doCatch ← match catches[0]! with
+  let caught ← catches.foldlM (init := body) fun current clause => do
+      let catchClause : TSyntax ``doCatch ← match clause with
         | `(doCatchMatch| catch $alternatives) =>
             `(doCatch| catch error => match error with $alternatives)
         | `(doCatch| $catchClause) => pure catchClause
-      let handler ← elabScopedHandler catchClause body.error
+      let handler ← elabScopedHandler catchClause current.error
         continuation controlInfo
-      combineScopedCatch body handler
+      combineScopedCatch current handler
   let completed ← match finallySequence? with
     | none => pure caught
     | some finallySequence => do

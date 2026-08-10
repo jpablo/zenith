@@ -337,6 +337,19 @@ def inferredDefectCatch := zdo
 #check inferredDefectCatch
 example : Z Unit Empty Nat := inferredDefectCatch
 
+def inferredMultipleCatch := zdo
+  try
+    let _ : Nat <- (Z.fail "body" : Z Unit String Nat)
+    pure 0
+  catch _ =>
+    let _ : Nat <- (Z.fail 5 : Z Unit Nat Nat)
+    pure 1
+  catch number =>
+    pure (number + 1)
+
+#check inferredMultipleCatch
+example : Z Unit Empty Nat := inferredMultipleCatch
+
 def inferredFinally := zdo
   try
     let _ : Nat <- (Z.fail "body" : Z Unit String Nat)

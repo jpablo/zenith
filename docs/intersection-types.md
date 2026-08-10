@@ -349,8 +349,8 @@ transformers.
 body and handler environments, removes the handled error, and exposes only the
 handler error. `Z.ensuringMeetJoin` provides the corresponding finalizer form.
 It combines environment and error requirements and gives a finalizer failure
-precedence. Plain inferred native syntax currently supports at most one catch
-clause.
+precedence. Plain inferred native syntax supports multiple catch clauses in
+source order. A later clause can handle an error from an earlier handler.
 
 This is elaborator-level normalization, not a reified row type. The structural
 order is not a public service-key order. Explicit service keys are still
@@ -365,8 +365,7 @@ representation or compiler version.
 4. Decide whether cross-version API stability requires explicit service keys.
 5. If explicit keys are necessary, define them and prove the row meet laws.
 6. Test normalized error inference on larger real programs.
-7. Extend scoped `doTry` inference to multiple catch clauses if real programs
-   require this form.
+7. Test ordered, heterogeneous catch chains on larger real programs.
 
 Run the checked sketches from the project root:
 

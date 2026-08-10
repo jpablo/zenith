@@ -327,8 +327,10 @@ The scoped catch forwards early `return`, mutable variables, `break`, and
 `continue` through the same control transformers that Lean uses for standard
 `do` notation. A protected body with error type `Empty` uses the existing
 `IO.Error` defect catch behavior. A body with a nonempty error channel catches
-that typed error. Catch patterns are supported. Plain inferred `zdo` currently
-supports at most one catch clause.
+that typed error. Catch patterns and multiple catch clauses are supported.
+Clauses use Lean's standard source order. A later clause handles an error from
+the protected body or from an earlier handler. A successful handler skips all
+later clauses.
 
 A finalizer has its own inferred environment and error. Its requirements are
 combined with the protected effect. It runs after success or failure and

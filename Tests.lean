@@ -652,6 +652,90 @@ def testZDoInferredCatch : IO Unit := do
   | .success 7 => pure ()
   | _ => failTest "zdo did not elaborate a catch pattern"
 
+def testZDoInferredMultipleCatch : IO Unit := do
+  let orderedChain := zdo
+    try
+      let _ : Nat ← (Z.fail "body" : Z Unit String Nat)
+      pure 0
+    catch _ =>
+      let _ : Nat ← (Z.fail 5 : Z Unit Nat Nat)
+      pure 1
+    catch number =>
+      pure (number + 1)
+  let orderedChain : Z Unit Empty Nat := orderedChain
+  match ← runProgram "zdo-inferred-multiple-catch-order" orderedChain with
+  | .success 6 => pure ()
+  | _ => failTest "a later catch did not handle an earlier handler error"
+
+  let secondCalled ← IO.mkRef false
+  let firstRecovery := zdo
+    try
+      let _ : Nat ← (Z.fail "body" : Z Unit String Nat)
+      pure 0
+    catch _ =>
+      pure 7
+    catch _ =>
+      let _ ← Z.succeed <| secondCalled.set true
+      pure 8
+  let firstRecovery : Z Unit Empty Nat := firstRecovery
+  match ← runProgram "zdo-inferred-multiple-catch-skip" firstRecovery with
+  | .success 7 => pure ()
+  | _ => failTest "a later catch changed an earlier successful recovery"
+  assertTrue "a later catch ran after an earlier successful recovery"
+    (!(← secondCalled.get))
+
+  let escapingError := zdo
+    try
+      let _ : Nat ← (Z.fail "body" : Z Unit String Nat)
+      pure 0
+    catch _ =>
+      let _ : Nat ← (Z.fail 5 : Z Unit Nat Nat)
+      pure 1
+    catch _ =>
+      let _ : Nat ← (Z.fail true : Z Unit Bool Nat)
+      pure 2
+  let escapingError : Z Unit Bool Nat := escapingError
+  match ← runProgram "zdo-inferred-multiple-catch-error" escapingError with
+  | .failure (.fail true) => pure ()
+  | _ => failTest "zdo did not expose the last catch handler error"
+
+  let environmentChain := zdo
+    try
+      let _ ← Z.environment Nat
+      let _ : Nat ← (Z.fail "body" : Z Unit String Nat)
+      pure false
+    catch _ =>
+      let _ ← Z.environment String
+      let _ : Nat ← (Z.fail 5 : Z Unit Nat Nat)
+      pure false
+    catch _ =>
+      Z.environment Bool
+  let environmentChain : Z (Bool × Nat × String) Empty Bool :=
+    environmentChain
+  let environmentChainClosed : Z Unit Empty Bool :=
+    environmentChain.provideEnvironment (true, 42, "handler")
+  match ← runProgram "zdo-inferred-multiple-catch-environment"
+      environmentChainClosed with
+  | .success true => pure ()
+  | _ => failTest "zdo did not combine multiple catch environments"
+
+  let caughtThenFinalized := zdo
+    try
+      let _ : Nat ← (Z.fail "body" : Z Unit String Nat)
+      pure 0
+    catch _ =>
+      let _ : Nat ← (Z.fail 5 : Z Unit Nat Nat)
+      pure 1
+    catch number =>
+      pure (number + 1)
+    finally
+      Z.attempt (pure ())
+  let caughtThenFinalized : Z Unit IO.Error Nat := caughtThenFinalized
+  match ← runProgram "zdo-inferred-multiple-catch-finally"
+      caughtThenFinalized with
+  | .success 6 => pure ()
+  | _ => failTest "zdo did not compose multiple catches with finally"
+
 def testZDoInferredFinally : IO Unit := do
   let environmentProgram := zdo
     try
@@ -787,5 +871,6 @@ def main : IO Unit := do
   testErrorChannelJoin
   testZDoInferredErrors
   testZDoInferredCatch
+  testZDoInferredMultipleCatch
   testZDoInferredFinally
   IO.println "All regression tests passed."
