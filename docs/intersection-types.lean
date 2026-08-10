@@ -138,6 +138,28 @@ example : Environment.Meet Nat Nat Nat := inferInstance
 example : Environment.Meet Unit Nat Nat := inferInstance
 example : Environment.Meet Nat (String × Nat) (String × Nat) := inferInstance
 
+abbrev InferredEnvironment
+    {R : Type u} {E A : Type} (_ : Z R E A) : Type u := R
+
+def normalizedForward := zdo[Empty]
+  let nat <- Z.environment Nat
+  let string <- Z.environment String
+  pure (nat, string)
+
+def normalizedReverse := zdo[Empty]
+  let string <- Z.environment String
+  let nat <- Z.environment Nat
+  pure (string, nat)
+
+def normalizedGrouped := zdo[Empty]
+  Z.environment (String × Nat)
+
+example : InferredEnvironment normalizedForward =
+    InferredEnvironment normalizedReverse := rfl
+
+example : InferredEnvironment normalizedForward =
+    InferredEnvironment normalizedGrouped := rfl
+
 /-! ## Current `do` extension points -/
 
 #check Bind.bind

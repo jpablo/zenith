@@ -387,6 +387,24 @@ def testZDoInferredEnvironment : IO Unit := do
   | .success (42, 42) => pure ()
   | _ => failTest "zdo did not remove a repeated environment requirement"
 
+  let reordered := zdo[Empty]
+    let string <- Z.environment String
+    let nat <- Z.environment Nat
+    pure (string, nat)
+  let reorderedClosed : Z Unit Empty (String × Nat) :=
+    reordered.provideEnvironment (42, "reordered")
+  match <- runProgram "zdo-inferred-reordered" reorderedClosed with
+  | .success ("reordered", 42) => pure ()
+  | _ => failTest "zdo did not normalize reordered environment requirements"
+
+  let grouped := zdo[Empty]
+    Z.environment (String × Nat)
+  let groupedClosed : Z Unit Empty (String × Nat) :=
+    grouped.provideEnvironment (42, "grouped")
+  match <- runProgram "zdo-inferred-grouped" groupedClosed with
+  | .success ("grouped", 42) => pure ()
+  | _ => failTest "zdo did not normalize a grouped environment requirement"
+
   let highService : HighGithub := {
     getIssues := fun _ => Z.succeedNow [1, 2]
   }

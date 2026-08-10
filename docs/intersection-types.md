@@ -253,8 +253,8 @@ compose heterogeneous actions.
 This relation does not sort unrelated types. Thus, `Meet Nat String` returns
 `Nat × String`, while `Meet String Nat` returns `String × Nat`. These types
 provide the same services through `Environment.CanProvide`, but they are not
-definitionally equal. The result is sufficient for program-order inference.
-It is not yet a canonical row representation.
+definitionally equal. Direct uses of `Environment.Meet` and `Z.flatMapMeet`
+therefore remain order-dependent.
 
 ## `Monad` and `do` notation
 
@@ -298,20 +298,27 @@ Ordinary `do` remains unchanged. A private action elaborator also widens bare
 terminal actions in control-flow branches before Lean fixes the branch type.
 
 The `zdo[E]` form gives each action a requirement slot, elaborates the block
-against one temporary environment, and combines the slots with
-`Environment.Meet`. This also combines requirements across `if`, `match`,
+against one temporary environment, and normalizes the requirements before it
+combines them with `Environment.Meet`. Normalization flattens products,
+removes `Unit` and `PUnit`, and uses Lean's structural expression order.
+Thus, action order and product association do not change the inferred
+environment type. This also combines requirements across `if`, `match`,
 `try`, loops, `return`, and nested actions. The error type stays explicit
 because Zenith does not yet infer unions.
+
+This is elaborator-level normalization, not a reified row type. The structural
+order is not a public service-key order. Explicit service keys are still
+necessary if the API needs an order that is independent of Lean's expression
+representation or compiler version.
 
 ## Recommended research sequence
 
 1. Define the Scala fragment that Zenith and other target libraries need.
 2. Formalize its subtype preorder, intersection rules, and equivalence laws.
-3. Test the product-based `Environment.Meet` on larger real programs.
-4. Decide whether stable cross-program type equality requires normalized rows.
-5. If normalized rows are necessary, define stable service keys and prove the
-   meet laws.
-6. Add unions and error-channel least upper bounds only after environment
+3. Test normalized `zdo[E]` inference on larger real programs.
+4. Decide whether cross-version API stability requires explicit service keys.
+5. If explicit keys are necessary, define them and prove the row meet laws.
+6. Add unions and error-channel least upper bounds after environment
    meets are stable.
 
 Run the checked sketches from the project root:

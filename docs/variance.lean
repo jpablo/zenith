@@ -2,6 +2,9 @@ import Z
 
 namespace Variance
 
+abbrev InferredEnvironment
+    {R : Type u} {E A : Type} (_ : Z R E A) : Type u := R
+
 variable {R E A : Type}
 
 example (effect : Z Unit E A) : Z R E A := effect
@@ -64,6 +67,22 @@ def inferredCombined := zdo[Empty]
 #check inferredCombined
 example : Z (Nat × String) Empty (Nat × String) := inferredCombined
 
+def inferredReordered := zdo[Empty]
+  let string <- Z.environment String
+  let nat <- Z.environment Nat
+  pure (string, nat)
+
+#check inferredReordered
+example : InferredEnvironment inferredCombined =
+    InferredEnvironment inferredReordered := rfl
+
+def inferredGrouped := zdo[Empty]
+  Z.environment (String × Nat)
+
+#check inferredGrouped
+example : InferredEnvironment inferredCombined =
+    InferredEnvironment inferredGrouped := rfl
+
 def inferredRepeated := zdo[Empty]
   let first <- Z.environment Nat
   let second <- Z.environment Nat
@@ -79,7 +98,7 @@ def inferredThree := zdo[Empty]
   pure (nat, string, bool)
 
 #check inferredThree
-example : Z (Nat × String × Bool) Empty (Nat × String × Bool) :=
+example : Z (Bool × Nat × String) Empty (Nat × String × Bool) :=
   inferredThree
 
 def inferredNonAdjacentDuplicate := zdo[Empty]
@@ -89,7 +108,7 @@ def inferredNonAdjacentDuplicate := zdo[Empty]
   pure (first, string, second)
 
 #check inferredNonAdjacentDuplicate
-example : Z (String × Nat) Empty (Nat × String × Nat) :=
+example : Z (Nat × String) Empty (Nat × String × Nat) :=
   inferredNonAdjacentDuplicate
 
 def inferredError := zdo[IO.Error]
@@ -247,6 +266,6 @@ def inferredHighService := zdo[Empty]
   pure (value + string.length)
 
 #check inferredHighService
-example : Z (HighService × String) Empty Nat := inferredHighService
+example : Z (String × HighService) Empty Nat := inferredHighService
 
 end Variance

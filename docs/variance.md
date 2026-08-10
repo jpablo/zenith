@@ -259,22 +259,29 @@ def combinedEnvironment := zdo[Empty]
 
 The elaborator gives each action a private requirement slot. It elaborates
 the complete control-flow block against one temporary environment. It then
-combines the collected slots with `Environment.Meet` and resolves the
-environment projections. `Environment.Meet` keeps one side when that side
-already provides the other side. This removes duplicate requirements and
-makes `Unit` the identity. Otherwise, it uses a product. `Z.flatMapMeet`
-exposes the binary operation without notation.
+flattens nested products, removes `Unit` and `PUnit`, and sorts the service
+types with Lean's structural expression order. Finally, it combines the
+normalized slots with `Environment.Meet` and resolves the environment
+projections. `Environment.Meet` keeps one side when that side already
+provides the other side. This removes duplicate and contained requirements.
+Otherwise, it uses a product. `Z.flatMapMeet` exposes the binary operation
+without notation.
 
 The inferred form works across environment universes. It also removes
-non-adjacent duplicate requirements. Product order follows the program's bind
-order, so reversed programs can infer different but mutually usable product
-types.
+non-adjacent duplicate requirements. Reordered and differently associated
+requirements now infer the same environment type.
+
+This normalization is part of the `zdo[E]` elaborator. The structural sort is
+an implementation order, not a public service-key order. Thus, it gives
+stable types for the same elaborated service types, but it is not yet a
+general keyed row encoding.
 
 The inferred form supports `if`, `match`, `try`, loops, `return`, and nested
 actions. Error unions are not inferred, which is why `zdo[E]` requires `E`.
 
 This is a capability meet for Zenith environments. It is not a general Scala
-intersection type and does not make products definitionally commutative.
+intersection type. Products remain noncommutative outside normalized
+`zdo[E]` inference.
 
 The checked examples are in [`variance.lean`](variance.lean). Run them from the
 project root:

@@ -1,4 +1,5 @@
 import Lean.Elab.Do
+import Lean.Util.SortExprs
 import Z.Combinators
 
 /-!
@@ -9,8 +10,9 @@ widens the action to the environment and error type of the complete block.
 explicit and lets `Environment.CanProvide` verify each requirement.
 
 `zdo[E]` collects action requirements before it infers the complete
-environment. The error type `E` stays explicit because Zenith does not yet
-have error union inference.
+environment. It flattens and sorts those requirements before it applies
+`Environment.Meet`. The error type `E` stays explicit because Zenith does not
+yet have error union inference.
 
 The private `zdo_action%` elaborator adapts terminal actions before Lean fixes
 their branch type. This supports bare terminal actions in control-flow blocks.
@@ -224,6 +226,23 @@ private partial def collectActions
       return { raw := .node info kind arguments, requirements }
     | _ => return { raw := node }
 
+private partial def flattenEnvironmentRequirement
+    (requirement : Expr) : TermElabM (Array Expr) := do
+  let requirement ← whnf (← instantiateMVars requirement)
+  if requirement.isConstOf ``Unit || requirement.isConstOf ``PUnit then
+    return #[]
+  if requirement.isAppOfArity ``Prod 2 then
+    let left ← flattenEnvironmentRequirement requirement.getAppArgs[0]!
+    let right ← flattenEnvironmentRequirement requirement.getAppArgs[1]!
+    return left ++ right
+  return #[requirement]
+
+private def normalizeEnvironmentRequirements
+    (requirements : Array Expr) : TermElabM (Array Expr) := do
+  let flattened ← requirements.foldlM (init := #[]) fun result requirement => do
+    return result ++ (← flattenEnvironmentRequirement requirement)
+  return Lean.sortExprs flattened |>.1
+
 private def meetEnvironments (requirements : Array Expr) : TermElabM Expr := do
   requirements.reverse.foldlM (init := mkConst ``Unit) fun right left => do
     let left ← instantiateMVars left
@@ -237,6 +256,9 @@ private def meetEnvironments (requirements : Array Expr) : TermElabM Expr := do
       left right result
     let _ ← synthInstance meetType
     instantiateMVars result
+
+private def inferEnvironment (requirements : Array Expr) : TermElabM Expr := do
+  meetEnvironments (← normalizeEnvironmentRequirements requirements)
 
 @[term_elab «zdo»]
 def elabZDo : TermElab := fun stx expectedType? => do
@@ -276,7 +298,7 @@ def elabZDoInfer : TermElab := fun stx expectedType? => do
   let internalExpectedType := mkZType level environment error success
   let result ← elabDoWith (zDoOps expected) sequence internalExpectedType
   let result ← Term.ensureHasType internalExpectedType result
-  let inferredEnvironment ← meetEnvironments collected.requirements
+  let inferredEnvironment ← inferEnvironment collected.requirements
   unless ← isDefEq environment inferredEnvironment do
     throwErrorAt stx "failed to infer the complete `zdo` environment"
   Term.synthesizeSyntheticMVarsNoPostponing
