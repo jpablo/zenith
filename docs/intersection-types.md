@@ -352,20 +352,43 @@ It combines environment and error requirements and gives a finalizer failure
 precedence. Plain inferred native syntax supports multiple catch clauses in
 source order. A later clause can handle an error from an earlier handler.
 
+## GitHub issue-sync integration case
+
+[`Examples/GithubIssueSync.lean`](../Examples/GithubIssueSync.lean) tests the
+encoding in one representative program. It uses configuration, GitHub, issue
+store, and audit services. The checked types show these results:
+
+```lean
+syncRaw : Z RawServices SourceErrors Nat
+requirementsForward : Z Services AllErrors Unit
+requirementsReverse : Z Services AllErrors Unit
+sync : Z Services Empty Nat
+```
+
+`requirementsForward` and `requirementsReverse` request the same four
+services and four errors in opposite orders. They infer the same normalized
+types. `sync` uses two ordered handlers. The first handler can fail with
+`AuditError`, and the second handler catches that error. An audit finalizer
+runs on every path.
+
+The tests use local fake layers. They check normal sync, dry-run branching,
+source-error recovery, handler-error recovery, finalizer execution, and an
+uncaught store error from `syncRaw`.
+
 This is elaborator-level normalization, not a reified row type. The structural
 order is not a public service-key order. Explicit service keys are still
 necessary if the API needs an order that is independent of Lean's expression
 representation or compiler version.
 
-## Recommended research sequence
+## Remaining research sequence
 
 1. Define the Scala fragment that Zenith and other target libraries need.
 2. Formalize its subtype preorder, intersection rules, and equivalence laws.
-3. Test normalized `zdo[E]` inference on larger real programs.
-4. Decide whether cross-version API stability requires explicit service keys.
-5. If explicit keys are necessary, define them and prove the row meet laws.
-6. Test normalized error inference on larger real programs.
-7. Test ordered, heterogeneous catch chains on larger real programs.
+3. Decide whether cross-version API stability requires explicit service keys.
+4. If explicit keys are necessary, define them and prove the row meet laws.
+
+The issue-sync case gives the first combined test of normalized environments,
+normalized errors, and ordered catch chains in a larger program.
 
 Run the checked sketches from the project root:
 

@@ -1,4 +1,5 @@
 import Z
+import Examples.GithubIssueSync
 
 open Fiber
 
@@ -332,6 +333,144 @@ def testAcquireReleaseZLayer : IO Unit := do
   | _ => failTest "the acquireReleaseZ layer did not run"
   assertTrue "acquireReleaseZ did not release its resource"
     ((<- events.get) == ["acquire-z", "release-z"])
+
+structure IssueSyncScenario where
+  config : Except GithubIssueSync.ConfigError GithubIssueSync.SyncConfig
+  github : Except GithubIssueSync.GithubError (List GithubIssueSync.Issue)
+  storeFailure : Option Nat := none
+  auditFails : Bool := false
+
+def recordIssueSyncEvent
+    (events : IO.Ref (List String))
+    (event : String) : Z Unit Empty Unit :=
+  Z.succeed <| events.modify fun current => current ++ [event]
+
+def makeIssueSyncServices
+    (events : IO.Ref (List String))
+    (scenario : IssueSyncScenario) :
+    GithubIssueSync.ConfigService ×
+      GithubIssueSync.GithubService ×
+      GithubIssueSync.IssueStore ×
+      GithubIssueSync.Audit :=
+  let config : GithubIssueSync.ConfigService := {
+    load := (zdo
+      let _ ← recordIssueSyncEvent events "config"
+      match scenario.config with
+      | .ok value => Z.succeedNow value
+      | .error error => Z.fail error :
+        Z Unit GithubIssueSync.ConfigError GithubIssueSync.SyncConfig)
+  }
+  let github : GithubIssueSync.GithubService := {
+    openIssues := fun organization => (zdo
+      let _ ← recordIssueSyncEvent events s!"github:{organization}"
+      match scenario.github with
+      | .ok issues => Z.succeedNow issues
+      | .error error => Z.fail error :
+        Z Unit GithubIssueSync.GithubError (List GithubIssueSync.Issue))
+  }
+  let store : GithubIssueSync.IssueStore := {
+    save := fun issue => zdo
+      let _ ← recordIssueSyncEvent events s!"store:{issue.id}"
+      if scenario.storeFailure == some issue.id then
+        Z.fail (.writeFailed issue.id)
+      else
+        pure ()
+  }
+  let audit : GithubIssueSync.Audit := {
+    recordFailure := fun message => zdo
+      let _ ← recordIssueSyncEvent events s!"audit:{message}"
+      if scenario.auditFails then
+        Z.fail .unavailable
+      else
+        pure ()
+    finish := recordIssueSyncEvent events "finish"
+  }
+  (config, github, store, audit)
+
+def issueSyncLayer
+    (events : IO.Ref (List String))
+    (scenario : IssueSyncScenario) :
+    Layer Unit Empty GithubIssueSync.Services :=
+  let (config, github, store, audit) :=
+    makeIssueSyncServices events scenario
+  GithubIssueSync.layer config github store audit
+
+def testGithubIssueSync : IO Unit := do
+  let issues : List GithubIssueSync.Issue := [
+    { id := 1, title := "first" },
+    { id := 2, title := "second" }
+  ]
+
+  let successEvents ← IO.mkRef ([] : List String)
+  let successScenario : IssueSyncScenario := {
+    config := .ok { organization := "lean", dryRun := false }
+    github := .ok issues
+  }
+  match ← (issueSyncLayer successEvents successScenario).run ()
+      GithubIssueSync.sync "issue-sync-success" with
+  | some (.success 2) => pure ()
+  | _ => failTest "the issue sync success path failed"
+  assertTrue "the issue sync success events are incorrect"
+    ((← successEvents.get) ==
+      ["config", "github:lean", "store:1", "store:2", "finish"])
+
+  let dryRunEvents ← IO.mkRef ([] : List String)
+  let dryRunScenario : IssueSyncScenario := {
+    config := .ok { organization := "lean", dryRun := true }
+    github := .ok issues
+  }
+  match ← (issueSyncLayer dryRunEvents dryRunScenario).run ()
+      GithubIssueSync.sync "issue-sync-dry-run" with
+  | some (.success 2) => pure ()
+  | _ => failTest "the issue sync dry-run path failed"
+  assertTrue "the dry-run path wrote issues"
+    ((← dryRunEvents.get) == ["config", "github:lean", "finish"])
+
+  let sourceFailureEvents ← IO.mkRef ([] : List String)
+  let sourceFailureScenario : IssueSyncScenario := {
+    config := .ok { organization := "lean", dryRun := false }
+    github := .error .unavailable
+  }
+  match ← (issueSyncLayer sourceFailureEvents sourceFailureScenario).run ()
+      GithubIssueSync.sync "issue-sync-source-recovery" with
+  | some (.success 0) => pure ()
+  | _ => failTest "the issue sync did not recover from a source failure"
+  assertTrue "the source recovery or finalizer events are incorrect"
+    ((← sourceFailureEvents.get) ==
+      ["config", "github:lean", "audit:GitHub unavailable", "finish"])
+
+  let auditFailureEvents ← IO.mkRef ([] : List String)
+  let auditFailureScenario : IssueSyncScenario := {
+    config := .error .unavailable
+    github := .ok issues
+    auditFails := true
+  }
+  match ← (issueSyncLayer auditFailureEvents auditFailureScenario).run ()
+      GithubIssueSync.sync "issue-sync-audit-recovery" with
+  | some (.success 0) => pure ()
+  | _ => failTest "a later catch did not recover from the audit failure"
+  assertTrue "the finalizer did not run after the audit failure"
+    ((← auditFailureEvents.get) ==
+      ["config", "audit:configuration unavailable", "finish"])
+
+  let rawFailureEvents ← IO.mkRef ([] : List String)
+  let rawFailureScenario : IssueSyncScenario := {
+    config := .ok { organization := "lean", dryRun := false }
+    github := .ok issues
+    storeFailure := some 2
+  }
+  let (rawConfig, rawGithub, rawStore, _) :=
+    makeIssueSyncServices rawFailureEvents rawFailureScenario
+  let rawLayer : Layer Unit GithubIssueSync.SourceErrors
+      GithubIssueSync.RawServices :=
+    GithubIssueSync.rawLayer rawConfig rawGithub rawStore
+  match ← rawLayer.run () GithubIssueSync.syncRaw
+      "issue-sync-raw-failure" with
+  | some (.failure (.fail (.inr (.inr (.writeFailed 2))))) => pure ()
+  | _ => failTest "the raw issue sync did not expose the store failure"
+  assertTrue "the raw failure ran an unexpected finalizer"
+    ((← rawFailureEvents.get) ==
+      ["config", "github:lean", "store:1", "store:2"])
 
 def testZDoEnvironmentComposition : IO Unit := do
   let program : Z (String × Nat) Empty (Nat × String) := zdo
@@ -864,6 +1003,7 @@ def main : IO Unit := do
   testParallelLayerOverlap
   testParallelLayerFailureCleanup
   testAcquireReleaseZLayer
+  testGithubIssueSync
   testZDoEnvironmentComposition
   testZDoControlFlow
   testZDoInferredEnvironment

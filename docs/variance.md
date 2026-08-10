@@ -345,6 +345,12 @@ This is a capability meet for Zenith environments. It is not a general Scala
 intersection type. Products remain noncommutative outside normalized
 inference.
 
+The larger checked example is
+[`Examples/GithubIssueSync.lean`](../Examples/GithubIssueSync.lean). It uses
+four services, normalized source errors, reordered actions, two catch clauses,
+an audit finalizer, and composed fake layers. The runtime cases are in
+[`Tests.lean`](../Tests.lean).
+
 The checked examples are in [`variance.lean`](variance.lean). Run them from the
 project root:
 
