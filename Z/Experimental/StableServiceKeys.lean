@@ -259,6 +259,15 @@ def zipFresh
   ⟨left.layer.zipWith right.layer fun leftEnvironment rightEnvironment =>
     Environment.merge leftEnvironment rightEnvironment⟩
 
+/-- Build two independent keyed layers in parallel and merge their outputs. -/
+def zipFreshPar
+    (left : KeyedLayer R E leftEntries)
+    (right : KeyedLayer R E rightEntries)
+    (_disjoint : Row.Disjoint leftEntries rightEntries) :
+    KeyedLayer R E (Row.merge leftEntries rightEntries) :=
+  ⟨left.layer.zipWithPar right.layer fun leftEnvironment rightEnvironment =>
+    Environment.merge leftEnvironment rightEnvironment⟩
+
 /--
 Build two keyed layers that require different keyed input rows. Both input
 rows are projected from their stable union. Both errors are injected into the
@@ -522,7 +531,7 @@ macro_rules
       yield $result:term
     }) =>
       `(KeyedLayer.shareInto (EOut := $errorType)
-          (KeyedLayer.zipFresh $left $right (by decide)) fun $name =>
+          (KeyedLayer.zipFreshPar $left $right (by decide)) fun $name =>
         keyed_graph (error := $errorType) { $rest* yield $result })
   | `(keyed_graph (error := $errorType:term) {
       let $name:ident := $value:term;

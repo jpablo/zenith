@@ -229,37 +229,133 @@ def zipWith
           acquiredRight.map (f acquiredLeft.value))
         (acquireAfter acquiredLeft (right.build environment))⟩
 
-/-- Build two independent layers in parallel and combine their outputs. -/
+private inductive ParallelCompletion where
+  | leftSuccess
+  | leftFailure
+  | leftInterrupted
+  | rightSuccess
+  | rightFailure
+  | rightInterrupted
+  deriving Inhabited
+
+private def signalParallel
+    (completion : IO.Promise ParallelCompletion)
+    (result : ParallelCompletion) : HEIO (Cause E) Unit :=
+  HEIO.bind
+    (HEIO.liftBaseIO.{0} (completion.resolve result))
+    fun _ => HEIO.pure ()
+
+private def observeParallel
+    (completion : IO.Promise ParallelCompletion)
+    (success failure interrupted : ParallelCompletion)
+    (action : HEIO (Cause E) A) : HEIO (Cause E) A :=
+  action.foldAll
+    (fun cause =>
+      HEIO.bind (signalParallel completion failure) fun _ =>
+        HEIO.throw cause)
+    (HEIO.bind (signalParallel completion interrupted) fun _ =>
+      HEIO.interrupt)
+    (fun value =>
+      HEIO.bind (signalParallel completion success) fun _ =>
+        HEIO.pure value)
+
+private def waitParallel
+    (completion : IO.Promise ParallelCompletion) :
+    HEIO (Cause E) ParallelCompletion :=
+  HEIO.bind
+    (HEIO.liftBaseIO.{0} (IO.wait completion.result?))
+    fun result =>
+      match result.down with
+      | some completion => HEIO.pure completion
+      | none => HEIO.throw <| .die <| IO.userError
+          "a parallel layer branch did not report completion"
+
+private def releaseResult
+    (result : HEIO.Result (Cause E) (Resource E A)) :
+    HEIO (Cause E) Unit :=
+  match result with
+  | .ok resource => resource.release
+  | .error _ | .interrupted => HEIO.pure ()
+
+private def releaseParallelResults
+    (left : HEIO.Result (Cause E) (Resource E A))
+    (right : HEIO.Result (Cause E) (Resource E B)) :
+    HEIO (Cause E) Unit :=
+  (releaseResult right).ensuring (releaseResult left)
+
+private def finishParallel
+    (first : ParallelCompletion)
+    (left : HEIO.Result (Cause E) (Resource E A))
+    (right : HEIO.Result (Cause E) (Resource E B))
+    (f : A -> B -> C) : HEIO (Cause E) (Resource E C) :=
+  match left, right with
+  | .ok acquiredLeft, .ok acquiredRight =>
+      HEIO.pure {
+        value := f acquiredLeft.value acquiredRight.value
+        release := acquiredRight.release.ensuring acquiredLeft.release
+      }
+  | _, _ =>
+      let release := releaseParallelResults left right
+      match first with
+      | .leftFailure =>
+          match left with
+          | .error cause => (HEIO.throw cause).ensuring release
+          | _ => (HEIO.interrupt :
+              HEIO (Cause E) (Resource E C)).ensuring release
+      | .rightFailure =>
+          match right with
+          | .error cause => (HEIO.throw cause).ensuring release
+          | _ => (HEIO.interrupt :
+              HEIO (Cause E) (Resource E C)).ensuring release
+      | .leftInterrupted | .rightInterrupted =>
+          (HEIO.interrupt :
+            HEIO (Cause E) (Resource E C)).ensuring release
+      | .leftSuccess =>
+          match right with
+          | .error cause => (HEIO.throw cause).ensuring release
+          | _ => (HEIO.interrupt :
+              HEIO (Cause E) (Resource E C)).ensuring release
+      | .rightSuccess =>
+          match left with
+          | .error cause => (HEIO.throw cause).ensuring release
+          | _ => (HEIO.interrupt :
+              HEIO (Cause E) (Resource E C)).ensuring release
+
+/--
+Build two independent layers in parallel and combine their outputs. A failure
+or interruption cancels the other branch before acquired resources release.
+-/
 def zipWithPar
     (left : Layer R E A)
     (right : Layer R E B)
     (f : A -> B -> C) : Layer R E C :=
   ⟨fun environment =>
-    HEIO.bind (HEIO.fork (left.build environment)) fun leftTask =>
-      HEIO.bind (HEIO.fork (right.build environment)) fun rightTask =>
-        HEIO.bind (HEIO.wait leftTask) fun leftResult =>
-          HEIO.bind (HEIO.wait rightTask) fun rightResult =>
-            match leftResult, rightResult with
-            | .ok acquiredLeft, .ok acquiredRight =>
-                HEIO.pure {
-                  value := f acquiredLeft.value acquiredRight.value
-                  release :=
-                    acquiredRight.release.ensuring acquiredLeft.release
-                }
-            | .ok acquiredLeft, .error cause =>
-                (HEIO.throw cause).ensuring acquiredLeft.release
-            | .error cause, .ok acquiredRight =>
-                (HEIO.throw cause).ensuring acquiredRight.release
-            | .ok acquiredLeft, .interrupted =>
-                (HEIO.interrupt : HEIO (Cause E) (Resource E C)).ensuring
-                  acquiredLeft.release
-            | .interrupted, .ok acquiredRight =>
-                (HEIO.interrupt : HEIO (Cause E) (Resource E C)).ensuring
-                  acquiredRight.release
-            | .interrupted, _ | _, .interrupted =>
-                HEIO.interrupt
-            | .error leftCause, .error _ =>
-                HEIO.throw leftCause⟩
+    HEIO.withChildInterruption fun interruption =>
+      HEIO.bind
+        (HEIO.liftBaseIO.{0}
+          (IO.Promise.new (α := ParallelCompletion)))
+        fun completionLift =>
+          let completion := completionLift.down
+          let observedLeft := observeParallel completion
+            .leftSuccess .leftFailure .leftInterrupted
+            (left.build environment)
+          let observedRight := observeParallel completion
+            .rightSuccess .rightFailure .rightInterrupted
+            (right.build environment)
+          HEIO.bind (HEIO.fork observedLeft) fun leftTask =>
+            HEIO.bind (HEIO.fork observedRight) fun rightTask =>
+              HEIO.bind (waitParallel completion) fun first =>
+                let cancelSibling : HEIO (Cause E) Unit :=
+                  match first with
+                  | .leftSuccess | .rightSuccess => HEIO.pure ()
+                  | _ =>
+                      HEIO.bind
+                        (HEIO.liftIO.{0} Cause.die interruption.request)
+                        fun _ => HEIO.pure ()
+                HEIO.bind cancelSibling fun _ =>
+                  HEIO.bind (HEIO.wait leftTask) fun leftResult =>
+                    HEIO.bind (HEIO.wait rightTask) fun rightResult =>
+                      finishParallel first leftResult rightResult f⟩
 
 def fromFunction (f : R -> A) : Layer R Empty A :=
   fromHEIO fun environment => HEIO.pure (f environment)

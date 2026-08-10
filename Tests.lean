@@ -442,6 +442,34 @@ def testParallelLayerFailureCleanup : IO Unit := do
   assertTrue "the successful parallel acquisition was not released"
     (<- released.get)
 
+def testParallelLayerFailureCancelsSibling : IO Unit := do
+  let leftStarted ← IO.mkRef false
+  let leftCancelled ← IO.mkRef false
+  let left : Layer Unit IO.Error String :=
+    Layer.fromHEIO fun _ =>
+      let pending : HEIO (Cause IO.Error) (ULift.{0} Unit) :=
+        HEIO.asyncInterrupt Cause.die fun callback => do
+          leftStarted.set true
+          let _ ← IO.asTask do
+            IO.sleep 100
+            callback (.ok ())
+          pure (leftCancelled.set true)
+      HEIO.bind pending fun _ => HEIO.pure "left"
+  let right : Layer Unit IO.Error String :=
+    Layer.fromHEIO fun _ =>
+      HEIO.bind
+        (HEIO.liftIO.{0} Cause.die
+          (waitForFlag "pending parallel sibling" leftStarted))
+        fun _ => HEIO.throw (.fail (IO.userError "right failed"))
+  let combined := left.zipWithPar right (·, ·)
+  let program : Z (String × String) IO.Error Unit :=
+    Z.serviceWith fun _ => ()
+  match ← combined.run () program "layer-parallel-fail-fast" with
+  | some (.failure (.fail _)) => pure ()
+  | _ => failTest "parallel layer failure did not preserve its typed error"
+  assertTrue "parallel layer failure did not cancel its pending sibling"
+    (← leftCancelled.get)
+
 def testAcquireReleaseZLayer : IO Unit := do
   let events <- IO.mkRef []
   let acquire : Z Unit IO.Error String :=
@@ -1132,6 +1160,7 @@ def main : IO Unit := do
   testHighUniverseParallelLayers
   testParallelLayerOverlap
   testParallelLayerFailureCleanup
+  testParallelLayerFailureCancelsSibling
   testAcquireReleaseZLayer
   testGithubIssueSync
   testZDoEnvironmentComposition

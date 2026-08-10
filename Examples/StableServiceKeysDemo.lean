@@ -175,6 +175,37 @@ def assertEvents
   unless actual == expected do
     throw (IO.userError s!"{name}: unexpected layer events {actual}")
 
+def assertEventsOneOf
+    (name : String)
+    (events : IO.Ref (List String))
+    (expected : List (List String)) : IO Unit := do
+  let actual ← events.get
+  unless expected.contains actual do
+    throw (IO.userError s!"{name}: unexpected layer events {actual}")
+
+def assertParallelSiblingEvents
+    (name : String)
+    (events : IO.Ref (List String))
+    (left right : String)
+    (releaseEvents : List String) : IO Unit := do
+  let initialEvents : List String := ["acquire-github-from-config"]
+  assertEventsOneOf name events [
+    initialEvents.append ([left, right].append releaseEvents),
+    initialEvents.append ([right, left].append releaseEvents)
+  ]
+
+def assertParallelFailureEvents
+    (name : String)
+    (events : IO.Ref (List String))
+    (failureEvent siblingEvent siblingReleaseEvent : String) : IO Unit := do
+  let initialEvents : List String := ["acquire-github-from-config"]
+  let finalEvents : List String := ["release-github-from-config"]
+  assertEventsOneOf name events [
+    initialEvents.append ([failureEvent].append finalEvents),
+    initialEvents.append ([siblingEvent, failureEvent, siblingReleaseEvent].append finalEvents),
+    initialEvents.append ([failureEvent, siblingEvent, siblingReleaseEvent].append finalEvents)
+  ]
+
 partial def waitForSignal
     (name : String)
     (signal : IO.Ref Bool)
@@ -694,6 +725,68 @@ def automaticFailingSharedDependencyGraph
   reporterFromGithubAndStoreLayer events
 ]
 
+def observeAutomaticParallelStart
+    (counter : Std.Mutex Nat)
+    (barrier : IO.Promise Unit) : IO Nat := do
+  let started ← counter.atomically do
+    let started ← get
+    let next := started + 1
+    set next
+    pure next
+  if started == 1 then
+    let _ ← IO.asTask do
+      IO.sleep 1000
+      barrier.resolve ()
+  else
+    barrier.resolve ()
+  let _ ← IO.wait barrier.result?
+  counter.atomically get
+
+def parallelMetricsFromGithubLayer
+    (counter : Std.Mutex Nat)
+    (barrier : IO.Promise Unit) :
+    KeyedLayer
+      (Environment [githubEntry])
+      MetricsBuildError
+      [metricsEntry] :=
+  KeyedLayer.singleton metricsEntry <|
+    Layer.fromHEIO fun _ =>
+      HEIO.bind
+        (HEIO.liftIO.{0} Cause.die
+          (observeAutomaticParallelStart counter barrier))
+        fun started => HEIO.pure {
+          count := Z.succeedNow started.down
+        }
+
+def parallelReporterFromGithubLayer
+    (counter : Std.Mutex Nat)
+    (barrier : IO.Promise Unit) :
+    KeyedLayer
+      (Environment [githubEntry])
+      ReporterBuildError
+      [reporterEntry] :=
+  KeyedLayer.singleton reporterEntry <|
+    Layer.fromHEIO fun _ =>
+      HEIO.bind
+        (HEIO.liftIO.{0} Cause.die
+          (observeAutomaticParallelStart counter barrier))
+        fun started => HEIO.pure {
+          report := Z.succeedNow (toString started.down)
+        }
+
+def automaticParallelDependencyGraph
+    (events : IO.Ref (List String))
+    (counter : Std.Mutex Nat)
+    (barrier : IO.Promise Unit) :
+    KeyedLayer
+      (Environment [configEntry])
+      SharedGraphError
+      SharedGraphOutputs := KeyedLayer.make [
+  parallelMetricsFromGithubLayer counter barrier,
+  githubFromConfigLayer events,
+  parallelReporterFromGithubLayer counter barrier
+]
+
 def sharedGraphProgram :
     Z (Environment SharedGraphOutputs) Empty String := zdo
   let report <- withServiceZ
@@ -707,6 +800,16 @@ def sharedGraphProgram :
 def sharedGraphUnitProgram :
     Z (Environment SharedGraphOutputs) Empty Unit :=
   Z.serviceWith fun _ => ()
+
+def parallelGraphProgram :
+    Z (Environment SharedGraphOutputs) Empty (Nat × String) := zdo
+  let count ← withServiceZ
+    (entries := SharedGraphOutputs) metricsEntry fun metrics =>
+      metrics.count
+  let report ← withServiceZ
+    (entries := SharedGraphOutputs) reporterEntry fun reporter =>
+      reporter.report
+  pure (count, report)
 
 def failingSharedGraphProgram :
     Z (Environment SharedGraphOutputs) SharedGraphError Unit :=
@@ -787,14 +890,12 @@ def checkSharedDependencyGraph : IO Unit := do
       "stable-keyed-layer-shared-graph" with
   | some (.success "issue:2:2") => pure ()
   | _ => throw (IO.userError "The shared dependency graph did not run.")
-  assertEvents "shared dependency graph" events [
-    "acquire-github-from-config",
-    "acquire-reporter",
-    "acquire-metrics",
-    "release-metrics",
-    "release-reporter",
-    "release-github-from-config"
-  ]
+  assertParallelSiblingEvents "shared dependency graph" events
+    "acquire-reporter" "acquire-metrics" [
+      "release-metrics",
+      "release-reporter",
+      "release-github-from-config"
+    ]
 
 def checkSharedDependencyGraphFailure : IO Unit := do
   let events <- IO.mkRef ([] : List String)
@@ -807,13 +908,8 @@ def checkSharedDependencyGraphFailure : IO Unit := do
       "stable-keyed-layer-shared-graph-failure" with
   | some (.failure (.fail (.inr (.inr .unavailable)))) => pure ()
   | _ => throw (IO.userError "The shared graph error was not preserved.")
-  assertEvents "shared dependency graph failure" events [
-    "acquire-github-from-config",
-    "acquire-reporter",
-    "acquire-metrics",
-    "release-reporter",
-    "release-github-from-config"
-  ]
+  assertParallelFailureEvents "shared dependency graph failure" events
+    "acquire-metrics" "acquire-reporter" "release-reporter"
 
 def checkAutomaticSharedDependencyGraph : IO Unit := do
   let events <- IO.mkRef ([] : List String)
@@ -826,12 +922,27 @@ def checkAutomaticSharedDependencyGraph : IO Unit := do
       "stable-keyed-layer-automatic-graph" with
   | some (.success "issue:2:2") => pure ()
   | _ => throw (IO.userError "The automatic dependency graph did not run.")
-  assertEvents "automatic dependency graph" events [
+  assertParallelSiblingEvents "automatic dependency graph" events
+    "acquire-metrics" "acquire-reporter" [
+      "release-reporter",
+      "release-metrics",
+      "release-github-from-config"
+    ]
+
+def checkAutomaticParallelDependencyGraph : IO Unit := do
+  let events ← IO.mkRef ([] : List String)
+  let counter ← Std.Mutex.new 0
+  let barrier ← IO.Promise.new (α := Unit)
+  let input : Builder [configEntry] :=
+    Builder.empty.addFresh configEntry config (by decide)
+  match ← (automaticParallelDependencyGraph events counter barrier).toLayer.run
+      input.environment parallelGraphProgram
+      "stable-keyed-layer-automatic-parallel" with
+  | some (.success (2, "2")) => pure ()
+  | _ => throw (IO.userError
+      "Independent automatic layer branches did not overlap.")
+  assertEvents "automatic parallel dependency graph" events [
     "acquire-github-from-config",
-    "acquire-metrics",
-    "acquire-reporter",
-    "release-reporter",
-    "release-metrics",
     "release-github-from-config"
   ]
 
@@ -846,11 +957,8 @@ def checkAutomaticSharedDependencyGraphFailure : IO Unit := do
       "stable-keyed-layer-automatic-graph-failure" with
   | some (.failure (.fail (.inr (.inr .unavailable)))) => pure ()
   | _ => throw (IO.userError "The automatic graph error was not preserved.")
-  assertEvents "automatic dependency graph failure" events [
-    "acquire-github-from-config",
-    "acquire-metrics",
-    "release-github-from-config"
-  ]
+  assertParallelFailureEvents "automatic dependency graph failure" events
+    "acquire-metrics" "acquire-reporter" "release-reporter"
 
 def checkZProvide : IO Unit := do
   let events <- IO.mkRef ([] : List String)
@@ -860,14 +968,12 @@ def checkZProvide : IO Unit := do
   match <- Z.unsafeRunSync effect "stable-keyed-z-provide" with
   | some (.success "issue:2:2") => pure ()
   | _ => throw (IO.userError "Z.provide did not run the program.")
-  assertEvents "Z.provide" events [
-    "acquire-github-from-config",
-    "acquire-metrics",
-    "acquire-reporter",
-    "release-reporter",
-    "release-metrics",
-    "release-github-from-config"
-  ]
+  assertParallelSiblingEvents "Z.provide" events
+    "acquire-metrics" "acquire-reporter" [
+      "release-reporter",
+      "release-metrics",
+      "release-github-from-config"
+    ]
 
 def checkZProvideFailure : IO Unit := do
   let events <- IO.mkRef ([] : List String)
@@ -877,11 +983,8 @@ def checkZProvideFailure : IO Unit := do
   match <- Z.unsafeRunSync effect "stable-keyed-z-provide-failure" with
   | some (.failure (.fail (.inr (.inr .unavailable)))) => pure ()
   | _ => throw (IO.userError "Z.provide did not preserve the layer error.")
-  assertEvents "Z.provide failure" events [
-    "acquire-github-from-config",
-    "acquire-metrics",
-    "release-github-from-config"
-  ]
+  assertParallelFailureEvents "Z.provide failure" events
+    "acquire-metrics" "acquire-reporter" "release-reporter"
 
 def checkZProvideProgramFailure : IO Unit := do
   let events <- IO.mkRef ([] : List String)
@@ -891,14 +994,12 @@ def checkZProvideProgramFailure : IO Unit := do
   match <- Z.unsafeRunSync effect "stable-keyed-z-provide-program-failure" with
   | some (.failure (.fail (.inl .unavailable))) => pure ()
   | _ => throw (IO.userError "Z.provide did not preserve the program error.")
-  assertEvents "Z.provide program failure" events [
-    "acquire-github-from-config",
-    "acquire-metrics",
-    "acquire-reporter",
-    "release-reporter",
-    "release-metrics",
-    "release-github-from-config"
-  ]
+  assertParallelSiblingEvents "Z.provide program failure" events
+    "acquire-metrics" "acquire-reporter" [
+      "release-reporter",
+      "release-metrics",
+      "release-github-from-config"
+    ]
 
 def checkZProvideInterruption : IO Unit := do
   let events <- IO.mkRef ([] : List String)
@@ -913,14 +1014,12 @@ def checkZProvideInterruption : IO Unit := do
   | some (.failure .interrupt) => pure ()
   | _ => throw (IO.userError "Z.provide did not preserve interruption.")
   fiber.awaitTask
-  assertEvents "Z.provide interruption" events [
-    "acquire-github-from-config",
-    "acquire-metrics",
-    "acquire-reporter",
-    "release-reporter",
-    "release-metrics",
-    "release-github-from-config"
-  ]
+  assertParallelSiblingEvents "Z.provide interruption" events
+    "acquire-metrics" "acquire-reporter" [
+      "release-reporter",
+      "release-metrics",
+      "release-github-from-config"
+    ]
 
 def checkZProvideAcquisitionInterruption : IO Unit := do
   let events <- IO.mkRef ([] : List String)
@@ -974,6 +1073,7 @@ def demo : IO Unit := do
   checkSharedDependencyGraphFailure
   IO.println "Shared keyed-layer graph checks passed."
   checkAutomaticSharedDependencyGraph
+  checkAutomaticParallelDependencyGraph
   checkAutomaticSharedDependencyGraphFailure
   IO.println "Automatic keyed-layer graph checks passed."
   checkZProvide

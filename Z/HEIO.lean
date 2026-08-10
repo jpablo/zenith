@@ -44,8 +44,13 @@ def HEIO.{ue, ua}
 
 namespace HEIO
 
-def Interruption.new : IO Interruption := do
+private def Interruption.newBase : BaseIO Interruption := do
   return .mk (← IO.mkRef false) (← IO.mkRef 0) (← IO.mkRef [])
+
+def Interruption.new : IO Interruption :=
+  fun world =>
+    match Interruption.newBase world with
+    | .mk interruption world => .ok interruption world
 
 def Interruption.isRequested (self : Interruption) : BaseIO Bool :=
   self.interrupted.get
@@ -66,7 +71,7 @@ private def Interruption.removeHandler
   self.handlers.modify fun current =>
     current.filter fun (currentId, _) => currentId != handlerId
 
-def Interruption.request (self : Interruption) : IO Unit := do
+private def Interruption.requestBase (self : Interruption) : BaseIO Unit := do
   let first ← self.interrupted.modifyGet fun wasInterrupted =>
     (!wasInterrupted, true)
   if first then
@@ -75,6 +80,56 @@ def Interruption.request (self : Interruption) : IO Unit := do
     for task in tasks do
       let _ ← IO.wait task
       pure ()
+
+def Interruption.request (self : Interruption) : IO Unit :=
+  fun world =>
+    match self.requestBase world with
+    | .mk _ world => .ok () world
+
+private structure ParentRegistration where
+  parent : Interruption
+  handlerId : Nat
+
+private def Runtime.installChild
+    (self : Runtime)
+    (child : Interruption) : BaseIO (Option ParentRegistration) := do
+  if !self.interruptible then
+    return none
+  match self.interruption with
+  | none => return none
+  | some parent =>
+      let handlerId ← parent.freshHandlerId
+      let requestChild : IO Unit := do child.request
+      parent.addHandler handlerId requestChild
+      if ← parent.isRequested then
+        child.requestBase
+      return some { parent, handlerId }
+
+private def newInterruption : HEIO E Interruption :=
+  fun _ world =>
+    match Interruption.newBase world with
+    | .mk interruption world => .ok interruption world
+
+private def installChild
+    (child : Interruption) : HEIO E (Option ParentRegistration) :=
+  fun runtime world =>
+    match runtime.installChild child world with
+    | .mk registration world => .ok registration world
+
+private def removeParent
+    (registration : Option ParentRegistration) : HEIO E Unit :=
+  fun _ world =>
+    match registration with
+    | none => .ok () world
+    | some registration =>
+        match registration.parent.removeHandler
+            registration.handlerId world with
+        | .mk _ world => .ok () world
+
+private def locallyInterruption
+    (interruption : Interruption)
+    (action : HEIO E A) : HEIO E A :=
+  fun runtime => action { runtime with interruption := some interruption }
 
 private def Runtime.shouldInterrupt (self : Runtime) : BaseIO Bool := do
   if !self.interruptible then
@@ -279,6 +334,17 @@ def ensuring
         | .ok _ world => .interrupted world
         | .error finalizerError world => .error finalizerError world
         | .interrupted world => .interrupted world
+
+/--
+Run an action with a child interruption scope. Parent interruption reaches the
+child, but requesting the child does not interrupt the parent.
+-/
+def withChildInterruption
+    (use : Interruption -> HEIO E A) : HEIO E A :=
+  bind newInterruption fun child =>
+    bind (installChild child) fun registration =>
+      (locallyInterruption child (use child)).ensuring
+        (removeParent registration)
 
 instance : Monad (HEIO E) where
   pure := pure

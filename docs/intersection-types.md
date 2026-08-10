@@ -426,6 +426,8 @@ The prototype provides these checked properties:
 - `KeyedLayer.singleton` converts one ordinary layer to a one-service keyed
   layer.
 - `KeyedLayer.zipFresh` combines disjoint service rows in canonical key order.
+- `KeyedLayer.zipFreshPar` combines independent disjoint rows in parallel and
+  cancels sibling acquisition after failure or interruption.
 - `Environment.CanProvide` projects one required keyed row from a larger row.
 - `KeyedLayer.zipFreshMeetJoin` combines different input rows and infers their
   common error channel.
@@ -442,7 +444,7 @@ The prototype provides these checked properties:
 - `KeyedLayer.projectOutput` removes services that a selected multi-output
   provider produces but the expected result does not request.
 - `keyed_graph` gives every lexical node a sharing scope and lowers `>>>` and
-  `++` graph bindings to the checked vertical and horizontal combinators.
+  `++` graph bindings to checked vertical and parallel horizontal combinators.
 - `KeyedLayer.make` reads its expected keyed input, error, and output rows. It
   selects and composes an unordered list of candidate layers automatically.
 - `Z.provide` reads the program environment and uses the same graph solver to
@@ -536,9 +538,9 @@ def applicationLayer :
 The elaborator starts from the requested output row. It finds one provider for
 each output, and then repeats the search for that provider's inputs. An input
 that occurs in the expected input row stays external. The elaborator lowers
-the resulting graph to `keyed_graph`, `widenInput`, `andThenInto`, `zipFresh`,
-`shareInto`, and `projectOutput`. Candidate order does not define dependency
-order.
+the resulting graph to `keyed_graph`, `widenInput`, `andThenInto`,
+`zipFreshPar`, `shareInto`, and `projectOutput`. Candidate order does not
+define dependency order.
 
 The elaborator reports missing providers, multiple providers, dependency
 cycles, service-type conflicts, and overlapping selected outputs. It warns
@@ -563,8 +565,9 @@ def runnable :
 
 `Z.provide` uses the program's environment row as the graph target. Its
 expected result type supplies the external input row and final error channel.
-The runtime checks confirm successful provision, layer acquisition failure,
-program failure, and reverse-order release.
+The runtime checks confirm successful provision, parallel sibling acquisition,
+fail-fast sibling cancellation, layer acquisition failure, program failure,
+and reverse-order release.
 
 The declaration command currently accepts only one named service type. It does
 not yet define identities for parameterized service types. Horizontal and
@@ -574,9 +577,11 @@ explicit scope, `keyed_graph` generates that scope automatically, and
 `KeyedLayer.make` now generates the graph. The first automatic version
 requires a complete expected `KeyedLayer` type. It uses exact stable-key
 matching and the selected error type's `ErrorChannel.CanInject` instances.
-Horizontal construction remains sequential because it lowers to `zipFresh`.
-It does not yet infer an external input row, infer a graph error, create a
-debug graph, or build independent layers in parallel. The experimental
+Independent horizontal branches now lower to `zipFreshPar`. A child `HEIO`
+interruption scope cancels sibling branches after failure or interruption,
+waits for their completion, and releases completed resources. The constructor
+does not yet infer an external input row, infer a graph error, or create a
+debug graph. The experimental
 `Z.provide` bridge runs the closed program in a nested fiber because `ZCore`
 cannot store high-universe services. `ZCore.asyncInterrupt` connects outer
 interruption to the layer scope and waits for release before it completes the

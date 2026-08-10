@@ -218,7 +218,7 @@ private def addZipBindings
     let binding ← `(keyedGraphBinding|
       let $combined := KeyedLayer.projectOutput
         (required := $outputSyntax) (provider := $providerSyntax)
-        (KeyedLayer.zipFresh $current $right (by decide));)
+        (KeyedLayer.zipFreshPar $current $right (by decide));)
     bindings := bindings.push binding
     current := combined
     currentOutput := normalizedOutput
