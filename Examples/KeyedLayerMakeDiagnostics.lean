@@ -69,6 +69,91 @@ private def metricsFromGithub :
       count := pure 0
     }
 
+private def inferredStandalone :=
+  KeyedLayer.make ([reporterEntry]) [
+    reporterFromGithub,
+    githubFromNothing
+  ]
+
+/--
+info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredStandalone : KeyedLayer (Environment []) Empty [reporterEntry]
+-/
+#guard_msgs in
+#check inferredStandalone
+
+private def inferredExternal :=
+  KeyedLayer.make ([reporterEntry]) [reporterFromGithub]
+
+/--
+info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredExternal :
+  KeyedLayer (Environment [githubEntry]) Empty [reporterEntry]
+-/
+#guard_msgs in
+#check inferredExternal
+
+private def inferredInputsAndErrors (events : IO.Ref (List String)) :=
+  KeyedLayer.make ([reporterEntry]) [
+    reporterFromGithubAndStoreLayer events,
+    githubFromConfigLayer events
+  ]
+
+/--
+info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredInputsAndErrors (events : IO.Ref (List String)) :
+  KeyedLayer (Environment [configEntry, storeEntry]) (GithubBuildError ⊕ ReporterBuildError) [reporterEntry]
+-/
+#guard_msgs in
+#check inferredInputsAndErrors
+
+private def inferredInputsAndErrorsReverse
+    (events : IO.Ref (List String)) :=
+  KeyedLayer.make ([reporterEntry]) [
+    githubFromConfigLayer events,
+    reporterFromGithubAndStoreLayer events
+  ]
+
+/--
+info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredInputsAndErrorsReverse (events : IO.Ref (List String)) :
+  KeyedLayer (Environment [configEntry, storeEntry]) (GithubBuildError ⊕ ReporterBuildError) [reporterEntry]
+-/
+#guard_msgs in
+#check inferredInputsAndErrorsReverse
+
+private def inferredProvided (events : IO.Ref (List String)) :=
+  Z.provide sharedGraphProgram [
+    metricsFromGithubLayer events,
+    reporterFromGithubAndStoreLayer events,
+    githubFromConfigLayer events
+  ]
+
+/--
+info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredProvided (events : IO.Ref (List String)) :
+  Z (Environment [configEntry, storeEntry]) (GithubBuildError ⊕ MetricsBuildError ⊕ ReporterBuildError) String
+-/
+#guard_msgs in
+#check inferredProvided
+
+private inductive ProgramError where
+  | unavailable
+
+private def programWithOwnError :
+    Z (Environment [reporterEntry]) ProgramError Unit :=
+  (Z.failCause (R := Environment [reporterEntry])
+    (.fail ProgramError.unavailable)).map impossible
+
+private def inferredProvidedProgramError
+    (events : IO.Ref (List String)) :=
+  Z.provide programWithOwnError [
+    reporterFromGithubAndStoreLayer events,
+    githubFromConfigLayer events
+  ]
+
+/--
+info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredProvidedProgramError (events : IO.Ref (List String)) :
+  Z (Environment [configEntry, storeEntry]) (GithubBuildError ⊕ ReporterBuildError ⊕ ProgramError) Unit
+-/
+#guard_msgs in
+#check inferredProvidedProgramError
+
 /--
 info: Keyed layer graph
 error type: Empty

@@ -3,12 +3,15 @@ import Z.Experimental.StableServiceKeys
 /-!
 Automatic construction for keyed layers.
 
-`KeyedLayer.make` reads the expected `KeyedLayer` type, finds one provider for
-each requested service, and emits ordinary `KeyedLayer` compositions. The
-dependency graph exists only while Lean elaborates the term.
+`KeyedLayer.make (outputs) [layers]` finds one provider for each requested
+service, infers the external input row and normalized error channel, and emits
+ordinary `KeyedLayer` compositions. `KeyedLayer.make [layers]` keeps the
+complete expected-type form for an explicitly selected input or error type.
+The dependency graph exists only while Lean elaborates the term.
 
-`Z.provide` reads the program's keyed environment, constructs that environment
-with `KeyedLayer.make`, and scopes the generated layer around the program.
+`Z.provide` reads the program's keyed environment, infers the graph input and
+the joined program-and-layer error channel, and scopes the generated layer
+around the program.
 
 `#keyed_layer_graph` runs the same analysis for an explicit target
 `KeyedLayer` type and prints the selected graph without building a value.
@@ -20,6 +23,9 @@ namespace StableServiceKeys
 
 syntax (name := keyedLayerMake)
   "KeyedLayer.make" "[" term,* "]" : term
+
+syntax (name := keyedLayerMakeInferred)
+  "KeyedLayer.make" "(" term ")" "[" term,* "]" : term
 
 syntax (name := zProvide)
   "Z.provide" term:max "[" term,* "]" : term
@@ -43,6 +49,7 @@ private structure Candidate where
   index : Nat
   stx : Term
   inputs : Array Expr
+  errorType : Expr
   outputRow : Expr
   outputs : Array Expr
   deriving Inhabited
@@ -50,6 +57,10 @@ private structure Candidate where
 private structure Plan where
   candidate : Nat
   dependencies : Array Nat
+
+private structure Resolution where
+  external : Array Expr
+  plans : Array Plan
 
 private structure Analysis where
   expected : KeyedLayerType
@@ -135,20 +146,21 @@ private def planContains (plans : Array Plan) (index : Nat) : Bool :=
 
 private partial def resolveCandidate
     (candidates : Array Candidate)
-    (external : Array Expr)
+    (fixedExternal : Bool)
     (index : Nat)
     (path : List Nat)
-    (plans : Array Plan) : TermElabM (Array Plan) := do
-  if planContains plans index then
-    return plans
+    (resolution : Resolution) : TermElabM Resolution := do
+  if planContains resolution.plans index then
+    return resolution
   if path.contains index then
     let candidate := candidateAt candidates index
     throwErrorAt candidate.stx
       "automatic keyed-layer construction found a dependency cycle"
   let candidate := candidateAt candidates index
   let mut dependencies := #[]
+  let mut resolution := resolution
   for input in candidate.inputs do
-    match ← findByKey external input with
+    match ← findByKey resolution.external input with
     | some externalEntry =>
         unless ← sameEntry externalEntry input do
           throwErrorAt candidate.stx m!
@@ -156,22 +168,31 @@ private partial def resolveCandidate
     | none =>
         let providers ← providersFor candidates input
         if providers.isEmpty then
-          throwErrorAt candidate.stx m!
-            "no layer provides required service {(← entryMessage input)}"
-        if providers.size > 1 then
+          if fixedExternal then
+            throwErrorAt candidate.stx m!
+              "no layer provides required service {(← entryMessage input)}"
+          else
+            resolution := {
+              resolution with
+              external := resolution.external.push input
+            }
+        else if providers.size > 1 then
           throwErrorAt candidate.stx m!
             "more than one layer provides required service {(← entryMessage input)}"
-        let (providerIndex, providedEntry) := providers[0]!
-        unless ← sameEntry providedEntry input do
-          throwErrorAt candidate.stx m!
-            "provided service {(← entryMessage providedEntry)} has the requested key, but it has a different service type from {(← entryMessage input)}"
-        unless dependencies.contains providerIndex do
-          dependencies := dependencies.push providerIndex
-  let mut plans := plans
+        else
+          let (providerIndex, providedEntry) := providers[0]!
+          unless ← sameEntry providedEntry input do
+            throwErrorAt candidate.stx m!
+              "provided service {(← entryMessage providedEntry)} has the requested key, but it has a different service type from {(← entryMessage input)}"
+          unless dependencies.contains providerIndex do
+            dependencies := dependencies.push providerIndex
   for dependency in dependencies do
-    plans ← resolveCandidate candidates external dependency
-      (index :: path) plans
-  return plans.push { candidate := index, dependencies }
+    resolution ← resolveCandidate candidates fixedExternal dependency
+      (index :: path) resolution
+  return {
+    resolution with
+    plans := resolution.plans.push { candidate := index, dependencies }
+  }
 
 private def checkDisjointOutputs
     (candidates : Array Candidate)
@@ -199,6 +220,49 @@ private def mergedOutputRow
 private def explicitRow (entries : Array Expr) : MetaM Expr := do
   let entryType ← inferType entries[0]!
   mkListLit entryType entries.toList
+
+private def normalizeRow
+    (entryType : Expr)
+    (entries : Array Expr) : MetaM Expr := do
+  let mut row ← mkListLit entryType []
+  for entry in entries do
+    row ← mkAppM ``Row.insert #[entry, row]
+  let normalized ← rowEntries row
+  mkListLit entryType normalized.toList
+
+private partial def flattenError
+    (errorType : Expr) : TermElabM (Array Expr) := do
+  let errorType ← whnf (← instantiateMVars errorType)
+  if errorType.isConstOf ``Empty then
+    return #[]
+  if errorType.isAppOfArity ``Sum 2 then
+    let left ← flattenError errorType.getAppArgs[0]!
+    let right ← flattenError errorType.getAppArgs[1]!
+    return left ++ right
+  return #[errorType]
+
+private def normalizeErrors
+    (errorTypes : Array Expr) : TermElabM (Array Expr) := do
+  let flattened ← errorTypes.foldlM (init := #[])
+    fun result errorType => do
+      return result ++ (← flattenError errorType)
+  return Lean.sortExprs flattened |>.1
+
+private def joinErrors (errorTypes : Array Expr) : TermElabM Expr := do
+  let normalized ← normalizeErrors errorTypes
+  normalized.reverse.foldlM (init := mkConst ``Empty)
+    fun right left => do
+      let left ← instantiateMVars left
+      let right ← instantiateMVars right
+      let leftLevel ← getDecLevel left
+      let rightLevel ← getDecLevel right
+      let resultLevel ← mkFreshLevelMVar
+      let result ← mkFreshExprMVar (mkSort resultLevel.succ)
+      let joinType := mkApp3
+        (mkConst ``ErrorChannel.Join [leftLevel, rightLevel, resultLevel])
+        left right result
+      let _ ← synthInstance joinType
+      instantiateMVars result
 
 private def nodeIdent (reference : Syntax) (index : Nat) : Ident :=
   mkIdentFrom reference <| Name.mkSimple s!"_keyed_make_node_{index}"
@@ -281,19 +345,25 @@ private def analyze
     (reference : Syntax)
     (caller : String)
     (expectedType : Expr)
-    (layers : Array Term) : TermElabM Analysis := do
+    (layers : Array Term)
+    (additionalErrors : Array Expr := #[]) : TermElabM Analysis := do
   let expectedType ← instantiateMVars expectedType
   let some expected ← keyedLayerType? expectedType |
     throwErrorAt reference m!
       "{caller} requires a `KeyedLayer` type"
-  if ← hasAssignableMVar expected.errorType <||>
-      hasAssignableMVar expected.output then
+  if ← hasAssignableMVar expected.output then
     throwErrorAt reference m!
-      "{caller} requires known error and output rows"
-  let some inputRow ← environmentRow? expected.input |
-    throwErrorAt reference m!
-      "{caller} requires a keyed `Environment` input"
-  let external ← rowEntries inputRow
+      "{caller} requires a known output row"
+  let inferInput := expected.input.isMVar
+  let inferError := expected.errorType.isMVar
+  let initialExternal ←
+    if inferInput then
+      pure #[]
+    else
+      let some inputRow ← environmentRow? expected.input |
+        throwErrorAt reference m!
+          "{caller} requires a keyed `Environment` input"
+      rowEntries inputRow
   let requested ← rowEntries expected.output
   if requested.isEmpty then
     throwErrorAt reference m!
@@ -316,6 +386,7 @@ private def analyze
       index
       stx := layer
       inputs
+      errorType := candidateType.errorType
       outputRow := candidateType.output
       outputs
     }
@@ -334,15 +405,46 @@ private def analyze
         "provided service {(← entryMessage providedEntry)} has the requested key, but it has a different service type from {(← entryMessage output)}"
     unless roots.contains providerIndex do
       roots := roots.push providerIndex
-  let mut plans := #[]
+  let mut resolution : Resolution := {
+    external := initialExternal
+    plans := #[]
+  }
   for root in roots do
-    plans ← resolveCandidate candidates external root [] plans
-  for plan in plans do
+    resolution ← resolveCandidate candidates (!inferInput) root [] resolution
+  for plan in resolution.plans do
     checkDisjointOutputs candidates plan.dependencies reference
   checkDisjointOutputs candidates roots reference
   for candidate in candidates do
-    unless planContains plans candidate.index do
+    unless planContains resolution.plans candidate.index do
       logWarningAt candidate.stx "unused automatic layer candidate"
+  let entryType ← inferType requested[0]!
+  let inputRow ←
+    if inferInput then
+      normalizeRow entryType resolution.external
+    else
+      let some inputRow ← environmentRow? expected.input |
+        throwErrorAt reference m!
+          "{caller} requires a keyed `Environment` input"
+      pure inputRow
+  let external ← rowEntries inputRow
+  let inputType ← mkAppM ``Environment #[inputRow]
+  if inferInput then
+    unless ← isDefEq expected.input inputType do
+      throwErrorAt reference m!
+        "{caller} could not assign the inferred input row"
+  let mut errorTypes := additionalErrors
+  for plan in resolution.plans do
+    errorTypes := errorTypes.push (candidateAt candidates plan.candidate).errorType
+  if inferError then
+    let inferredError ← joinErrors errorTypes
+    unless ← isDefEq expected.errorType inferredError do
+      throwErrorAt reference m!
+        "{caller} could not assign the inferred error type"
+  let resolvedExpected : KeyedLayerType := {
+    input := ← instantiateMVars expected.input
+    errorType := ← instantiateMVars expected.errorType
+    output := ← instantiateMVars expected.output
+  }
   let availableOutputRow ← mergedOutputRow candidates roots
   let availableOutputs ← rowEntries availableOutputRow
   let availableRow ← explicitRow availableOutputs
@@ -351,13 +453,13 @@ private def analyze
     availableRow, requestedRow]
   let provider ← synthInstance providerType
   return {
-    expected
+    expected := resolvedExpected
     inputRow
     external
     requested
     candidates
     roots
-    plans
+    plans := resolution.plans
     provider
   }
 
@@ -466,6 +568,32 @@ def elabKeyedLayerMake : TermElab := fun stx expectedType? => do
     analysis.provider
   Term.elabTerm generated expectedType
 
+@[term_elab keyedLayerMakeInferred]
+def elabKeyedLayerMakeInferred : TermElab := fun stx expectedType? => do
+  let `(KeyedLayer.make ($output) [$layers,*]) := stx |
+    throwUnsupportedSyntax
+  let output ← Term.elabTerm output none
+  Term.synthesizeSyntheticMVarsNoPostponing
+  let output ← instantiateMVars output
+  let inputLevel ← mkFreshLevelMVar
+  let input ← mkFreshExprMVar (mkSort inputLevel.succ)
+  let errorType ← mkFreshExprMVar (mkSort (.succ .zero))
+  let targetType ← mkAppM ``KeyedLayer #[input, errorType, output]
+  let analysis ← KeyedLayerMake.analyze stx "`KeyedLayer.make`"
+    targetType layers.getElems
+  let resolvedType ← mkAppM ``KeyedLayer #[
+    analysis.expected.input,
+    analysis.expected.errorType,
+    analysis.expected.output]
+  let generated ← KeyedLayerMake.generateGraph stx
+    analysis.candidates analysis.plans analysis.roots
+    analysis.inputRow analysis.expected.errorType analysis.expected.output
+    analysis.provider
+  let expression ← Term.elabTerm generated resolvedType
+  match expectedType? with
+  | some expectedType => Term.ensureHasType expectedType expression
+  | none => pure expression
+
 @[command_elab keyedLayerGraph]
 meta def elabKeyedLayerGraph : CommandElab
   | stx@`(#keyed_layer_graph ($expectedType) [$layers,*]) =>
@@ -480,18 +608,6 @@ meta def elabKeyedLayerGraph : CommandElab
 @[term_elab zProvide]
 def elabZProvide : TermElab := fun stx expectedType? => do
   let `(Z.provide $program [$layers,*]) := stx | throwUnsupportedSyntax
-  Term.tryPostponeIfNoneOrMVar expectedType?
-  let some expectedType := expectedType? | throwErrorAt stx
-    "`Z.provide` requires an expected `Z R E A` type"
-  let expectedType ← instantiateMVars expectedType
-  let some expected ← KeyedLayerMake.zType? expectedType |
-    throwErrorAt stx "`Z.provide` requires an expected `Z R E A` type"
-  if ← hasAssignableMVar expected.errorType <||>
-      hasAssignableMVar expected.success then
-    throwErrorAt stx "`Z.provide` requires known error and success types"
-  let some _ ← KeyedLayerMake.environmentRow? expected.environment |
-    throwErrorAt stx
-      "`Z.provide` requires a keyed `Environment` in its expected type"
   let programExpression ← Term.elabTerm program none
   Term.synthesizeSyntheticMVarsNoPostponing
   let programType ← instantiateMVars (← inferType programExpression)
@@ -501,20 +617,59 @@ def elabZProvide : TermElab := fun stx expectedType? => do
       KeyedLayerMake.environmentRow? actual.environment |
     throwErrorAt program
       "the program supplied to `Z.provide` must require a keyed `Environment`"
-  unless ← isDefEq actual.success expected.success do
-    throwErrorAt program
-      "the program success type does not match the expected `Z.provide` success type"
-  let inputSyntax ← Term.exprToSyntax expected.environment
-  let errorSyntax ← Term.exprToSyntax expected.errorType
-  let successSyntax ← Term.exprToSyntax expected.success
+  let expected ←
+    match expectedType? with
+    | none => pure none
+    | some expectedType =>
+        let expectedType ← instantiateMVars expectedType
+        match ← KeyedLayerMake.zType? expectedType with
+        | some expected => pure (some expected)
+        | none =>
+          if ← hasAssignableMVar expectedType then
+            pure none
+          else
+            throwErrorAt stx
+              "`Z.provide` requires an expected `Z R E A` type"
+  if let some expected := expected then
+    unless ← isDefEq actual.success expected.success do
+      throwErrorAt program
+        "the program success type does not match the expected `Z.provide` success type"
+  let input ←
+    match expected with
+    | some expected => pure expected.environment
+    | none =>
+        let level ← mkFreshLevelMVar
+        mkFreshExprMVar (mkSort level.succ)
+  let errorType ←
+    match expected with
+    | some expected => pure expected.errorType
+    | none => mkFreshExprMVar (mkSort (.succ .zero))
+  let layerType ← mkAppM ``KeyedLayer #[input, errorType, outputRow]
+  let analysis ← KeyedLayerMake.analyze stx "`Z.provide`"
+    layerType layers.getElems #[actual.errorType]
+  let success ← instantiateMVars actual.success
+  let resultType ← mkAppM ``Z #[
+    analysis.expected.input,
+    analysis.expected.errorType,
+    success]
+  let inputSyntax ← Term.exprToSyntax analysis.expected.input
+  let errorSyntax ← Term.exprToSyntax analysis.expected.errorType
+  let successSyntax ← Term.exprToSyntax success
   let programEnvironmentSyntax ←
     Term.exprToSyntax actual.environment
   let outputSyntax ← Term.exprToSyntax outputRow
+  let layer ← KeyedLayerMake.generateGraph stx
+    analysis.candidates analysis.plans analysis.roots
+    analysis.inputRow analysis.expected.errorType analysis.expected.output
+    analysis.provider
   let generated ← `(KeyedLayer.provide
     (show KeyedLayer $inputSyntax $errorSyntax $outputSyntax from
-      KeyedLayer.make [$layers,*])
+      $layer)
     (show Z $programEnvironmentSyntax $errorSyntax $successSyntax from
       Z.intoJoined $program))
-  Term.elabTerm generated expectedType
+  let expression ← Term.elabTerm generated resultType
+  match expectedType? with
+  | some expectedType => Term.ensureHasType expectedType expression
+  | none => pure expression
 
 end StableServiceKeys

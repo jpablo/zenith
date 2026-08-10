@@ -826,22 +826,16 @@ def metricsUnitProgram :
   Z.serviceWith fun _ => ()
 
 def automaticallyProvidedSharedGraph
-    (events : IO.Ref (List String)) :
-    Z
-      (Environment [configEntry, storeEntry])
-      SharedGraphError
-      String := Z.provide sharedGraphProgram [
+    (events : IO.Ref (List String)) :=
+  Z.provide sharedGraphProgram [
   metricsFromGithubLayer events,
   reporterFromGithubAndStoreLayer events,
   githubFromConfigLayer events
 ]
 
 def automaticallyProvidedFailingSharedGraph
-    (events : IO.Ref (List String)) :
-    Z
-      (Environment [configEntry, storeEntry])
-      SharedGraphError
-      Unit := Z.provide sharedGraphUnitProgram [
+    (events : IO.Ref (List String)) :=
+  Z.provide sharedGraphUnitProgram [
   failingMetricsFromGithubLayer events,
   githubFromConfigLayer events,
   reporterFromGithubAndStoreLayer events
@@ -981,7 +975,7 @@ def checkZProvideFailure : IO Unit := do
     (automaticallyProvidedFailingSharedGraph events).provideEnvironment
       heterogeneousInputs.environment
   match <- Z.unsafeRunSync effect "stable-keyed-z-provide-failure" with
-  | some (.failure (.fail (.inr (.inr .unavailable)))) => pure ()
+  | some (.failure (.fail (.inr (.inl .unavailable)))) => pure ()
   | _ => throw (IO.userError "Z.provide did not preserve the layer error.")
   assertParallelFailureEvents "Z.provide failure" events
     "acquire-metrics" "acquire-reporter" "release-reporter"

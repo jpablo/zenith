@@ -445,10 +445,13 @@ The prototype provides these checked properties:
   provider produces but the expected result does not request.
 - `keyed_graph` gives every lexical node a sharing scope and lowers `>>>` and
   `++` graph bindings to checked vertical and parallel horizontal combinators.
-- `KeyedLayer.make` reads its expected keyed input, error, and output rows. It
-  selects and composes an unordered list of candidate layers automatically.
-- `Z.provide` reads the program environment and uses the same graph solver to
-  construct, supply, and release the required services.
+- `KeyedLayer.make (outputs) [layers]` reads the requested output row, infers
+  the external input row and normalized error type, and composes an unordered
+  list of candidate layers automatically. The expected-type form
+  `KeyedLayer.make [layers]` remains available for an explicit boundary.
+- `Z.provide` reads the program environment, infers the remaining graph input
+  and the joined program-and-layer error type, and constructs, supplies, and
+  releases the required services.
 
 The checked examples show that two libraries can use the same local service
 name when their declaration namespaces differ. They also show that
@@ -542,6 +545,37 @@ the resulting graph to `keyed_graph`, `widenInput`, `andThenInto`,
 `zipFreshPar`, `shareInto`, and `projectOutput`. Candidate order does not
 define dependency order.
 
+The standalone inferred form follows the `ZLayer.make[Output]` design. Lean
+uses parentheses in place of a Scala type argument:
+
+```lean
+def applicationLayer := KeyedLayer.make
+  ([metricsEntry, reporterEntry]) [
+    metricsLayer,
+    reporterLayer,
+    githubLayer
+  ]
+```
+
+The output row defines the graph roots. For each selected layer input, the
+planner selects its unique candidate provider when one exists. If no candidate
+provides that service, the service becomes an external input. The planner
+normalizes these external entries into the result row. It flattens the errors
+of selected layers, removes `Empty`, sorts the remaining types, and folds them
+with `ErrorChannel.Join`. Unused candidate errors do not enter the result.
+The checked example above infers a result equivalent to:
+
+```lean
+KeyedLayer
+  (Environment [configEntry, storeEntry])
+  (GithubBuildError ⊕ MetricsBuildError ⊕ ReporterBuildError)
+  [metricsEntry, reporterEntry]
+```
+
+The expected-type form remains useful when a service must stay external even
+though its provider is in the candidate list, or when the application requires
+one preselected error type.
+
 The elaborator reports missing providers, multiple providers, dependency
 cycles, service-type conflicts, and overlapping selected outputs. It warns
 about unused candidates. Each selected candidate becomes one shared lexical
@@ -568,23 +602,22 @@ Selected candidates appear in dependency order. The command uses the same
 provider checks and errors as `KeyedLayer.make`, so the report describes the
 graph that the constructor will generate for that target type.
 
-The program-level form does not require an intermediate layer declaration:
+The program-level form does not require an intermediate layer declaration or
+a result annotation:
 
 ```lean
-def runnable :
-    Z
-      (Environment [configEntry, storeEntry])
-      SharedGraphError
-      String := Z.provide sharedGraphProgram [
+def runnable := Z.provide sharedGraphProgram [
   metricsLayer,
   reporterLayer,
   githubLayer
 ]
 ```
 
-`Z.provide` uses the program's environment row as the graph target. Its
-expected result type supplies the external input row and final error channel.
-The runtime checks confirm successful provision, parallel sibling acquisition,
+`Z.provide` uses the program's environment row as the graph target. It infers
+the unresolved external inputs. Its normalized error channel includes the
+program error and errors from selected layers. A supplied expected `Z` type can
+still select a compatible wider input or error type. The runtime checks confirm
+successful provision, inferred typed failures, parallel sibling acquisition,
 fail-fast sibling cancellation, layer acquisition failure, program failure,
 and reverse-order release.
 
@@ -593,16 +626,16 @@ not yet define identities for parameterized service types. Horizontal and
 vertical layer composition now handle different keyed inputs and errors, and
 pass-through uses a strict duplicate-key policy. Shared graphs work with an
 explicit scope, `keyed_graph` generates that scope automatically, and
-`KeyedLayer.make` now generates the graph. The first automatic version
-requires a complete expected `KeyedLayer` type. It uses exact stable-key
-matching and the selected error type's `ErrorChannel.CanInject` instances.
+`KeyedLayer.make` now generates the graph. Its standalone form requires only
+the requested output row. It uses exact stable-key matching and
+`ErrorChannel.CanInject` instances for the inferred or selected error type.
 Independent horizontal branches now lower to `zipFreshPar`. The
 `#keyed_layer_graph` command prints the compile-time plan, including parallel
-and shared nodes. A child `HEIO`
-interruption scope cancels sibling branches after failure or interruption,
-waits for their completion, and releases completed resources. The constructor
-does not yet infer an external input row or infer a graph error. The experimental
-`Z.provide` bridge runs the closed program in a nested fiber because `ZCore`
+and shared nodes. A child `HEIO` interruption scope cancels sibling branches
+after failure or interruption, waits for their completion, and releases
+completed resources. The constructor infers canonical external input rows and
+normalized graph errors. The experimental `Z.provide` bridge runs the closed
+program in a nested fiber because `ZCore`
 cannot store high-universe services. `ZCore.asyncInterrupt` connects outer
 interruption to the layer scope and waits for release before it completes the
 outer fiber. `HEIO` now carries a separate interruption signal and result, so
