@@ -2,6 +2,7 @@ import Z.Combinators
 import Z.Colors
 import Z.GraphvizDiagram
 import Z.InterpreterModels
+import Init.System.Promise
 
 open IO (userError)
 -- Needed to use dot notation on Fibers
@@ -149,6 +150,51 @@ mutual
             try register callback
             catch ioError => resume (.failure (.die ioError))
 
+        | .asyncInterrupt register _, _ => do
+          let resumed <- IO.mkRef false
+          let cancelReady ← IO.Promise.new (α := IO Unit)
+          let resume (exit : Exit E A) : IO Unit := do
+            let isFirst <- resumed.modifyGet fun alreadyResumed =>
+              (!alreadyResumed, true)
+            if isFirst then
+              state.interruption.interruptHandler.set IO.unit
+              diagram.async state.fiberId self.nodeId t₀
+              match exit with
+              | .failure cause => runWithErrorHandler cause state
+              | .success value => continueOrComplete value state
+          let interrupt := do
+            if <- state.interruption.shouldInterrupt then
+              match ← IO.wait cancelReady.result? with
+              | some cancel =>
+                  try
+                    cancel
+                    resume (.failure .interrupt)
+                  catch ioError =>
+                    resume (.failure (.die ioError))
+              | none =>
+                  resume (.failure .interrupt)
+          let callback (exit : Exit E A) := do
+            if <- state.interruption.shouldInterrupt then
+              pure ()
+            else
+              resume exit
+          state.interruption.interruptHandler.set interrupt
+          if <- state.interruption.shouldInterrupt then
+            cancelReady.resolve IO.unit
+            interrupt
+          else
+            try
+              let cancel ← register callback
+              cancelReady.resolve cancel
+              if <- state.interruption.shouldInterrupt then
+                interrupt
+            catch ioError =>
+              cancelReady.resolve IO.unit
+              if <- state.interruption.shouldInterrupt then
+                resume (.failure .interrupt)
+              else
+                resume (.failure (.die ioError))
+
         | ZCore.fork effect name _, _ => do
           let effect := effect.ensureNodeId (<- state.newId)
           let newFiberBoxId := effect.nodeId
@@ -267,6 +313,19 @@ open System
 open IO
 
 namespace Z
+
+/-- Start a closed Zenith effect and return its fiber without waiting. -/
+def unsafeFork
+    (self : Z Unit E A)
+    (fiberId : FiberId := "main") : IO (Fiber E A) := do
+  let startTime <- IO.monoMsNow.toIO
+  ZCore.unsafeRunFiber
+    ExecutionDiagram.empty
+    (self.close ())
+    Environment.empty
+    ""
+    fiberId
+    startTime
 
 /-- Run a closed Zenith effect with the fiber interpreter. -/
 def unsafeRunSync

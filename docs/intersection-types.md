@@ -578,9 +578,13 @@ Horizontal construction remains sequential because it lowers to `zipFresh`.
 It does not yet infer an external input row, infer a graph error, create a
 debug graph, or build independent layers in parallel. The experimental
 `Z.provide` bridge runs the closed program in a nested fiber because `ZCore`
-cannot store high-universe services. Outer-fiber interruption does not yet
-cancel that nested task. This must be resolved before this API moves into the
-production layer implementation.
+cannot store high-universe services. `ZCore.asyncInterrupt` connects outer
+interruption to that nested fiber and waits for layer release before it
+completes the outer fiber. An `HEIO` layer acquisition cannot yet be preempted.
+If interruption occurs during acquisition, `Z.provide` waits for acquisition
+to return, interrupts the new program fiber, and then releases the acquired
+scope. The checked examples cover interruption during both acquisition and
+program execution.
 
 Run the checked sketches from the project root:
 

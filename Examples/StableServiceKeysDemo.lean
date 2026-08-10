@@ -175,6 +175,18 @@ def assertEvents
   unless actual == expected do
     throw (IO.userError s!"{name}: unexpected layer events {actual}")
 
+partial def waitForSignal
+    (name : String)
+    (signal : IO.Ref Bool)
+    (attempts : Nat := 1000) : IO Unit := do
+  if ← signal.get then
+    pure ()
+  else if attempts == 0 then
+    throw (IO.userError s!"timed out while waiting for {name}")
+  else
+    IO.sleep 1
+    waitForSignal name signal (attempts - 1)
+
 def checkKeyedLayerSuccess : IO Unit := do
   let events <- IO.mkRef ([] : List String)
   let effect : Z (Environment Services) String String := program
@@ -262,6 +274,31 @@ def githubFromConfigLayer
             })
       (fun _ _ =>
         recordLayerEvent events "release-github-from-config")
+
+def slowGithubFromConfigLayer
+    (events : IO.Ref (List String))
+    (started : IO.Ref Bool) :
+    KeyedLayer
+      (Environment [configEntry])
+      GithubBuildError
+      [githubEntry] :=
+  KeyedLayer.singleton githubEntry <|
+    Layer.acquireRelease
+      (fun environment =>
+        HEIO.bind
+          (recordLayerEvent events "acquire-slow-github") fun _ =>
+            HEIO.bind
+              (HEIO.liftIO.{0} Cause.die (started.set true)) fun _ =>
+                HEIO.bind
+                  (HEIO.liftIO.{0} Cause.die (IO.sleep 20)) fun _ =>
+                    let config :=
+                      Contains.get (target := configEntry) environment
+                    HEIO.pure {
+                      issueCount := fun organization =>
+                        Z.succeedNow <|
+                          if organization == config.organization then 2 else 0
+                    })
+      (fun _ _ => recordLayerEvent events "release-slow-github")
 
 def otherConfigFromStoreLayer
     (events : IO.Ref (List String)) :
@@ -678,6 +715,15 @@ def failingSharedGraphProgram :
   (Z.failCause (R := Environment SharedGraphOutputs)
     (.fail (.inl .unavailable))).map impossible
 
+def waitingSharedGraphProgram
+    (started : IO.Ref Bool) :
+    Z (Environment SharedGraphOutputs) Empty Unit :=
+  Z.async fun _ => started.set true
+
+def githubUnitProgram :
+    Z (Environment [githubEntry]) Empty Unit :=
+  Z.serviceWith fun _ => ()
+
 def automaticallyProvidedSharedGraph
     (events : IO.Ref (List String)) :
     Z
@@ -710,6 +756,26 @@ def automaticallyProvidedFailingProgram
   reporterFromGithubAndStoreLayer events,
   githubFromConfigLayer events
 ]
+
+def automaticallyProvidedWaitingProgram
+    (events : IO.Ref (List String))
+    (started : IO.Ref Bool) :
+    Z
+      (Environment [configEntry, storeEntry])
+      SharedGraphError
+      Unit := Z.provide (waitingSharedGraphProgram started) [
+  metricsFromGithubLayer events,
+  reporterFromGithubAndStoreLayer events,
+  githubFromConfigLayer events
+]
+
+def automaticallyProvidedSlowGithub
+    (events : IO.Ref (List String))
+    (started : IO.Ref Bool) :
+    Z (Environment [configEntry]) GithubBuildError Unit :=
+  Z.provide githubUnitProgram [
+    slowGithubFromConfigLayer events started
+  ]
 
 def checkSharedDependencyGraph : IO Unit := do
   let events <- IO.mkRef ([] : List String)
@@ -835,6 +901,50 @@ def checkZProvideProgramFailure : IO Unit := do
     "release-github-from-config"
   ]
 
+def checkZProvideInterruption : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let started <- IO.mkRef false
+  let effect :=
+    (automaticallyProvidedWaitingProgram events started).provideEnvironment
+      heterogeneousInputs.environment
+  let fiber ← Z.unsafeFork effect "stable-keyed-z-provide-interruption"
+  waitForSignal "provided program" started
+  fiber.requestInterrupt
+  match ← fiber.awaitPoll (fiberId := fiber.fiberId) with
+  | some (.failure .interrupt) => pure ()
+  | _ => throw (IO.userError "Z.provide did not preserve interruption.")
+  fiber.awaitTask
+  assertEvents "Z.provide interruption" events [
+    "acquire-github-from-config",
+    "acquire-metrics",
+    "acquire-reporter",
+    "release-reporter",
+    "release-metrics",
+    "release-github-from-config"
+  ]
+
+def checkZProvideAcquisitionInterruption : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let started <- IO.mkRef false
+  let input : Builder [configEntry] :=
+    Builder.empty.addFresh configEntry config (by decide)
+  let effect :=
+    (automaticallyProvidedSlowGithub events started).provideEnvironment
+      input.environment
+  let fiber ← Z.unsafeFork effect
+    "stable-keyed-z-provide-acquisition-interruption"
+  waitForSignal "slow layer acquisition" started
+  fiber.requestInterrupt
+  match ← fiber.awaitPoll (fiberId := fiber.fiberId) with
+  | some (.failure .interrupt) => pure ()
+  | _ => throw (IO.userError
+      "Z.provide did not preserve acquisition interruption.")
+  fiber.awaitTask
+  assertEvents "Z.provide acquisition interruption" events [
+    "acquire-slow-github",
+    "release-slow-github"
+  ]
+
 def demo : IO Unit := do
   match <- run with
   | some (.success "issue:2") =>
@@ -868,6 +978,8 @@ def demo : IO Unit := do
   checkZProvide
   checkZProvideFailure
   checkZProvideProgramFailure
+  checkZProvideInterruption
+  checkZProvideAcquisitionInterruption
   IO.println "Z.provide checks passed."
 
 end StableServiceKeys

@@ -26,6 +26,10 @@ inductive ZCore : Type -> Type -> Type -> Type 1 where
       (registerCallback : Observer E A -> IO Unit)
       (md := mempty) : ZCore R E A
 
+  | private internal.asyncInterrupt
+      (registerCallback : Observer E A -> IO (IO Unit))
+      (md := mempty) : ZCore R E A
+
   | private internal.onSuccess
       (effect : ZCore R E A)
       (next : A -> ZCore R E A₁)
@@ -69,6 +73,7 @@ def updateMetadata
   | internal.done e md => internal.done e (f md)
   | internal.sync io md => internal.sync io (f md)
   | internal.async cb md => internal.async cb (f md)
+  | internal.asyncInterrupt cb md => internal.asyncInterrupt cb (f md)
   | internal.onSuccess e n md => internal.onSuccess e n (f md)
   | internal.fork e n md => internal.fork e n (f md)
   | internal.onSuccessAndFailure e h n md =>
@@ -84,6 +89,7 @@ def showHead : ZCore R E A -> String
   | internal.done _ _ => "done"
   | internal.sync _ _ => "sync"
   | internal.async _ _ => "async"
+  | internal.asyncInterrupt _ _ => "asyncInterrupt"
   | internal.onSuccess _ _ _ => "onSuccess"
   | internal.fork .. => "fork"
   | internal.onSuccessAndFailure .. => "onSuccessAndFailure"
@@ -96,6 +102,7 @@ def metadata : ZCore R E A -> Metadata
   | internal.done _ md => md
   | internal.sync _ md => md
   | internal.async _ md => md
+  | internal.asyncInterrupt _ md => md
   | internal.onSuccess _ _ md => md
   | internal.fork _ _ md => md
   | internal.onSuccessAndFailure _ _ _ md => md
@@ -155,6 +162,12 @@ def async
     (registerCallback : Observer E A -> IO Unit)
     (md := mempty) : ZCore R E A :=
   internal.async registerCallback md
+
+/-- Register an asynchronous action that returns its interruption action. -/
+def asyncInterrupt
+    (registerCallback : Observer E A -> IO (IO Unit))
+    (md := mempty) : ZCore R E A :=
+  internal.asyncInterrupt registerCallback md
 
 def flatMap
     (effect : ZCore R E A)
@@ -293,6 +306,12 @@ def async
     (registerCallback : Observer E A -> IO Unit)
     (md := mempty) : Z R E A :=
   ⟨fun _ => ZCore.async registerCallback md⟩
+
+/-- Register an asynchronous effect with an action that cancels its work. -/
+def asyncInterrupt
+    (registerCallback : Observer E A -> IO (IO Unit))
+    (md := mempty) : Z R E A :=
+  ⟨fun _ => ZCore.asyncInterrupt registerCallback md⟩
 
 def flatMap
     (effect : Z R E A)

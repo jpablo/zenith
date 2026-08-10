@@ -438,37 +438,50 @@ Build a keyed layer, supply its environment to a program, and release the
 layer after the program completes.
 
 The current implementation runs the closed program in a nested fiber because
-`ZCore` cannot store a service environment from an arbitrary universe.
+`ZCore` cannot store a service environment from an arbitrary universe. Outer
+interruption cancels that fiber and waits for this layer scope to release.
 -/
 def provide
     (self : KeyedLayer.{uin, uout} R E entries)
     (program : Z (Environment entries) E A)
     (fiberId : FiberId := "Z.provide") : Z R E A :=
   Z.fromCore fun input =>
-    ZCore.async fun observer => do
+    ZCore.asyncInterrupt fun observer => do
+      let cancelled ← IO.mkRef false
+      let nestedFiber ← IO.mkRef (none : Option (Fiber E A))
       let builtAndRun :
           HEIO (Cause E) (ULift.{uout} (Exit E A)) :=
         HEIO.bind (self.layer.build input) fun resource =>
           let runProgram :
               HEIO (Cause E) (ULift.{uout} (Exit E A)) :=
-            HEIO.bind
-              (HEIO.liftIO.{uout} Cause.die <|
-                Z.unsafeRunSync
-                  (program.provideEnvironment resource.value)
-                  fiberId)
-              fun result =>
-                match result.down with
-                | some exit => HEIO.pure (ULift.up exit)
-                | none =>
-                    HEIO.throw <| .die <|
-                      IO.userError
-                        "the provided program did not return an exit value"
+            HEIO.liftIO.{uout} Cause.die do
+              let fiber ← Z.unsafeFork
+                (program.provideEnvironment resource.value)
+                fiberId
+              nestedFiber.set (some fiber)
+              if ← cancelled.get then
+                fiber.requestInterrupt
+              match ← fiber.awaitPoll (fiberId := fiber.fiberId) with
+              | some exit =>
+                  fiber.awaitTask
+                  pure exit
+              | none =>
+                  throw <| IO.userError
+                    "the provided program did not return an exit value"
           runProgram.ensuring resource.release
-      let _task ← IO.asTask do
+      let worker ← IO.asTask do
         match ← HEIO.toIOResult builtAndRun with
         | .ok exit => observer exit
         | .error cause => observer (.failure cause)
-      pure ()
+      pure do
+        let first ← cancelled.modifyGet fun wasCancelled =>
+          (!wasCancelled, true)
+        if first then
+          match ← nestedFiber.get with
+          | some fiber => fiber.requestInterrupt
+          | none => pure ()
+        let _ ← IO.wait worker
+        pure ()
 
 end KeyedLayer
 

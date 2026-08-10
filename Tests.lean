@@ -76,6 +76,48 @@ def testAsyncInterruption : IO Unit := do
   | .success (.failure .interrupt) => pure ()
   | _ => failTest "interrupting a pending async effect did not complete the fiber"
 
+partial def waitForFlag
+    (name : String)
+    (flag : IO.Ref Bool)
+    (attempts : Nat := 1000) : IO Unit := do
+  if ← flag.get then
+    pure ()
+  else if attempts == 0 then
+    failTest s!"timed out while waiting for {name}"
+  else
+    IO.sleep 1
+    waitForFlag name flag (attempts - 1)
+
+def testAsyncInterruptCanceler : IO Unit := do
+  let registering ← IO.mkRef false
+  let cancelled ← IO.mkRef false
+  let pending : Z Unit Empty Unit := Z.asyncInterrupt fun _ => do
+    registering.set true
+    IO.sleep 20
+    pure (cancelled.set true)
+  let fiber ← Z.unsafeFork pending "async-interrupt-canceler"
+  waitForFlag "cancellable async registration" registering
+  fiber.requestInterrupt
+  match ← fiber.awaitPoll (fiberId := fiber.fiberId) with
+  | some (.failure .interrupt) => pure ()
+  | _ => failTest "cancellable async interruption returned the wrong exit"
+  fiber.awaitTask
+  assertTrue "cancellable async interruption did not run its canceler"
+    (← cancelled.get)
+
+def testAsyncInterruptCancelerFailure : IO Unit := do
+  let registered ← IO.mkRef false
+  let pending : Z Unit Empty Unit := Z.asyncInterrupt fun _ => do
+    registered.set true
+    pure (throw (IO.userError "canceler failed"))
+  let fiber ← Z.unsafeFork pending "async-interrupt-canceler-failure"
+  waitForFlag "failing cancellable async registration" registered
+  fiber.requestInterrupt
+  match ← fiber.awaitPoll (fiberId := fiber.fiberId) with
+  | some (.failure (.die _)) => pure ()
+  | _ => failTest "a cancellable async canceler defect did not complete the fiber"
+  fiber.awaitTask
+
 def testObserverRace : IO Unit := do
   for index in [0:100] do
     assertTrue s!"observer race failed at iteration {index}" (<- observerRaceOnce index)
@@ -987,6 +1029,8 @@ def main : IO Unit := do
   testCompleteBeforeTask
   testAsyncRegistrationFailure
   testAsyncInterruption
+  testAsyncInterruptCanceler
+  testAsyncInterruptCancelerFailure
   testObserverRace
   testGraphVizEscaping
   testChildDiagramLifetime
