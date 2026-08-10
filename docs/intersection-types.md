@@ -398,24 +398,40 @@ normalized errors, and ordered catch chains in a larger program.
 
 ## Stable service-key prototype
 
-[`stable-service-keys.lean`](stable-service-keys.lean) is a separate prototype.
-It does not change the production `Z` environment. Each service entry contains
-an explicit numeric key and its service type. An insertion sort gives service
-rows a stable order and removes duplicate keys.
+The reusable experiment is in
+[`Z/Experimental/StableServiceKeys.lean`](../Z/Experimental/StableServiceKeys.lean).
+The checked client is [`stable-service-keys.lean`](stable-service-keys.lean).
+The experiment does not change the production `Z` environment. Each service
+entry contains an owner, a local name, and its service type. A lexical
+insertion sort gives service rows a stable order and removes duplicate keys.
 
 The prototype provides these checked properties:
 
 - Opposite insertion orders produce the same row type.
 - A repeated service key produces one row entry.
 - `Contains` returns only the service type assigned to the selected entry.
-- `Builder.add` lets layer code add services without tuple-order knowledge.
+- `Builder.addFresh` lets layer code add services without tuple-order
+  knowledge and requires proof that the qualified key is new.
+- `Builder.addExisting` handles an exact duplicate without adding a value.
 - A `Type 1` GitHub service runs through the existing `Z` and `Layer` types.
+- `service_key configEntry : Config` resolves `Config` and generates the key
+  `StableServiceKeys.Config` from its full Lean declaration name.
+- `KeyedLayer.singleton` converts one ordinary layer to a one-service keyed
+  layer.
+- `KeyedLayer.zipFresh` combines disjoint service rows in canonical key order.
+- `Environment.CanProvide` projects one required keyed row from a larger row.
+- `KeyedLayer.zipFreshMeetJoin` combines different input rows and infers their
+  common error channel.
+- `KeyedLayer.zipFreshInto` injects both errors into one selected stable error
+  channel.
 
-The prototype also exposes the next design problem. Two different service
-entries can use the same numeric key. Normalization keeps one entry, but it
-does not report the conflict. A production design needs an extensible key
-identity and a compile-time conflict check. It must also define how separate
-libraries allocate keys without a central numeric registry.
+The checked examples show that two libraries can use the same local service
+name when their declaration namespaces differ. They also show that
+`Builder.addFresh` rejects a key that is already present. The `Entry`
+constructor is private. A client module can create entries through
+`service_key`, but it cannot create a conflicting raw entry.
+The command generates a reducible abbreviation. Row normalization and
+projection must inspect the key during elaboration.
 
 The entry stores a service type as data. Thus, a row uses one universe level
 above its service ceiling. Low-universe services must also be placed at that
@@ -428,9 +444,25 @@ Run the checked runtime example with:
 lake env lean --run docs/stable-service-keys.lean
 ```
 
-The next step is to select and test a key identity scheme. Good candidates are
-qualified names, user-defined key types with stable ranks, or a registry that
-assigns unique identifiers.
+The runtime checks compose effectful keyed layers through the production
+`Layer.zipWith` operation. The checks confirm acquisition order, reverse
+release order, cleanup after a later acquisition fails, and cleanup after the
+program fails. The final environment row has canonical key order even when the
+layers are supplied in the opposite order.
+
+The heterogeneous checks use one layer that requires `Config` and another
+layer that requires `Store`. Their result requires the canonical union of both
+input rows. Each layer receives only its own projected row. The two layers also
+have different error types. One check infers their `Sum` with
+`ErrorChannel.Join`. Another check reverses layer order and uses
+`ErrorChannel.CanInject` to keep the same selected error sum. A failing second
+acquisition keeps its error side and releases the first resource.
+
+The declaration command currently accepts only one named service type. It does
+not yet define identities for parameterized service types. Horizontal layer
+composition now handles different keyed inputs and errors. The next layer step
+is vertical composition: feed one keyed output row into a later keyed input row
+while preserving required external inputs and release behavior.
 
 Run the checked sketches from the project root:
 

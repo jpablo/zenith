@@ -1,102 +1,16 @@
-import Z
+import Z.Experimental.StableServiceKeys
 
 /-!
 A separate experiment for stable, normalized service rows.
 
 This file does not change the production `Z` environment. It tests whether an
-explicit service key can remove product-order knowledge from layer code.
+explicit qualified service key can remove product-order knowledge from layer
+code without one central numeric registry.
 -/
 
 namespace StableServiceKeys
 
-/-- A stable numeric key and the service type assigned to it. -/
-structure Entry.{u} where
-  key : Nat
-  Service : Type u
-
-namespace Row
-
-/-- Insert one entry in key order. Keep the existing entry for a duplicate. -/
-def insert (entry : Entry) : List Entry -> List Entry
-  | [] => [entry]
-  | head :: tail =>
-      match compare entry.key head.key with
-      | .lt => entry :: head :: tail
-      | .eq => head :: tail
-      | .gt => head :: insert entry tail
-
-/-- Give any list of entries one stable order and remove duplicate keys. -/
-def normalize (entries : List Entry) : List Entry :=
-  entries.foldr insert []
-
-end Row
-
-/-- A typed value for every entry in a service row. -/
-inductive Environment.{u} : List Entry.{u} -> Type (u + 1) where
-  | empty : Environment []
-  | cons (value : entry.Service) (tail : Environment entries) :
-      Environment (entry :: entries)
-
-namespace Environment
-
-/-- Insert a service value at the position selected by its stable key. -/
-def insert
-    (entry : Entry)
-    (value : entry.Service) :
-    {entries : List Entry} ->
-      Environment entries -> Environment (Row.insert entry entries)
-  | [], .empty => .cons value .empty
-  | head :: tail, .cons headValue tailValues => by
-      cases order : compare entry.key head.key with
-      | lt =>
-          simpa [Row.insert, order] using
-            (Environment.cons value
-              (Environment.cons headValue tailValues))
-      | eq =>
-          simpa [Row.insert, order] using
-            (Environment.cons headValue tailValues)
-      | gt =>
-          simpa [Row.insert, order] using
-            (Environment.cons headValue
-              (insert entry value tailValues))
-
-end Environment
-
-/-- Evidence that one exact entry occurs in a row. -/
-class Contains (target : Entry) (entries : List Entry) where
-  get : Environment entries -> target.Service
-
-instance (priority := high) : Contains entry (entry :: entries) where
-  get
-    | .cons value _ => value
-
-instance (priority := low) [Contains target entries] :
-    Contains target (entry :: entries) where
-  get
-    | .cons _ tail => Contains.get tail
-
-/-- Build a typed environment without knowledge of its final storage order. -/
-structure Builder.{u} (entries : List Entry.{u}) where
-  environment : Environment entries
-
-namespace Builder
-
-def empty : Builder [] :=
-  ⟨Environment.empty⟩
-
-def add
-    (builder : Builder entries)
-    (entry : Entry)
-    (value : entry.Service) : Builder (Row.insert entry entries) :=
-  ⟨Environment.insert entry value builder.environment⟩
-
-def toLayer (builder : Builder entries) :
-    Layer Unit Empty (Environment entries) :=
-  Layer.succeed builder.environment
-
-end Builder
-
-/-! The example service keys use explicit ranks. -/
+/-! The example service keys come from service declaration names. -/
 
 structure Config : Type 1 where
   organization : String
@@ -107,23 +21,33 @@ structure Github : Type 1 where
 structure Store : Type 1 where
   label : String
 
-def configEntry : Entry.{1} := {
-  key := 20
-  Service := Config
-}
+service_key configEntry : Config
 
-def githubEntry : Entry.{1} := {
-  key := 30
-  Service := Github
-}
+service_key githubEntry : Github
 
-def storeEntry : Entry.{1} := {
-  key := 10
-  Service := Store
-}
+service_key storeEntry : Store
+
+namespace OtherLibrary
+
+structure Config : Type 1 where
+  organization : String
+
+end OtherLibrary
+
+service_key otherConfigEntry : OtherLibrary.Config
+
+example : configEntry.key = {
+    owner := "StableServiceKeys"
+    name := "Config"
+  } := rfl
+
+example : otherConfigEntry.key = {
+    owner := "StableServiceKeys.OtherLibrary"
+    name := "Config"
+  } := rfl
 
 abbrev Services : List Entry.{1} :=
-  [storeEntry, configEntry, githubEntry]
+  [configEntry, githubEntry, storeEntry]
 
 example : Row.normalize [configEntry, githubEntry, storeEntry] =
     Row.normalize [storeEntry, configEntry, githubEntry] := rfl
@@ -133,6 +57,10 @@ example : Row.normalize [configEntry, configEntry, githubEntry, storeEntry] =
 
 example : Row.normalize [storeEntry, configEntry, githubEntry] =
     Services := rfl
+
+example : Row.Fresh otherConfigEntry.key [configEntry] := by decide
+
+example : ¬ Row.Fresh configEntry.key [configEntry] := by decide
 
 def config : Config := {
   organization := "lean"
@@ -148,31 +76,25 @@ def store : Store := {
 
 def servicesForward : Builder Services :=
   Builder.empty
-    |>.add configEntry config
-    |>.add githubEntry github
-    |>.add storeEntry store
+    |>.addFresh configEntry config (by decide)
+    |>.addFresh githubEntry github (by decide)
+    |>.addFresh storeEntry store (by decide)
 
 def servicesReverse : Builder Services :=
   Builder.empty
-    |>.add storeEntry store
-    |>.add githubEntry github
-    |>.add configEntry config
+    |>.addFresh storeEntry store (by decide)
+    |>.addFresh githubEntry github (by decide)
+    |>.addFresh configEntry config (by decide)
+
+def servicesBeforeDuplicate : Builder [configEntry, githubEntry] :=
+  Builder.empty
+    |>.addFresh configEntry config (by decide)
+    |>.addFresh githubEntry github (by decide)
 
 def servicesWithDuplicate : Builder Services :=
-  Builder.empty
-    |>.add configEntry config
-    |>.add githubEntry github
-    |>.add configEntry config
-    |>.add storeEntry store
-
-/-- Select a high-universe service without returning it as a fiber result. -/
-def withServiceZ
-    (entry : Entry)
-    [Contains entry entries]
-    (operation : entry.Service -> Z Unit E A) :
-    Z (Environment entries) E A :=
-  Z.serviceWithZ fun environment =>
-    operation (Contains.get environment)
+  servicesBeforeDuplicate
+    |>.addExisting configEntry config
+    |>.addFresh storeEntry store (by decide)
 
 def program : Z (Environment Services) Empty String := zdo
   let organization <- withServiceZ (entries := Services) configEntry fun config =>
@@ -186,6 +108,275 @@ def program : Z (Environment Services) Empty String := zdo
 def run : IO (Option (Exit Empty String)) :=
   servicesReverse.toLayer.run () program "stable-service-keys"
 
+def recordLayerEvent
+    (events : IO.Ref (List String))
+    (event : String) : HEIO (Cause E) Unit :=
+  HEIO.bind
+    (HEIO.liftIO.{0} Cause.die <|
+      events.modify fun current => current ++ [event])
+    fun _ => HEIO.pure ()
+
+def trackedServiceLayer
+    (events : IO.Ref (List String))
+    (name : String)
+    (value : A) : Layer Unit String A :=
+  Layer.acquireRelease
+    (fun _ =>
+      HEIO.bind (recordLayerEvent events s!"acquire-{name}") fun _ =>
+        HEIO.pure value)
+    (fun _ _ => recordLayerEvent events s!"release-{name}")
+
+def failingServiceLayer
+    (events : IO.Ref (List String))
+    (name : String) : Layer Unit String A :=
+  Layer.fromHEIO fun _ =>
+    HEIO.bind (recordLayerEvent events s!"acquire-{name}") fun _ =>
+      HEIO.throw (.fail s!"{name} acquisition failed")
+
+def keyedServicesReverse
+    (events : IO.Ref (List String)) :
+    KeyedLayer Unit String Services :=
+  let storeLayer := KeyedLayer.singleton storeEntry <|
+    trackedServiceLayer events "store" store
+  let githubLayer := KeyedLayer.singleton githubEntry <|
+    trackedServiceLayer events "github" github
+  let configLayer := KeyedLayer.singleton configEntry <|
+    trackedServiceLayer events "config" config
+  storeLayer.zipFresh githubLayer (by decide)
+    |>.zipFresh configLayer (by decide)
+
+abbrev ConfigGithubServices : List Entry.{1} :=
+  [configEntry, githubEntry]
+
+def failingKeyedServices
+    (events : IO.Ref (List String)) :
+    KeyedLayer Unit String ConfigGithubServices :=
+  let configLayer := KeyedLayer.singleton configEntry <|
+    trackedServiceLayer events "config" config
+  let githubLayer := KeyedLayer.singleton githubEntry <|
+    failingServiceLayer events "github"
+  configLayer.zipFresh githubLayer (by decide)
+
+def assertEvents
+    (name : String)
+    (events : IO.Ref (List String))
+    (expected : List String) : IO Unit := do
+  let actual <- events.get
+  unless actual == expected do
+    throw (IO.userError s!"{name}: unexpected layer events {actual}")
+
+def checkKeyedLayerSuccess : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect : Z (Environment Services) String String := program
+  match <- (keyedServicesReverse events).toLayer.run () effect
+      "stable-keyed-layer-success" with
+  | some (.success "issue:2") => pure ()
+  | _ => throw (IO.userError "The keyed service layer did not run.")
+  assertEvents "keyed success" events [
+    "acquire-store",
+    "acquire-github",
+    "acquire-config",
+    "release-config",
+    "release-github",
+    "release-store"
+  ]
+
+def checkKeyedLayerAcquisitionFailure : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect : Z (Environment ConfigGithubServices) String Unit :=
+    Z.serviceWith fun _ => ()
+  match <- (failingKeyedServices events).toLayer.run () effect
+      "stable-keyed-layer-acquisition-failure" with
+  | some (.failure (.fail "github acquisition failed")) => pure ()
+  | _ => throw (IO.userError "The keyed layer failure was not preserved.")
+  assertEvents "keyed acquisition failure" events [
+    "acquire-config",
+    "acquire-github",
+    "release-config"
+  ]
+
+def checkKeyedLayerProgramFailure : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect : Z (Environment Services) String Unit :=
+    Z.fail "program failed"
+  match <- (keyedServicesReverse events).toLayer.run () effect
+      "stable-keyed-layer-program-failure" with
+  | some (.failure (.fail "program failed")) => pure ()
+  | _ => throw (IO.userError "The keyed program failure was not preserved.")
+  assertEvents "keyed program failure" events [
+    "acquire-store",
+    "acquire-github",
+    "acquire-config",
+    "release-config",
+    "release-github",
+    "release-store"
+  ]
+
+/-! Keyed layers with different input rows and error types. -/
+
+inductive GithubBuildError where
+  | unavailable
+  deriving BEq, Repr
+
+inductive OtherConfigBuildError where
+  | unavailable
+  deriving BEq, Repr
+
+abbrev HeterogeneousInputs : List Entry.{1} :=
+  [configEntry, storeEntry]
+
+abbrev HeterogeneousOutputs : List Entry.{1} :=
+  [githubEntry, otherConfigEntry]
+
+def heterogeneousInputs : Builder HeterogeneousInputs :=
+  Builder.empty
+    |>.addFresh storeEntry store (by decide)
+    |>.addFresh configEntry config (by decide)
+
+def githubFromConfigLayer
+    (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Environment [configEntry])
+      GithubBuildError
+      [githubEntry] :=
+  KeyedLayer.singleton githubEntry <|
+    Layer.acquireRelease
+      (fun environment =>
+        HEIO.bind
+          (recordLayerEvent events "acquire-github-from-config") fun _ =>
+            let config := Contains.get (target := configEntry) environment
+            HEIO.pure {
+              issueCount := fun organization =>
+                Z.succeedNow <|
+                  if organization == config.organization then 2 else 0
+            })
+      (fun _ _ =>
+        recordLayerEvent events "release-github-from-config")
+
+def otherConfigFromStoreLayer
+    (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Environment [storeEntry])
+      OtherConfigBuildError
+      [otherConfigEntry] :=
+  KeyedLayer.singleton otherConfigEntry <|
+    Layer.acquireRelease
+      (fun environment =>
+        HEIO.bind
+          (recordLayerEvent events "acquire-other-config-from-store") fun _ =>
+            let store := Contains.get (target := storeEntry) environment
+            HEIO.pure { organization := store.label })
+      (fun _ _ =>
+        recordLayerEvent events "release-other-config-from-store")
+
+def failingOtherConfigFromStoreLayer
+    (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Environment [storeEntry])
+      OtherConfigBuildError
+      [otherConfigEntry] :=
+  KeyedLayer.singleton otherConfigEntry <|
+    Layer.fromHEIO fun _ =>
+      HEIO.bind
+        (recordLayerEvent events "acquire-other-config-from-store") fun _ =>
+          HEIO.throw (.fail .unavailable)
+
+def heterogeneousKeyedServices
+    (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Environment HeterogeneousInputs)
+      (GithubBuildError ⊕ OtherConfigBuildError)
+      HeterogeneousOutputs :=
+  (githubFromConfigLayer events).zipFreshMeetJoin
+    (otherConfigFromStoreLayer events)
+    (by rfl)
+    (by decide)
+
+/-- Select one stable error sum even when layer order changes. -/
+def heterogeneousKeyedServicesReverse
+    (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Environment HeterogeneousInputs)
+      (GithubBuildError ⊕ OtherConfigBuildError)
+      HeterogeneousOutputs :=
+  (otherConfigFromStoreLayer events).zipFreshInto
+    (githubFromConfigLayer events)
+    (by rfl)
+    (by decide)
+
+def failingHeterogeneousKeyedServices
+    (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Environment HeterogeneousInputs)
+      (GithubBuildError ⊕ OtherConfigBuildError)
+      HeterogeneousOutputs :=
+  (githubFromConfigLayer events).zipFreshMeetJoin
+    (failingOtherConfigFromStoreLayer events)
+    (by rfl)
+    (by decide)
+
+def heterogeneousProgram :
+    Z (Environment HeterogeneousOutputs) Empty String := zdo
+  let count <- withServiceZ
+    (entries := HeterogeneousOutputs) githubEntry fun github =>
+      github.issueCount "lean"
+  let organization <- withServiceZ
+    (entries := HeterogeneousOutputs) otherConfigEntry fun otherConfig =>
+      Z.succeedNow otherConfig.organization
+  pure s!"{organization}:{count}"
+
+def checkHeterogeneousKeyedLayers : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect : Z
+      (Environment HeterogeneousOutputs)
+      (GithubBuildError ⊕ OtherConfigBuildError)
+      String := heterogeneousProgram
+  match <- (heterogeneousKeyedServices events).toLayer.run
+      heterogeneousInputs.environment effect "stable-keyed-layer-heterogeneous" with
+  | some (.success "issue:2") => pure ()
+  | _ => throw (IO.userError "The heterogeneous keyed layers did not run.")
+  assertEvents "heterogeneous keyed layers" events [
+    "acquire-github-from-config",
+    "acquire-other-config-from-store",
+    "release-other-config-from-store",
+    "release-github-from-config"
+  ]
+
+def checkHeterogeneousKeyedLayersReverse : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect : Z
+      (Environment HeterogeneousOutputs)
+      (GithubBuildError ⊕ OtherConfigBuildError)
+      String := heterogeneousProgram
+  match <- (heterogeneousKeyedServicesReverse events).toLayer.run
+      heterogeneousInputs.environment effect
+      "stable-keyed-layer-heterogeneous-reverse" with
+  | some (.success "issue:2") => pure ()
+  | _ => throw (IO.userError "The reversed heterogeneous layers did not run.")
+  assertEvents "reversed heterogeneous keyed layers" events [
+    "acquire-other-config-from-store",
+    "acquire-github-from-config",
+    "release-github-from-config",
+    "release-other-config-from-store"
+  ]
+
+def checkHeterogeneousKeyedLayerFailure : IO Unit := do
+  let events <- IO.mkRef ([] : List String)
+  let effect : Z
+      (Environment HeterogeneousOutputs)
+      (GithubBuildError ⊕ OtherConfigBuildError)
+      Unit := Z.serviceWith fun _ => ()
+  match <- (failingHeterogeneousKeyedServices events).toLayer.run
+      heterogeneousInputs.environment effect
+      "stable-keyed-layer-heterogeneous-failure" with
+  | some (.failure (.fail (.inr .unavailable))) => pure ()
+  | _ => throw (IO.userError "The joined layer error was not preserved.")
+  assertEvents "heterogeneous keyed layer failure" events [
+    "acquire-github-from-config",
+    "acquire-other-config-from-store",
+    "release-github-from-config"
+  ]
+
 def demo : IO Unit := do
   match <- run with
   | some (.success "issue:2") =>
@@ -196,6 +387,14 @@ def demo : IO Unit := do
       throw (IO.userError "The stable service-key prototype failed.")
   | none =>
       throw (IO.userError "The stable service-key prototype returned no result.")
+  checkKeyedLayerSuccess
+  checkKeyedLayerAcquisitionFailure
+  checkKeyedLayerProgramFailure
+  IO.println "Keyed layer lifecycle checks passed."
+  checkHeterogeneousKeyedLayers
+  checkHeterogeneousKeyedLayersReverse
+  checkHeterogeneousKeyedLayerFailure
+  IO.println "Heterogeneous keyed-layer checks passed."
 
 end StableServiceKeys
 
