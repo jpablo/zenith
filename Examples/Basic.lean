@@ -1,193 +1,169 @@
 import Z
 
+/-!
+Small examples of the public Zenith API.
+
+Use ordinary `do` when all actions already have one environment and error
+type. Use `zdo` when Zenith must infer and combine different requirements.
+-/
+
 open Console (consoleLive)
 
 structure Person where
   name : String
-  age  : Nat
+  age : Nat
 
 instance : ToString Person where
-  toString person := s!"Person (name = {person.name}, age = {person.age})"
+  toString person :=
+    s!"Person (name = {person.name}, age = {person.age})"
 
+/-! Creating and combining effects. -/
 
-def IO.repeatN (n: Nat) (za: IO A) : IO Unit := do
-  let _ <- za
-  if n > 0 then
-    repeatN (n - 1) za
+def succeedNowExample : Z Unit Empty String :=
+  Z.succeedNow "hello from Z.succeedNow"
 
+def zipExample : Z Unit Empty (Nat × String) :=
+  (Z.succeedNow 8).zip (Z.succeedNow "LO")
 
-/-!  Examples -/
+/-- The same operation as `zipExample`, written with `do`. -/
+def zipExample2 : Z Unit Empty (Nat × String) := do
+  let number <- Z.succeedNow 8
+  let text <- Z.succeedNow "LO"
+  pure (number, text)
 
-def succeedNowExample :=
-  Z.succeedNow "hello from Z.succeed"
-
-def zipExample :=
-  (Z.succeedNow (8: Nat)).zip (.succeedNow "LO")
-
-def zipExample2: Z Unit Empty (Nat × String) :=
-  .flatMap (.done ∘ .success <| (8: Nat)) fun n => 
-    .flatMap (.done ∘ .success <| "LO") fun s => 
-      .done ∘ .success <| (n, s)
-
-def mapExample :=
+def mapExample : Z Unit Empty String :=
   zipExample.withLabel "zipExample"
-    |>.map (fun (nat, str) => {name := str, age := nat : Person})
-    |>.map (fun p => s!"{p.name} is {p.age} years old")
+    |>.map (fun (age, name) => { name, age : Person })
+    |>.map (fun person =>
+      s!"{person.name} is {person.age} years old")
 
-def monadExample := do 
-  let (a, b) <- zipExample
-  consoleLive.printLine s!"Got a tuple: ({a},{b})"
+def monadExample : Z Unit Empty Unit := do
+  let (number, text) <- zipExample
+  consoleLive.printLine s!"Got a tuple: ({number}, {text})"
 
-def succeedExample: Z Unit Empty Unit :=
-  Z.succeed <| println! "hello from IO"
+/-! Lift synchronous `IO` into Zenith. -/
 
-def attemptExample: Z Unit IO.Error Unit :=
-  Z.attempt <| println! "hello from IO"
+def succeedExample : Z Unit Empty Unit :=
+  Z.succeed <| IO.println "hello from IO"
 
-def coercionExample: Z Unit IO.Error Unit :=
-  println! "hello from IO"
+def attemptExample : Z Unit IO.Error Unit :=
+  Z.attempt <| IO.println "hello from IO"
 
+/-- `IO` coerces to a `Z` effect when the expected type is known. -/
+def coercionExample : Z Unit IO.Error Unit :=
+  IO.println "hello from IO"
 
-/-- Option 1: propagate type parameters up to the top level function -/
-def asyncExample {R E} :=
-  Z.async (R := R) (E := E) fun continueExecution => do
-    println! "sleeping 1 seconds..."
+/-! Asynchronous effects and fibers. -/
+
+def asyncExample : Z Unit Empty Nat :=
+  Z.async fun resume => do
+    IO.println "sleeping for one second..."
     IO.sleep 1000
-    println! "waking up"
-    continueExecution (.success 10)
+    IO.println "waking up"
+    resume (.success 10)
 
-def forkExample := do
-  let t1 := Z.repeatN 10 (consoleLive.printLine "- t1" *> .sleep 200)
-  let t3 := Z.repeatN 10 (consoleLive.printLine "- t1" *> .sleep 200)
-  let t2 := Z.repeatN 10 (consoleLive.printLine "+ t2" *> .sleep 200)
-  let fiber1 <- t1.fork "f1"
-  let fiber2 <- t2.fork "f2"
-  -- fiber1.interrupt
-  -- fiber2.interrupt
-  let int    <- fiber1.join
-  let int2   <- fiber2.join
-  -- let ret := s!"Got two ints: ({int}, {int2})"
-  -- .printLine ret
-  consoleLive.printLine "done"
+def forkExample : Z Unit Empty Unit := do
+  let left :=
+    Z.repeatN 3 (consoleLive.printLine "- left" *> Z.sleep 20)
+  let right :=
+    Z.repeatN 3 (consoleLive.printLine "+ right" *> Z.sleep 20)
+  let leftFiber <- left.fork "left"
+  let rightFiber <- right.fork "right"
+  leftFiber.join
+  rightFiber.join
+  consoleLive.printLine "both fibers finished"
 
-def taskExample: IO Unit := do
-  let t1 := IO.repeatN 100 (IO.println "- t1" *> IO.sleep 200)
-  let t2 := IO.repeatN 100 (IO.println "+ t2" *> IO.sleep 200)
-  let _ <- t1.asTask
-  let _ <- t2.asTask
-  IO.println "done"
-
-
-def stackOverflow :=
+/-- A long sequence is represented by the executable `ZCore` tree. -/
+def stackSafetyExample : Z Unit Empty Unit :=
   Z.repeatN 20 <| consoleLive.printLine "Howdy!"
 
-def stackOverflowIO :=
-  let p := IO.println "Howdy!"
-  IO.repeatN 10000000 p
+/-! Finalization and interruption. -/
 
-def flatMapEx := do
-  consoleLive.printLine "hi"
-  consoleLive.printLine "there"
+def ensuringExample : Z Unit Empty Unit :=
+  (consoleLive.printLine "work" *> Z.sleep 10)
+    |>.repeatN 1
+    |>.ensuring (consoleLive.printLine "finalizer")
 
-def ensuringExample :=  do
-  consoleLive.printLine "Howdy" *> Z.sleep 100
-  |>.repeatN 1
-  |>.ensuring (consoleLive.printLine "--- Bowdy! ---" )
+def uninterruptibleExample : Z Unit Empty Unit :=
+  Z.sleep 10 |>.uninterruptible
 
-def uninterruptibleExample :=
-  Z.sleep 100 |>.uninterruptible
+/-- The fiber finishes before the interruption request. -/
+def interruptionExample1 : Z Unit Empty Unit := do
+  let fiber <-
+    (Z.sleep 1)
+      |>.repeatN 4
+      |>.fork "finished-fiber"
+  Z.sleep 20
+  let _ <- fiber.interrupt
+  pure ()
 
-/-- Fiber finishes before interruption  -/
-def interruptionExample1 := do
-  let fiber <- 
-    Z.sleep 1
-    |>.repeatN 4
-    |>.fork "my-fiber"
+/-- The interruption request stops a running fiber. -/
+def interruptionExample2 : Z Unit Empty Unit := do
+  let fiber <-
+    (Z.sleep 50)
+      |>.repeatN 5
+      |>.fork "running-fiber"
   Z.sleep 100
   let _ <- fiber.interrupt
-  
-/-- Fiber is interrupted  -/
-def interruptionExample2 := do
-  let fiber <- 
-    Z.sleep 50
-    |>.repeatN 5
-    |>.fork "my-fiber"
-  Z.sleep 100
+  pure ()
+
+/-- The interruption request can arrive before the first action completes. -/
+def interruptionExample3 : Z Unit Empty Unit := do
+  let fiber <-
+    (Z.sleep 50)
+      |>.repeatN 5
+      |>.fork "new-fiber"
   let _ <- fiber.interrupt
+  pure ()
 
-/-- Fiber is interrupted and then joined  -/
-def interruptionExample2b := do
-  let fiber <- 
-    Z.sleep 50
-    |>.repeatN 5
-    |>.fork "my-fiber"
-  Z.sleep 100
+/-- An uninterruptible fiber completes before `interrupt` returns. -/
+def uninterruptibleExample1 : Z Unit Empty Unit := do
+  let fiber <-
+    (Z.sleep 20)
+      |>.repeatN 2
+      |>.uninterruptible
+      |>.fork "uninterruptible-fiber"
+  Z.sleep 10
   let _ <- fiber.interrupt
-  -- interrupt already uses .join, so joining again is pointless
-  let _ <- fiber.join
-  
-/-- Fiber is interrupted before execution  -/
-def interruptionExample3 := do
-  let fiber <- 
-    Z.sleep 50
-    |>.repeatN 5
-    |>.fork "my-fiber"
+  pure ()
+
+/-- Interruption takes effect after the uninterruptible region. -/
+def uninterruptibleExample2 : Z Unit Empty Unit := do
+  let region := (Z.sleep 20).repeatN 2 |>.uninterruptible
+  let fiber <-
+    (region *> Z.sleep 100)
+      |>.fork "partly-uninterruptible-fiber"
+  Z.sleep 10
   let _ <- fiber.interrupt
-  
+  pure ()
 
-/-- Fiber is not interrupted  -/
-def uninterruptibleExample1 := do
-  let fiber <- 
-    Z.sleep 50
-    |>.repeatN 5
-    |>.uninterruptible
-    |>.fork "my-fiber"
-  Z.sleep 100
-  let _ <- fiber.interrupt
+/-! Environment inference. -/
 
-/-- Fiber is interrupted only after the uninterruptible region has finised  -/
-def uninterruptibleExample2 := do
-  let fiber <- 
-    ((Z.sleep 50 |>.repeatN 5 |>.uninterruptible) *> (Z.sleep 50 |>.repeatN 5))
-    |>.fork "my-fiber"
-  Z.sleep 100
-  let _ <- fiber.interrupt
+/-- `zdo` combines and normalizes the two environment requirements. -/
+def envExample1 := zdo[Empty]
+  let number <- Z.environment Nat
+  let text <- Z.environment String
+  consoleLive.printLine s!"environment: ({number}, {text})"
 
-def e1: Z Nat Empty (Environment Nat) := Z.environment Nat
-def e2: Z String Empty (Environment String) := Z.environment String
+example : Z (Nat × String) Empty Unit := envExample1
 
-def envExample1: Z (Nat × String) Empty Unit := do
-  let env <- Z.environment (Nat × String)
-  -- let nat <- Z.environment Nat
-  -- let str <- Z.environment String
-  consoleLive.printLine (env.get Nat)
-  consoleLive.printLine (env.get String)
+def envExample1ready : Z Unit Empty Unit :=
+  envExample1.provideEnvironment (1, "hello")
 
-def envExample1ready: Z Unit Empty Unit :=
-  envExample1.provideEnvironment ((1: Nat), "hello")
+/-!
+`Console` is in `Type 1`. Zenith can use it as an environment even though the
+standard `IO` result type is restricted to `Type`.
+-/
+def envExample2 : Z Console Empty Unit :=
+  Console.printLineZ "hello from Console.printLineZ"
 
-def envExample2 : Z ConsoleIO Empty Unit := do
-  let console <- Z.environment ConsoleIO
-  Z.succeed <| console.printLine "hello from ConsoleIO.printLine"
+def envExample2ready : Z Unit Empty Unit :=
+  envExample2.provideEnvironment Console.consoleLive
 
-def envExample2ready :=
-  envExample2.provideEnvironment ConsoleIO.consoleLive
+/-- `zdo` infers the `Console` environment and the `IO.Error` channel. -/
+def interactiveConsoleExample := zdo
+  Console.printLineZ "What is your name?"
+  let name <- Console.readLineZ
+  Console.printLineZ s!"hello {name.trimAscii.toString}"
 
-
-def envExample3 :=
-  (Z.succeedNow "hello from Z.succeed").provideEnvironment ()
-
-/- Example using accessors defined in ConsoleIO -/
-open ConsoleIO in
-def envExample4 := do
-  printLineZ "What is your name?"
-  let msg <- readLineZ
-  printLineZ s!"hello {msg}"
-
-def envExample4ready: Z Unit Empty Unit :=
-  envExample4.provideEnvironment ConsoleIO.consoleLive
-
-
-def envExample5 := do
-  ConsoleIO.printLineZ "hello from ConsoleIO.printLine"
-
+example : Z Console IO.Error Unit := interactiveConsoleExample

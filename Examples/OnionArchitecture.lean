@@ -1,115 +1,127 @@
-import Z
+import Z.Experimental.KeyedLayerMake
 
-structure Issue
+/-!
+A small onion-style application built with the current keyed service API.
 
-structure Comment extends Issue where 
-  text: String
+The program depends only on `BusinessLogic`. The automatic `Z.provide` graph
+builds that service from `Github`, then builds `Github` from `HttpClient`, and
+finally builds `HttpClient` from `HttpConfig`.
+-/
 
-structure BusinessLogic where
-  run: IO Unit --Z Unit IO.Error Unit
+namespace OnionArchitecture
 
-structure Github: Type 0 where
-  getIssues (organization: String): IO (List Issue)
-  postComment (issue: Issue) (comment: Comment): IO Unit
+open StableServiceKeys
 
-structure GithubZ: Type 1 where
-  getIssues (organization: String): Z Unit IO.Error (List Issue)
-  postComment (issue: Issue) (comment: Comment):  Z Unit IO.Error Unit
+structure Issue where
+  id : Nat
+  title : String
+  deriving Repr
 
-namespace GithubZ
+structure Comment where
+  text : String
+  deriving Repr
 
-  def mock : GithubZ where
-    getIssues _ := Z.succeedNow ([] : List Issue)
-    postComment _ _ := Z.succeedNow ()
+inductive HttpError where
+  | unavailable (path : String)
+  deriving Repr
 
-  def layer : Layer Unit IO.Error GithubZ :=
-    Layer.fromHEIO fun _ => pure mock
+instance : ToString HttpError where
+  toString
+    | .unavailable path => s!"HTTP service unavailable: {path}"
 
-  def getIssuesZ (organization : String) :
-      Z GithubZ IO.Error (List Issue) :=
-    Z.serviceWithZ fun github => github.getIssues organization
+structure HttpConfig : Type 1 where
+  baseUrl : String
+  deriving ServiceKey
 
-  def issueCount : Z (GithubZ × String) IO.Error Nat := zdo
-    let organization <- Z.environment String
-    let issues <- getIssuesZ organization
-    pure issues.length
+structure HttpClient : Type 1 where
+  get : String -> Z Unit HttpError String
+  post : String -> String -> Z Unit HttpError Unit
+  deriving ServiceKey
 
-end GithubZ
+structure Github : Type 1 where
+  getIssues : String -> Z Unit HttpError (List Issue)
+  postComment : Issue -> Comment -> Z Unit HttpError Unit
+  deriving ServiceKey
 
+structure BusinessLogic : Type 1 where
+  run : Z Unit HttpError Unit
+  deriving ServiceKey
 
-structure Http where
-  get (url: String): IO ByteArray -- Z Unit IO.Error ByteArray
-  post (url: String) (body: ByteArray): IO ByteArray -- Z Unit IO.Error ByteArray
+def httpClientLayer :
+    KeyedLayer
+      (Services[HttpConfig])
+      Empty
+      (ServiceRow[HttpClient]) :=
+  KeyedLayer.fromLayer (Layer.fromFunction fun environment =>
+    let config := Services.get[HttpConfig] environment
+    {
+      get := fun path => Z.succeed do
+        IO.println s!"GET {config.baseUrl}{path}"
+        pure "ok"
+      post := fun path body => Z.succeed do
+        IO.println s!"POST {config.baseUrl}{path}: {body}"
+    })
 
+def githubLayer :
+    KeyedLayer
+      (Services[HttpClient])
+      Empty
+      (ServiceRow[Github]) :=
+  KeyedLayer.fromLayer (Layer.fromFunction fun environment =>
+    let http := Services.get[HttpClient] environment
+    {
+      getIssues := fun organization => zdo
+        let _ <- http.get s!"/orgs/{organization}/issues"
+        pure [
+          { id := 1, title := "Update the examples" },
+          { id := 2, title := "Document automatic layers" }
+        ]
+      postComment := fun issue comment =>
+        http.post s!"/issues/{issue.id}/comments" comment.text
+    })
 
-def IO.getOrFail (v: Option A): IO A :=
-  match v with
-    | some a => pure a
-    | none => throw (IO.userError "userError")
+def businessLogicLayer :
+    KeyedLayer
+      (Services[Github])
+      Empty
+      (ServiceRow[BusinessLogic]) :=
+  KeyedLayer.fromLayer (Layer.fromFunction fun environment =>
+    let github := Services.get[Github] environment
+    {
+      run := zdo
+        let issues <- github.getIssues "leanprover"
+        for issue in issues do
+          github.postComment issue {
+            text := s!"Working on: {issue.title}"
+          }
+    })
 
-structure BusinessLogicLive extends BusinessLogic where
-  github: Github
-  run := do
-    let issues <- github.getIssues "zio"
-    let comment: Comment := {text := "Working on this!"}
-    github.postComment (<- IO.getOrFail issues.head?) comment
-    -- github.postComment (<- Z.getOrFail issues.head?) comment
+def program : Z (Services[BusinessLogic]) HttpError Unit :=
+  Z.serviceWithZ[BusinessLogic] fun businessLogic =>
+    businessLogic.run
 
-def BusinessLogicLive.new (github: Github) := 
-  { github := github: BusinessLogicLive}
+/-- Compose the complete dependency graph from its layer candidates. -/
+def application (config : HttpConfig) :=
+  Z.provide program [
+    businessLogicLayer,
+    githubLayer,
+    httpClientLayer,
+    KeyedLayer.succeed config
+  ]
 
-instance : Coe BusinessLogicLive BusinessLogic := ⟨BusinessLogicLive.toBusinessLogic⟩
+example (config : HttpConfig) :
+    Z (Services[]) HttpError Unit :=
+  application config
 
--- structure GithubLive extends Github where
---   http: Http := sorry
---   getIssues org := sorry
---   postComment issue comment := sorry
+def demoConfig : HttpConfig := {
+  baseUrl := "https://api.github.test"
+}
 
--- def GithubLive.new (http: Http) := 
---   { http := http : GithubLive }
+def demoApplication : Z (Services[]) HttpError Unit :=
+  application demoConfig
 
--- instance : Coe GithubLive Github := ⟨GithubLive.toGithub⟩
+def runnableDemo : Z Unit HttpError Unit :=
+  demoApplication.provideEnvironment
+    StableServiceKeys.Services.empty
 
-structure HttpConfig
-
--- structure HttpLive extends Http where
---   config : HttpConfig
---   get url := sorry
---   post url body := sorry
---   start : IO Unit := sorry
---   shutdown : IO Unit := sorry
-
--- def HttpLive.new (config: HttpConfig): HttpLive := { config := config}
-
--- instance : Coe HttpLive Http := ⟨HttpLive.toHttp⟩
-
--- def mainZ := 
---   let http: Http := HttpLive.new sorry
---   let github := GithubLive.new http
---   let businessLogic: BusinessLogic := BusinessLogicLive.new github
---   businessLogic.run
-
-
-/- Using layers. `GithubZ : Type 1` is a valid layer output and environment. -/
-
--- https://leanprover.zulipchat.com/#narrow/stream/270676-lean4/topic/universe.20polymorphic.20IO
--- https://github.com/leanprover/lean4/issues/1136
-
--- https://leanprover.zulipchat.com/#narrow/stream/236449-Program-verification/topic/universes/near/257719653
-
-
-def BusinessLogicLive.layer: Layer Github Empty BusinessLogic := 
-  (Layer.fromFunction BusinessLogicLive.new).map (Environment.map BusinessLogicLive.toBusinessLogic)
-
-
--- def GithubLive.layer: Layer Http Empty Github := 
---   (Layer.fromFunction GithubLive.new).map (Environment.map GithubLive.toGithub)
-
-
--- def HttpLive.layer: Layer HttpConfig IO.Error Http := 
---   Layer.fromZ do
---     let config <- Z.service HttpConfig
---     let http <- Z.succeedNow (HttpLive.new config)
---     Z.attempt http.start
---     -- Z.addFinalizer http.shutdown
---     return http
+end OnionArchitecture
