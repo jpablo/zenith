@@ -1,16 +1,19 @@
 import Z.Experimental.KeyedLayerMake
 
 /-!
-A separate experiment for stable, normalized service rows.
+A separate experiment for stable, normalized service rows with type-derived
+keys.
 
 This file does not change the production `Z` environment. It tests whether an
-explicit qualified service key can remove product-order knowledge from layer
-code without one central numeric registry.
+internal qualified service key can remove product-order knowledge from layer
+code without one central numeric registry. The explicit `service_key`
+declarations below test the low-level key and builder APIs. The application
+examples use only service types.
 -/
 
 namespace StableServiceKeys
 
-/-! The example service keys come from service declaration names. -/
+/-! Low-level checks use explicit names for keys from service declarations. -/
 
 structure Config : Type 1 where
   organization : String
@@ -104,7 +107,7 @@ example : Services[Repository User, Repository Issue] =
     Environment ParameterizedEntries := rfl
 
 abbrev Services : List Entry.{1} :=
-  [configEntry, githubEntry, storeEntry]
+  ServiceRow[Config, Github, Store]
 
 example : Row.normalize [configEntry, githubEntry, storeEntry] =
     Row.normalize [storeEntry, configEntry, githubEntry] := rfl
@@ -140,21 +143,21 @@ def issueRepository : Repository Issue := {
 }
 
 def userRepositoryLayer :=
-  KeyedLayer.succeed (Repository User) userRepository
+  KeyedLayer.succeed userRepository
 
 def issueRepositoryLayer :=
-  KeyedLayer.succeed (Repository Issue) issueRepository
+  KeyedLayer.succeed issueRepository
 
 def userRepositoryLayerFromLayer :=
-  KeyedLayer.fromLayer (Repository User) (Layer.succeed userRepository)
+  KeyedLayer.fromLayer (Layer.succeed userRepository)
 
 example : KeyedLayer Unit Empty (ServiceRow[Repository User]) :=
   userRepositoryLayerFromLayer
 
 def parameterizedProgram := zdo
-  let name <- Z.serviceWithType (Repository User)
+  let name <- Z.serviceWith[Repository User]
     (fun repository => repository.value.name)
-  let number <- Z.serviceWithZType (Repository Issue)
+  let number <- Z.serviceWithZ[Repository Issue]
     (fun repository => Z.succeedNow repository.value.number)
   pure s!"{name}:{number}"
 
@@ -163,9 +166,9 @@ example : Z
   parameterizedProgram
 
 def parameterizedProgramReverse := zdo
-  let number <- Z.serviceWithType (Repository Issue)
+  let number <- Z.serviceWith[Repository Issue]
     (fun repository => repository.value.number)
-  let name <- Z.serviceWithType (Repository User)
+  let name <- Z.serviceWith[Repository User]
     (fun repository => repository.value.name)
   pure s!"{name}:{number}"
 
@@ -174,9 +177,9 @@ example : Z
   parameterizedProgramReverse
 
 def parameterizedProgramWithFixedError := zdo[Empty]
-  let name <- Z.serviceWithType (Repository User)
+  let name <- Z.serviceWith[Repository User]
     (fun repository => repository.value.name)
-  let number <- Z.serviceWithType (Repository Issue)
+  let number <- Z.serviceWith[Repository Issue]
     (fun repository => repository.value.number)
   pure s!"{name}:{number}"
 
@@ -185,9 +188,9 @@ example : Z
   parameterizedProgramWithFixedError
 
 def repeatedParameterizedService := zdo
-  let first <- Z.serviceWithType (Repository User)
+  let first <- Z.serviceWith[Repository User]
     (fun repository => repository.value.name)
-  let second <- Z.serviceWithType (Repository User)
+  let second <- Z.serviceWith[Repository User]
     (fun repository => repository.value.name)
   pure s!"{first}:{second}"
 
@@ -196,11 +199,11 @@ example : Z (Services[Repository User]) Empty String :=
 
 def branchedParameterizedProgram (useUser : Bool) := zdo
   if useUser then
-    let name <- Z.serviceWithType (Repository User)
+    let name <- Z.serviceWith[Repository User]
       (fun repository => repository.value.name)
     pure name
   else
-    let number <- Z.serviceWithType (Repository Issue)
+    let number <- Z.serviceWith[Repository Issue]
       (fun repository => repository.value.number)
     pure s!"{number}"
 
@@ -210,14 +213,14 @@ example : Bool → Z
 
 def scopedParameterizedProgram := zdo
   try
-    Z.serviceWithZType (Repository User) fun repository =>
+    Z.serviceWithZ[Repository User] fun repository =>
       (Z.succeedNow repository.value.name : Z Unit String String)
   catch _ =>
-    let number <- Z.serviceWithType (Repository Issue)
+    let number <- Z.serviceWith[Repository Issue]
       (fun repository => repository.value.number)
     pure s!"{number}"
   finally
-    let _ <- Z.serviceWithType (Repository (List User))
+    let _ <- Z.serviceWith[Repository (List User)]
       (fun repository => repository.value.length)
     pure ()
 
@@ -232,10 +235,10 @@ example : Z
   scopedParameterizedProgram
 
 def parameterizedProgramWithErrors := zdo
-  let name <- Z.serviceWithZType (Repository User)
+  let name <- Z.serviceWithZ[Repository User]
     (fun repository =>
       (Z.succeedNow repository.value.name : Z Unit String String))
-  let number <- Z.serviceWithZType (Repository Issue)
+  let number <- Z.serviceWithZ[Repository Issue]
     (fun repository => Z.attempt (pure repository.value.number))
   pure s!"{name}:{number}"
 
@@ -247,9 +250,9 @@ example : Z
 
 def mixedParameterizedProgram := zdo
   let offset <- Z.environment Nat
-  let name <- Z.serviceWithType (Repository User)
+  let name <- Z.serviceWith[Repository User]
     (fun repository => repository.value.name)
-  let number <- Z.serviceWithType (Repository Issue)
+  let number <- Z.serviceWith[Repository Issue]
     (fun repository => repository.value.number)
   pure s!"{name}:{number + offset}"
 
@@ -299,14 +302,17 @@ def servicesWithDuplicate : Builder Services :=
     |>.addExisting configEntry config
     |>.addFresh storeEntry store (by decide)
 
-def program : Z (Environment Services) Empty String := zdo
-  let organization <- withServiceZ (entries := Services) configEntry fun config =>
-    Z.succeedNow config.organization
-  let count <- withServiceZ (entries := Services) githubEntry fun github =>
-    github.issueCount organization
-  let label <- withServiceZ (entries := Services) storeEntry fun store =>
-    Z.succeedNow store.label
+def program := zdo
+  let organization <- Z.serviceWith[Config]
+    (fun config => config.organization)
+  let count <- Z.serviceWithZ[Github]
+    (fun github => github.issueCount organization)
+  let label <- Z.serviceWith[Store]
+    (fun store => store.label)
   pure s!"{label}:{count}"
+
+example : Z (Services[Config, Github, Store]) Empty String :=
+  program
 
 def run : IO (Option (Exit Empty String)) :=
   servicesReverse.toLayer.run () program "stable-service-keys"
@@ -339,25 +345,25 @@ def failingServiceLayer
 def keyedServicesReverse
     (events : IO.Ref (List String)) :
     KeyedLayer Unit String Services :=
-  let storeLayer := KeyedLayer.singleton storeEntry <|
-    trackedServiceLayer events "store" store
-  let githubLayer := KeyedLayer.singleton githubEntry <|
-    trackedServiceLayer events "github" github
-  let configLayer := KeyedLayer.singleton configEntry <|
-    trackedServiceLayer events "config" config
+  let storeLayer := KeyedLayer.fromLayer
+    (trackedServiceLayer events "store" store)
+  let githubLayer := KeyedLayer.fromLayer
+    (trackedServiceLayer events "github" github)
+  let configLayer := KeyedLayer.fromLayer
+    (trackedServiceLayer events "config" config)
   storeLayer.zipFresh githubLayer (by decide)
     |>.zipFresh configLayer (by decide)
 
 abbrev ConfigGithubServices : List Entry.{1} :=
-  [configEntry, githubEntry]
+  ServiceRow[Config, Github]
 
 def failingKeyedServices
     (events : IO.Ref (List String)) :
     KeyedLayer Unit String ConfigGithubServices :=
-  let configLayer := KeyedLayer.singleton configEntry <|
-    trackedServiceLayer events "config" config
-  let githubLayer := KeyedLayer.singleton githubEntry <|
-    failingServiceLayer events "github"
+  let configLayer := KeyedLayer.fromLayer
+    (trackedServiceLayer events "config" config)
+  let githubLayer : KeyedLayer Unit String (ServiceRow[Github]) :=
+    KeyedLayer.fromLayer (failingServiceLayer events "github")
   configLayer.zipFresh githubLayer (by decide)
 
 def assertEvents
@@ -469,10 +475,10 @@ inductive OtherConfigBuildError where
   deriving BEq, Repr
 
 abbrev HeterogeneousInputs : List Entry.{1} :=
-  [configEntry, storeEntry]
+  ServiceRow[Config, Store]
 
 abbrev HeterogeneousOutputs : List Entry.{1} :=
-  [githubEntry, otherConfigEntry]
+  ServiceRow[Github, OtherLibrary.Config]
 
 def heterogeneousInputs : Builder HeterogeneousInputs :=
   Builder.empty
@@ -482,50 +488,47 @@ def heterogeneousInputs : Builder HeterogeneousInputs :=
 def githubFromConfigLayer
     (events : IO.Ref (List String)) :
     KeyedLayer
-      (Environment [configEntry])
+      (Services[Config])
       GithubBuildError
-      [githubEntry] :=
-  KeyedLayer.singleton githubEntry <|
-    Layer.acquireRelease
+      (ServiceRow[Github]) :=
+  KeyedLayer.fromLayer (Layer.acquireRelease
       (fun environment =>
         HEIO.bind
           (recordLayerEvent events "acquire-github-from-config") fun _ =>
-            let config := Contains.get (target := configEntry) environment
+            let config := Services.get[Config] environment
             HEIO.pure {
               issueCount := fun organization =>
                 Z.succeedNow <|
                   if organization == config.organization then 2 else 0
             })
       (fun _ _ =>
-        recordLayerEvent events "release-github-from-config")
+        recordLayerEvent events "release-github-from-config"))
 
 def otherConfigFromStoreLayer
     (events : IO.Ref (List String)) :
     KeyedLayer
-      (Environment [storeEntry])
+      (Services[Store])
       OtherConfigBuildError
-      [otherConfigEntry] :=
-  KeyedLayer.singleton otherConfigEntry <|
-    Layer.acquireRelease
+      (ServiceRow[OtherLibrary.Config]) :=
+  KeyedLayer.fromLayer (Layer.acquireRelease
       (fun environment =>
         HEIO.bind
           (recordLayerEvent events "acquire-other-config-from-store") fun _ =>
-            let store := Contains.get (target := storeEntry) environment
+            let store := Services.get[Store] environment
             HEIO.pure { organization := store.label })
       (fun _ _ =>
-        recordLayerEvent events "release-other-config-from-store")
+        recordLayerEvent events "release-other-config-from-store"))
 
 def failingOtherConfigFromStoreLayer
     (events : IO.Ref (List String)) :
     KeyedLayer
-      (Environment [storeEntry])
+      (Services[Store])
       OtherConfigBuildError
-      [otherConfigEntry] :=
-  KeyedLayer.singleton otherConfigEntry <|
-    Layer.fromHEIO fun _ =>
+      (ServiceRow[OtherLibrary.Config]) :=
+  KeyedLayer.fromLayer (Layer.fromHEIO fun _ =>
       HEIO.bind
         (recordLayerEvent events "acquire-other-config-from-store") fun _ =>
-          HEIO.throw (.fail .unavailable)
+          HEIO.throw (.fail .unavailable))
 
 def heterogeneousKeyedServices
     (events : IO.Ref (List String)) :
@@ -561,20 +564,20 @@ def failingHeterogeneousKeyedServices
     (by rfl)
     (by decide)
 
-def heterogeneousProgram :
-    Z (Environment HeterogeneousOutputs) Empty String := zdo
-  let count <- withServiceZ
-    (entries := HeterogeneousOutputs) githubEntry fun github =>
-      github.issueCount "lean"
-  let organization <- withServiceZ
-    (entries := HeterogeneousOutputs) otherConfigEntry fun otherConfig =>
-      Z.succeedNow otherConfig.organization
+def heterogeneousProgram := zdo
+  let count <- Z.serviceWithZ[Github]
+    (fun github => github.issueCount "lean")
+  let organization <- Z.serviceWith[OtherLibrary.Config]
+    (fun otherConfig => otherConfig.organization)
   pure s!"{organization}:{count}"
+
+example : Z (Services[Github, OtherLibrary.Config]) Empty String :=
+  heterogeneousProgram
 
 def checkHeterogeneousKeyedLayers : IO Unit := do
   let events <- IO.mkRef ([] : List String)
   let effect : Z
-      (Environment HeterogeneousOutputs)
+      (Services[Github, OtherLibrary.Config])
       (GithubBuildError ⊕ OtherConfigBuildError)
       String := heterogeneousProgram
   match <- (heterogeneousKeyedServices events).toLayer.run
@@ -591,7 +594,7 @@ def checkHeterogeneousKeyedLayers : IO Unit := do
 def checkHeterogeneousKeyedLayersReverse : IO Unit := do
   let events <- IO.mkRef ([] : List String)
   let effect : Z
-      (Environment HeterogeneousOutputs)
+      (Services[Github, OtherLibrary.Config])
       (GithubBuildError ⊕ OtherConfigBuildError)
       String := heterogeneousProgram
   match <- (heterogeneousKeyedServicesReverse events).toLayer.run
@@ -609,7 +612,7 @@ def checkHeterogeneousKeyedLayersReverse : IO Unit := do
 def checkHeterogeneousKeyedLayerFailure : IO Unit := do
   let events <- IO.mkRef ([] : List String)
   let effect : Z
-      (Environment HeterogeneousOutputs)
+      (Services[Github, OtherLibrary.Config])
       (GithubBuildError ⊕ OtherConfigBuildError)
       Unit := Z.serviceWith fun _ => ()
   match <- (failingHeterogeneousKeyedServices events).toLayer.run
@@ -630,10 +633,10 @@ inductive ReporterBuildError where
   deriving BEq, Repr
 
 abbrev ReporterInputs : List Entry.{1} :=
-  [githubEntry, storeEntry]
+  ServiceRow[Github, Store]
 
 abbrev ReporterOutputs : List Entry.{1} :=
-  [reporterEntry]
+  ServiceRow[Reporter]
 
 def reporterFromGithubAndStoreLayer
     (events : IO.Ref (List String)) :
@@ -641,18 +644,17 @@ def reporterFromGithubAndStoreLayer
       (Environment ReporterInputs)
       ReporterBuildError
       ReporterOutputs :=
-  KeyedLayer.singleton reporterEntry <|
-    Layer.acquireRelease
+  KeyedLayer.fromLayer (Layer.acquireRelease
       (fun environment =>
         HEIO.bind
           (recordLayerEvent events "acquire-reporter") fun _ =>
-            let github := Contains.get (target := githubEntry) environment
-            let store := Contains.get (target := storeEntry) environment
+            let github := Services.get[Github] environment
+            let store := Services.get[Store] environment
             HEIO.pure {
               report := github.issueCount "lean" |>.map fun count =>
                 s!"{store.label}:{count}"
             })
-      (fun _ _ => recordLayerEvent events "release-reporter")
+      (fun _ _ => recordLayerEvent events "release-reporter"))
 
 def failingReporterFromGithubAndStoreLayer
     (events : IO.Ref (List String)) :
@@ -660,15 +662,14 @@ def failingReporterFromGithubAndStoreLayer
       (Environment ReporterInputs)
       ReporterBuildError
       ReporterOutputs :=
-  KeyedLayer.singleton reporterEntry <|
-    Layer.fromHEIO fun _ =>
+  KeyedLayer.fromLayer (Layer.fromHEIO fun _ =>
       HEIO.bind (recordLayerEvent events "acquire-reporter") fun _ =>
-        HEIO.throw (.fail .unavailable)
+        HEIO.throw (.fail .unavailable))
 
 def verticalKeyedServices
     (events : IO.Ref (List String)) :
   KeyedLayer
-      (Environment [configEntry, storeEntry])
+      (Services[Config, Store])
       (GithubBuildError ⊕ ReporterBuildError)
       ReporterOutputs :=
   (githubFromConfigLayer events).andThenMeetJoin
@@ -678,21 +679,23 @@ def verticalKeyedServices
 def failingVerticalKeyedServices
     (events : IO.Ref (List String)) :
   KeyedLayer
-      (Environment [configEntry, storeEntry])
+      (Services[Config, Store])
       (GithubBuildError ⊕ ReporterBuildError)
       ReporterOutputs :=
   (githubFromConfigLayer events).andThenInto
     (failingReporterFromGithubAndStoreLayer events)
     (by rfl)
 
-def reporterProgram : Z (Environment ReporterOutputs) Empty String :=
-  withServiceZ (entries := ReporterOutputs) reporterEntry fun reporter =>
-    reporter.report
+def reporterProgram :=
+  Z.serviceWithZ[Reporter] (fun reporter => reporter.report)
+
+example : Z (Services[Reporter]) Empty String :=
+  reporterProgram
 
 def checkVerticalKeyedLayers : IO Unit := do
   let events <- IO.mkRef ([] : List String)
   let effect : Z
-      (Environment ReporterOutputs)
+      (Services[Reporter])
       (GithubBuildError ⊕ ReporterBuildError)
       String := reporterProgram
   match <- (verticalKeyedServices events).toLayer.run
@@ -709,7 +712,7 @@ def checkVerticalKeyedLayers : IO Unit := do
 def checkVerticalKeyedLayerFailure : IO Unit := do
   let events <- IO.mkRef ([] : List String)
   let effect : Z
-      (Environment ReporterOutputs)
+      (Services[Reporter])
       (GithubBuildError ⊕ ReporterBuildError)
       Unit := Z.serviceWith fun _ => ()
   match <- (failingVerticalKeyedServices events).toLayer.run
@@ -726,7 +729,7 @@ def checkVerticalKeyedLayerFailure : IO Unit := do
 /-! Pass-through composition keeps upstream and downstream outputs. -/
 
 abbrev PassThroughOutputs : List Entry.{1} :=
-  [githubEntry, reporterEntry]
+  ServiceRow[Github, Reporter]
 
 example : Row.Disjoint [githubEntry] [reporterEntry] := by decide
 
@@ -735,7 +738,7 @@ example : ¬ Row.Disjoint [githubEntry] [githubEntry] := by decide
 def passThroughKeyedServices
     (events : IO.Ref (List String)) :
     KeyedLayer
-      (Environment [configEntry, storeEntry])
+      (Services[Config, Store])
       (GithubBuildError ⊕ ReporterBuildError)
       PassThroughOutputs :=
   (githubFromConfigLayer events).andThenKeepFreshMeetJoin
@@ -746,7 +749,7 @@ def passThroughKeyedServices
 def failingPassThroughKeyedServices
     (events : IO.Ref (List String)) :
     KeyedLayer
-      (Environment [configEntry, storeEntry])
+      (Services[Config, Store])
       (GithubBuildError ⊕ ReporterBuildError)
       PassThroughOutputs :=
   (githubFromConfigLayer events).andThenKeepFreshInto
@@ -754,20 +757,20 @@ def failingPassThroughKeyedServices
     (by rfl)
     (by decide)
 
-def passThroughProgram :
-    Z (Environment PassThroughOutputs) Empty String := zdo
-  let report <- withServiceZ
-    (entries := PassThroughOutputs) reporterEntry fun reporter =>
-      reporter.report
-  let count <- withServiceZ
-    (entries := PassThroughOutputs) githubEntry fun github =>
-      github.issueCount "lean"
+def passThroughProgram := zdo
+  let report <- Z.serviceWithZ[Reporter]
+    (fun reporter => reporter.report)
+  let count <- Z.serviceWithZ[Github]
+    (fun github => github.issueCount "lean")
   pure s!"{report}:{count}"
+
+example : Z (Services[Github, Reporter]) Empty String :=
+  passThroughProgram
 
 def checkPassThroughKeyedLayers : IO Unit := do
   let events <- IO.mkRef ([] : List String)
   let effect : Z
-      (Environment PassThroughOutputs)
+      (Services[Github, Reporter])
       (GithubBuildError ⊕ ReporterBuildError)
       String := passThroughProgram
   match <- (passThroughKeyedServices events).toLayer.run
@@ -785,7 +788,7 @@ def checkPassThroughKeyedLayers : IO Unit := do
 def checkPassThroughKeyedLayerFailure : IO Unit := do
   let events <- IO.mkRef ([] : List String)
   let effect : Z
-      (Environment PassThroughOutputs)
+      (Services[Github, Reporter])
       (GithubBuildError ⊕ ReporterBuildError)
       Unit := Z.serviceWith fun _ => ()
   match <- (failingPassThroughKeyedServices events).toLayer.run
@@ -806,16 +809,16 @@ inductive MetricsBuildError where
   deriving BEq, Repr
 
 abbrev MetricsInputs : List Entry.{1} :=
-  [githubEntry]
+  ServiceRow[Github]
 
 abbrev MetricsOutputs : List Entry.{1} :=
-  [metricsEntry]
+  ServiceRow[Metrics]
 
 abbrev SharedGraphError :=
   GithubBuildError ⊕ (ReporterBuildError ⊕ MetricsBuildError)
 
 abbrev SharedGraphOutputs : List Entry.{1} :=
-  [metricsEntry, reporterEntry]
+  ServiceRow[Metrics, Reporter]
 
 def metricsFromGithubLayer
     (events : IO.Ref (List String)) :
@@ -823,13 +826,12 @@ def metricsFromGithubLayer
       (Environment MetricsInputs)
       MetricsBuildError
       MetricsOutputs :=
-  KeyedLayer.singleton metricsEntry <|
-    Layer.acquireRelease
+  KeyedLayer.fromLayer (Layer.acquireRelease
       (fun environment =>
         HEIO.bind (recordLayerEvent events "acquire-metrics") fun _ =>
-          let github := Contains.get (target := githubEntry) environment
+          let github := Services.get[Github] environment
           HEIO.pure { count := github.issueCount "lean" })
-      (fun _ _ => recordLayerEvent events "release-metrics")
+      (fun _ _ => recordLayerEvent events "release-metrics"))
 
 def slowMetricsFromGithubLayer
     (events : IO.Ref (List String))
@@ -838,8 +840,7 @@ def slowMetricsFromGithubLayer
       (Environment MetricsInputs)
       MetricsBuildError
       MetricsOutputs :=
-  KeyedLayer.singleton metricsEntry <|
-    Layer.fromHEIO fun environment =>
+  KeyedLayer.fromLayer (Layer.fromHEIO fun environment =>
       HEIO.bind (recordLayerEvent events "acquire-slow-metrics") fun _ =>
         HEIO.bind
           (HEIO.liftIO.{0} Cause.die (started.set true)) fun _ =>
@@ -850,9 +851,8 @@ def slowMetricsFromGithubLayer
                 pure <| events.modify fun current =>
                   current ++ ["cancel-slow-metrics"]
             HEIO.bind pending fun _ =>
-              let github := Contains.get
-                (target := githubEntry) environment
-              HEIO.pure { count := github.issueCount "lean" }
+              let github := Services.get[Github] environment
+              HEIO.pure { count := github.issueCount "lean" })
 
 def failingMetricsFromGithubLayer
     (events : IO.Ref (List String)) :
@@ -860,15 +860,14 @@ def failingMetricsFromGithubLayer
       (Environment MetricsInputs)
       MetricsBuildError
       MetricsOutputs :=
-  KeyedLayer.singleton metricsEntry <|
-    Layer.fromHEIO fun _ =>
+  KeyedLayer.fromLayer (Layer.fromHEIO fun _ =>
       HEIO.bind (recordLayerEvent events "acquire-metrics") fun _ =>
-        HEIO.throw (.fail .unavailable)
+        HEIO.throw (.fail .unavailable))
 
 def sharedDependencyGraph
     (events : IO.Ref (List String)) :
     KeyedLayer
-      (Environment [configEntry, storeEntry])
+      (Services[Config, Store])
       SharedGraphError
       SharedGraphOutputs := keyed_graph (error := SharedGraphError) {
   let github := (githubFromConfigLayer events).widenInput;
@@ -881,7 +880,7 @@ def sharedDependencyGraph
 def failingSharedDependencyGraph
     (events : IO.Ref (List String)) :
     KeyedLayer
-      (Environment [configEntry, storeEntry])
+      (Services[Config, Store])
       SharedGraphError
       SharedGraphOutputs := keyed_graph (error := SharedGraphError) {
   let github := (githubFromConfigLayer events).widenInput;
@@ -899,7 +898,7 @@ order. The expected type supplies the external input, error, and output rows.
 def automaticSharedDependencyGraph
     (events : IO.Ref (List String)) :
     KeyedLayer
-      (Environment [configEntry, storeEntry])
+      (Services[Config, Store])
       SharedGraphError
       SharedGraphOutputs := KeyedLayer.make [
   metricsFromGithubLayer events,
@@ -910,7 +909,7 @@ def automaticSharedDependencyGraph
 def automaticFailingSharedDependencyGraph
     (events : IO.Ref (List String)) :
     KeyedLayer
-      (Environment [configEntry, storeEntry])
+      (Services[Config, Store])
       SharedGraphError
       SharedGraphOutputs := KeyedLayer.make [
   failingMetricsFromGithubLayer events,
@@ -939,40 +938,38 @@ def parallelMetricsFromGithubLayer
     (counter : Std.Mutex Nat)
     (barrier : IO.Promise Unit) :
     KeyedLayer
-      (Environment [githubEntry])
+      (Services[Github])
       MetricsBuildError
-      [metricsEntry] :=
-  KeyedLayer.singleton metricsEntry <|
-    Layer.fromHEIO fun _ =>
+      (ServiceRow[Metrics]) :=
+  KeyedLayer.fromLayer (Layer.fromHEIO fun _ =>
       HEIO.bind
         (HEIO.liftIO.{0} Cause.die
           (observeAutomaticParallelStart counter barrier))
         fun started => HEIO.pure {
           count := Z.succeedNow started.down
-        }
+        })
 
 def parallelReporterFromGithubLayer
     (counter : Std.Mutex Nat)
     (barrier : IO.Promise Unit) :
     KeyedLayer
-      (Environment [githubEntry])
+      (Services[Github])
       ReporterBuildError
-      [reporterEntry] :=
-  KeyedLayer.singleton reporterEntry <|
-    Layer.fromHEIO fun _ =>
+      (ServiceRow[Reporter]) :=
+  KeyedLayer.fromLayer (Layer.fromHEIO fun _ =>
       HEIO.bind
         (HEIO.liftIO.{0} Cause.die
           (observeAutomaticParallelStart counter barrier))
         fun started => HEIO.pure {
           report := Z.succeedNow (toString started.down)
-        }
+        })
 
 def automaticParallelDependencyGraph
     (events : IO.Ref (List String))
     (counter : Std.Mutex Nat)
     (barrier : IO.Promise Unit) :
     KeyedLayer
-      (Environment [configEntry])
+      (Services[Config])
       SharedGraphError
       SharedGraphOutputs := KeyedLayer.make [
   parallelMetricsFromGithubLayer counter barrier,
@@ -980,43 +977,41 @@ def automaticParallelDependencyGraph
   parallelReporterFromGithubLayer counter barrier
 ]
 
-def sharedGraphProgram :
-    Z (Environment SharedGraphOutputs) Empty String := zdo
-  let report <- withServiceZ
-    (entries := SharedGraphOutputs) reporterEntry fun reporter =>
-      reporter.report
-  let count <- withServiceZ
-    (entries := SharedGraphOutputs) metricsEntry fun metrics =>
-      metrics.count
+def sharedGraphProgram := zdo
+  let report <- Z.serviceWithZ[Reporter]
+    (fun reporter => reporter.report)
+  let count <- Z.serviceWithZ[Metrics]
+    (fun metrics => metrics.count)
   pure s!"{report}:{count}"
 
-def sharedGraphUnitProgram :
-    Z (Environment SharedGraphOutputs) Empty Unit :=
-  Z.serviceWith fun _ => ()
+example : Z (Services[Metrics, Reporter]) Empty String :=
+  sharedGraphProgram
 
-def parallelGraphProgram :
-    Z (Environment SharedGraphOutputs) Empty (Nat × String) := zdo
-  let count ← withServiceZ
-    (entries := SharedGraphOutputs) metricsEntry fun metrics =>
-      metrics.count
-  let report ← withServiceZ
-    (entries := SharedGraphOutputs) reporterEntry fun reporter =>
-      reporter.report
+def sharedGraphUnitProgram : Z (Services[Metrics, Reporter]) Empty Unit :=
+  Z.succeedNow ()
+
+def parallelGraphProgram := zdo
+  let count ← Z.serviceWithZ[Metrics]
+    (fun metrics => metrics.count)
+  let report ← Z.serviceWithZ[Reporter]
+    (fun reporter => reporter.report)
   pure (count, report)
 
+example : Z (Services[Metrics, Reporter]) Empty (Nat × String) :=
+  parallelGraphProgram
+
 def failingSharedGraphProgram :
-    Z (Environment SharedGraphOutputs) SharedGraphError Unit :=
-  (Z.failCause (R := Environment SharedGraphOutputs)
+    Z (Services[Metrics, Reporter]) SharedGraphError Unit :=
+  (Z.failCause (R := Services[Metrics, Reporter])
     (.fail (.inl .unavailable))).map impossible
 
 def waitingSharedGraphProgram
     (started : IO.Ref Bool) :
-    Z (Environment SharedGraphOutputs) Empty Unit :=
+    Z (Services[Metrics, Reporter]) Empty Unit :=
   Z.async fun _ => started.set true
 
-def metricsUnitProgram :
-    Z (Environment [metricsEntry]) Empty Unit :=
-  Z.serviceWith fun _ => ()
+def metricsUnitProgram : Z (Services[Metrics]) Empty Unit :=
+  Z.succeedNow ()
 
 def automaticallyProvidedSharedGraph
     (events : IO.Ref (List String)) :=
@@ -1025,6 +1020,23 @@ def automaticallyProvidedSharedGraph
   reporterFromGithubAndStoreLayer events,
   githubFromConfigLayer events
 ]
+
+def typeFacadeApplication
+    (events : IO.Ref (List String)) :=
+  Z.provide sharedGraphProgram [
+    metricsFromGithubLayer events,
+    reporterFromGithubAndStoreLayer events,
+    githubFromConfigLayer events,
+    KeyedLayer.succeed config,
+    KeyedLayer.succeed store
+  ]
+
+example (events : IO.Ref (List String)) :
+    Z
+      (Services[])
+      (GithubBuildError ⊕ MetricsBuildError ⊕ ReporterBuildError)
+      String :=
+  typeFacadeApplication events
 
 def automaticallyProvidedFailingSharedGraph
     (events : IO.Ref (List String)) :=
@@ -1037,7 +1049,7 @@ def automaticallyProvidedFailingSharedGraph
 def automaticallyProvidedFailingProgram
     (events : IO.Ref (List String)) :
     Z
-      (Environment [configEntry, storeEntry])
+      (Services[Config, Store])
       SharedGraphError
       Unit := Z.provide failingSharedGraphProgram [
   metricsFromGithubLayer events,
@@ -1049,7 +1061,7 @@ def automaticallyProvidedWaitingProgram
     (events : IO.Ref (List String))
     (started : IO.Ref Bool) :
     Z
-      (Environment [configEntry, storeEntry])
+      (Services[Config, Store])
       SharedGraphError
       Unit := Z.provide (waitingSharedGraphProgram started) [
   metricsFromGithubLayer events,
@@ -1060,7 +1072,7 @@ def automaticallyProvidedWaitingProgram
 def automaticallyProvidedSlowMetrics
     (events : IO.Ref (List String))
     (started : IO.Ref Bool) :
-    Z (Environment [configEntry]) SharedGraphError Unit :=
+    Z (Services[Config]) SharedGraphError Unit :=
   Z.provide metricsUnitProgram [
     slowMetricsFromGithubLayer events started,
     githubFromConfigLayer events
@@ -1069,7 +1081,7 @@ def automaticallyProvidedSlowMetrics
 def checkSharedDependencyGraph : IO Unit := do
   let events <- IO.mkRef ([] : List String)
   let effect : Z
-      (Environment SharedGraphOutputs)
+      (Services[Metrics, Reporter])
       SharedGraphError
       String := sharedGraphProgram
   match <- (sharedDependencyGraph events).toLayer.run
@@ -1087,7 +1099,7 @@ def checkSharedDependencyGraph : IO Unit := do
 def checkSharedDependencyGraphFailure : IO Unit := do
   let events <- IO.mkRef ([] : List String)
   let effect : Z
-      (Environment SharedGraphOutputs)
+      (Services[Metrics, Reporter])
       SharedGraphError
       Unit := Z.serviceWith fun _ => ()
   match <- (failingSharedDependencyGraph events).toLayer.run
@@ -1101,7 +1113,7 @@ def checkSharedDependencyGraphFailure : IO Unit := do
 def checkAutomaticSharedDependencyGraph : IO Unit := do
   let events <- IO.mkRef ([] : List String)
   let effect : Z
-      (Environment SharedGraphOutputs)
+      (Services[Metrics, Reporter])
       SharedGraphError
       String := sharedGraphProgram
   match <- (automaticSharedDependencyGraph events).toLayer.run
@@ -1136,7 +1148,7 @@ def checkAutomaticParallelDependencyGraph : IO Unit := do
 def checkAutomaticSharedDependencyGraphFailure : IO Unit := do
   let events <- IO.mkRef ([] : List String)
   let effect : Z
-      (Environment SharedGraphOutputs)
+      (Services[Metrics, Reporter])
       SharedGraphError
       Unit := Z.serviceWith fun _ => ()
   match <- (automaticFailingSharedDependencyGraph events).toLayer.run
@@ -1156,6 +1168,20 @@ def checkZProvide : IO Unit := do
   | some (.success "issue:2:2") => pure ()
   | _ => throw (IO.userError "Z.provide did not run the program.")
   assertParallelSiblingEvents "Z.provide" events
+    "acquire-metrics" "acquire-reporter" [
+      "release-reporter",
+      "release-metrics",
+      "release-github-from-config"
+    ]
+
+def checkTypeFacadeApplication : IO Unit := do
+  let events ← IO.mkRef ([] : List String)
+  let effect := (typeFacadeApplication events).provideEnvironment
+    Services.empty
+  match ← Z.unsafeRunSync effect "stable-keyed-type-facade" with
+  | some (.success "issue:2:2") => pure ()
+  | _ => throw (IO.userError "The type-based application did not run.")
+  assertParallelSiblingEvents "type-based application" events
     "acquire-metrics" "acquire-reporter" [
       "release-reporter",
       "release-metrics",
@@ -1265,6 +1291,8 @@ def demo : IO Unit := do
   checkAutomaticParallelDependencyGraph
   checkAutomaticSharedDependencyGraphFailure
   IO.println "Automatic keyed-layer graph checks passed."
+  checkTypeFacadeApplication
+  IO.println "Type-based application checks passed."
   checkZProvide
   checkZProvideFailure
   checkZProvideProgramFailure

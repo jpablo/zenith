@@ -657,16 +657,25 @@ syntax (name := servicesType)
   "Services[" term,* "]" : term
 
 syntax (name := keyedLayerFromLayerType)
-  "KeyedLayer.fromLayer" "(" term ")" term:arg : term
+  "KeyedLayer.fromLayer" term:arg : term
 
 syntax (name := keyedLayerSucceedType)
-  "KeyedLayer.succeed" "(" term ")" term:arg : term
+  "KeyedLayer.succeed" term:arg : term
 
 syntax (name := keyedServiceWithType)
   "Z.serviceWithType" "(" term ")" term:arg : term
 
 syntax (name := keyedServiceWithZType)
   "Z.serviceWithZType" "(" term ")" term:arg : term
+
+syntax (name := servicesGetType)
+  "Services.get" "[" term "]" term:arg : term
+
+macro_rules
+  | `(Z.serviceWith[$serviceType] $operation) =>
+      `(Z.serviceWithType ($serviceType) $operation)
+  | `(Z.serviceWithZ[$serviceType] $operation) =>
+      `(Z.serviceWithZType ($serviceType) $operation)
 
 private partial def keySyntaxForType
     (reference : Syntax)
@@ -699,6 +708,15 @@ private def entrySyntaxForType
   let key ← keySyntaxForType reference
     (← instantiateMVars serviceTypeExpr)
   `(Entry.create $key $serviceType)
+
+private def entrySyntaxForTypeExpr
+    (reference : Syntax)
+    (serviceType : Expr) : TermElabM Term := do
+  let serviceType ← instantiateMVars serviceType
+  let serviceTypeSyntax ← Term.exprToSyntax serviceType
+  let key ← keySyntaxForType reference
+    serviceType
+  `(Entry.create $key $serviceTypeSyntax)
 
 private partial def serviceRowEntries
     (reference : Syntax)
@@ -743,6 +761,33 @@ private def ensureExpectedType
   | some expectedType => Term.ensureHasType expectedType expression
   | none => pure expression
 
+private structure ExpectedSingleServiceLayer where
+  input : Expr
+  errorType : Expr
+  service : Expr
+
+private def expectedSingleServiceLayer?
+    (expectedType? : Option Expr) :
+    TermElabM (Option ExpectedSingleServiceLayer) := do
+  let some expectedType := expectedType? | return none
+  let expectedType ← instantiateMVars expectedType
+  if ← hasAssignableMVar expectedType then return none
+  let expectedType ← whnf expectedType
+  unless expectedType.isAppOfArity ``KeyedLayer 3 do return none
+  let arguments := expectedType.getAppArgs
+  let row ← whnf arguments[2]!
+  unless row.getAppFn.isConstOf ``List.cons do return none
+  let rowArguments := row.getAppArgs
+  unless rowArguments.size == 3 do return none
+  let tail ← whnf rowArguments[2]!
+  unless tail.getAppFn.isConstOf ``List.nil do return none
+  let service ← mkAppM ``Entry.Service #[rowArguments[1]!]
+  return some {
+    input := arguments[0]!
+    errorType := arguments[1]!
+    service
+  }
+
 @[term_elab serviceRowType]
 def elabServiceRowType : TermElab := fun stx expectedType? => do
   let `(ServiceRow[$serviceTypes,*]) := stx | throwUnsupportedSyntax
@@ -758,19 +803,33 @@ def elabServicesType : TermElab := fun stx expectedType? => do
 
 @[term_elab keyedLayerFromLayerType]
 def elabKeyedLayerFromLayerType : TermElab := fun stx expectedType? => do
-  let `(KeyedLayer.fromLayer ($serviceType) $layer) := stx |
+  let `(KeyedLayer.fromLayer $layer) := stx |
     throwUnsupportedSyntax
-  let entry ← entrySyntaxForType serviceType serviceType
-  let generated ← `(KeyedLayer.singleton $entry $layer)
-  Term.elabTerm generated expectedType?
+  let expectedLayer? ← expectedSingleServiceLayer? expectedType?
+  let layerExpectedType? ← expectedLayer?.mapM fun expected =>
+    mkAppM ``Layer #[expected.input, expected.errorType, expected.service]
+  let layer ← Term.elabTerm layer layerExpectedType?
+  let layerType ← whnf (← inferType layer)
+  unless layerType.isAppOfArity ``Layer 3 do
+    throwErrorAt stx
+      "`KeyedLayer.fromLayer` requires an ordinary `Layer` value"
+  let serviceType := layerType.getAppArgs[2]!
+  let entrySyntax ← entrySyntaxForTypeExpr stx serviceType
+  let entry ← Term.elabTerm entrySyntax none
+  let result ← mkAppM ``KeyedLayer.singleton #[entry, layer]
+  ensureExpectedType expectedType? result
 
 @[term_elab keyedLayerSucceedType]
 def elabKeyedLayerSucceedType : TermElab := fun stx expectedType? => do
-  let `(KeyedLayer.succeed ($serviceType) $value) := stx |
+  let `(KeyedLayer.succeed $value) := stx |
     throwUnsupportedSyntax
-  let entry ← entrySyntaxForType serviceType serviceType
-  let generated ← `(KeyedLayer.succeedEntry $entry $value)
-  Term.elabTerm generated expectedType?
+  let expectedLayer? ← expectedSingleServiceLayer? expectedType?
+  let value ← Term.elabTerm value (expectedLayer?.map (·.service))
+  let serviceType ← inferType value
+  let entrySyntax ← entrySyntaxForTypeExpr stx serviceType
+  let entry ← Term.elabTerm entrySyntax none
+  let result ← mkAppM ``KeyedLayer.succeedEntry #[entry, value]
+  ensureExpectedType expectedType? result
 
 @[term_elab keyedServiceWithType]
 def elabKeyedServiceWithType : TermElab := fun stx expectedType? => do
@@ -799,6 +858,15 @@ def elabKeyedServiceWithZType : TermElab := fun stx expectedType? => do
       else
         Term.elabTerm generated expectedType?
   | none => Term.elabTerm generated none
+
+@[term_elab servicesGetType]
+def elabServicesGetType : TermElab := fun stx expectedType? => do
+  let `(Services.get[$serviceType] $environment) := stx |
+    throwUnsupportedSyntax
+  let entry ← entrySyntaxForType serviceType serviceType
+  let generated ←
+    `(Contains.get (target := $entry) $environment)
+  Term.elabTerm generated expectedType?
 
 @[command_elab serviceKeyDecl]
 meta def elabServiceKeyDecl : CommandElab

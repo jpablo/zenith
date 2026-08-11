@@ -76,53 +76,62 @@ private def metricsFromGithub :
     }
 
 private def inferredStandalone :=
-  KeyedLayer.make ([reporterEntry]) [
+  KeyedLayer.make (ServiceRow[Reporter]) [
     reporterFromGithub,
     githubFromNothing
   ]
 
-/--
-info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredStandalone : KeyedLayer (Environment []) Empty [reporterEntry]
--/
-#guard_msgs in
+/-- info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredStandalone -/
+#guard_msgs (info, substring := true) in
 #check inferredStandalone
 
-private def inferredExternal :=
-  KeyedLayer.make ([reporterEntry]) [reporterFromGithub]
+example : KeyedLayer (Services[]) Empty (ServiceRow[Reporter]) :=
+  inferredStandalone
 
-/--
-info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredExternal :
-  KeyedLayer (Environment [githubEntry]) Empty [reporterEntry]
--/
-#guard_msgs in
+private def inferredExternal :=
+  KeyedLayer.make (ServiceRow[Reporter]) [reporterFromGithub]
+
+/-- info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredExternal -/
+#guard_msgs (info, substring := true) in
 #check inferredExternal
 
+example : KeyedLayer (Services[Github]) Empty (ServiceRow[Reporter]) :=
+  inferredExternal
+
 private def inferredInputsAndErrors (events : IO.Ref (List String)) :=
-  KeyedLayer.make ([reporterEntry]) [
+  KeyedLayer.make (ServiceRow[Reporter]) [
     reporterFromGithubAndStoreLayer events,
     githubFromConfigLayer events
   ]
 
-/--
-info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredInputsAndErrors (events : IO.Ref (List String)) :
-  KeyedLayer (Environment [configEntry, storeEntry]) (GithubBuildError ⊕ ReporterBuildError) [reporterEntry]
--/
-#guard_msgs in
+/-- info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredInputsAndErrors -/
+#guard_msgs (info, substring := true) in
 #check inferredInputsAndErrors
+
+example (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Services[Config, Store])
+      (GithubBuildError ⊕ ReporterBuildError)
+      (ServiceRow[Reporter]) :=
+  inferredInputsAndErrors events
 
 private def inferredInputsAndErrorsReverse
     (events : IO.Ref (List String)) :=
-  KeyedLayer.make ([reporterEntry]) [
+  KeyedLayer.make (ServiceRow[Reporter]) [
     githubFromConfigLayer events,
     reporterFromGithubAndStoreLayer events
   ]
 
-/--
-info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredInputsAndErrorsReverse (events : IO.Ref (List String)) :
-  KeyedLayer (Environment [configEntry, storeEntry]) (GithubBuildError ⊕ ReporterBuildError) [reporterEntry]
--/
-#guard_msgs in
+/-- info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredInputsAndErrorsReverse -/
+#guard_msgs (info, substring := true) in
 #check inferredInputsAndErrorsReverse
+
+example (events : IO.Ref (List String)) :
+    KeyedLayer
+      (Services[Config, Store])
+      (GithubBuildError ⊕ ReporterBuildError)
+      (ServiceRow[Reporter]) :=
+  inferredInputsAndErrorsReverse events
 
 private def inferredProvided (events : IO.Ref (List String)) :=
   Z.provide sharedGraphProgram [
@@ -131,12 +140,16 @@ private def inferredProvided (events : IO.Ref (List String)) :=
     githubFromConfigLayer events
   ]
 
-/--
-info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredProvided (events : IO.Ref (List String)) :
-  Z (Environment [configEntry, storeEntry]) (GithubBuildError ⊕ MetricsBuildError ⊕ ReporterBuildError) String
--/
-#guard_msgs in
+/-- info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredProvided -/
+#guard_msgs (info, substring := true) in
 #check inferredProvided
+
+example (events : IO.Ref (List String)) :
+    Z
+      (Services[Config, Store])
+      (GithubBuildError ⊕ MetricsBuildError ⊕ ReporterBuildError)
+      String :=
+  inferredProvided events
 
 private inductive ProgramError where
   | unavailable
@@ -153,31 +166,35 @@ private def inferredProvidedProgramError
     githubFromConfigLayer events
   ]
 
-/--
-info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredProvidedProgramError (events : IO.Ref (List String)) :
-  Z (Environment [configEntry, storeEntry]) (GithubBuildError ⊕ ReporterBuildError ⊕ ProgramError) Unit
--/
-#guard_msgs in
+/-- info: StableServiceKeys.KeyedLayerMakeDiagnostics.inferredProvidedProgramError -/
+#guard_msgs (info, substring := true) in
 #check inferredProvidedProgramError
+
+example (events : IO.Ref (List String)) :
+    Z
+      (Services[Config, Store])
+      (GithubBuildError ⊕ ReporterBuildError ⊕ ProgramError)
+      Unit :=
+  inferredProvidedProgramError events
 
 /--
 info: Keyed layer graph
 error type: Empty
 external inputs: (none)
-final outputs: metricsEntry, reporterEntry
+final outputs: Metrics, Reporter
 selected providers:
-  metricsEntry <- [0] metricsFromGithub
-  reporterEntry <- [1] reporterFromGithub
+  Metrics <- [0] metricsFromGithub
+  Reporter <- [1] reporterFromGithub
 selected candidates:
   [2] githubFromNothing
     inputs: (none)
-    outputs: githubEntry
+    outputs: Github
   [0] metricsFromGithub
-    inputs: githubEntry
-    outputs: metricsEntry
+    inputs: Github
+    outputs: Metrics
   [1] reporterFromGithub
-    inputs: githubEntry
-    outputs: reporterEntry
+    inputs: Github
+    outputs: Reporter
 dependency edges:
   [2] githubFromNothing -> [0] metricsFromGithub
   [2] githubFromNothing -> [1] reporterFromGithub
@@ -190,20 +207,20 @@ unused candidates:
 -/
 #guard_msgs in
 #keyed_layer_graph
-  ([metricsEntry, reporterEntry])
+  (ServiceRow[Metrics, Reporter])
   [metricsFromGithub, reporterFromGithub, githubFromNothing]
 
 /--
 info: Keyed layer graph
 error type: ReporterBuildError
-external inputs: githubEntry
-final outputs: reporterEntry
+external inputs: Github
+final outputs: Reporter
 selected providers:
-  reporterEntry <- [0] reporterFromGithubWithError
+  Reporter <- [0] reporterFromGithubWithError
 selected candidates:
   [0] reporterFromGithubWithError
-    inputs: githubEntry
-    outputs: reporterEntry
+    inputs: Github
+    outputs: Reporter
 dependency edges:
   (none)
 parallel groups:
@@ -215,7 +232,7 @@ unused candidates:
 -/
 #guard_msgs in
 #keyed_layer_graph
-  ([reporterEntry])
+  (ServiceRow[Reporter])
   [reporterFromGithubWithError]
 
 /--

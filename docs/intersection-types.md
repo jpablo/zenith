@@ -419,15 +419,15 @@ entry names:
 
 ```lean
 def userRepositoryLayer :=
-  KeyedLayer.succeed (Repository User) userRepository
+  KeyedLayer.succeed userRepository
 
 def issueRepositoryLayer :=
-  KeyedLayer.succeed (Repository Issue) issueRepository
+  KeyedLayer.succeed issueRepository
 
 def program := zdo
-  let name <- Z.serviceWithType (Repository User)
+  let name <- Z.serviceWith[Repository User]
     (fun repository => repository.value.name)
-  let number <- Z.serviceWithZType (Repository Issue)
+  let number <- Z.serviceWithZ[Repository Issue]
     (fun repository => Z.succeedNow repository.value.number)
   pure s!"{name}:{number}"
 
@@ -439,9 +439,13 @@ def supplied : Z (Services[]) Empty String :=
 normalizes their order. `ServiceRow[...]` gives the normalized entry list when
 a low-level keyed-layer signature needs a row instead of an environment.
 `KeyedLayer.succeed` builds a closed layer. `KeyedLayer.fromLayer` converts an
-existing layer. `Z.serviceWithType` selects a value from a service.
-`Z.serviceWithZType` runs an effect that uses a service. The callback forms are
-necessary because a fiber result cannot contain a `Type 1` service.
+existing layer. Both forms infer the output service type from their value.
+`Z.serviceWith[Service]` selects a value from a service.
+`Z.serviceWithZ[Service]` runs an effect that uses a service. The callback
+forms are necessary because a fiber result cannot contain a `Type 1` service.
+Custom layer functions can read an input with
+`Services.get[Service] environment`. Application code does not use an entry
+name.
 
 The stable environment registers `Row.normalize` with the general `zdo`
 collector through `[zdo_row_environment Row.normalize]`. During elaboration,
@@ -480,8 +484,8 @@ The prototype provides these checked properties:
   entry.
 - `Services[Repository User, Repository Issue]` creates the same normalized
   environment type as the equivalent explicit entry row.
-- `Z.serviceWithType` and `Z.serviceWithZType` infer an internal singleton
-  entry from a concrete service type.
+- `Z.serviceWith[Service]` and `Z.serviceWithZ[Service]` infer an internal
+  singleton entry from a concrete service type.
 - Plain `zdo` combines these singleton entries into one normalized keyed
   environment. Access order and repeated access do not change the inferred
   type.
@@ -524,10 +528,12 @@ The prototype provides these checked properties:
 The checked examples show that two libraries can use the same local service
 name when their declaration namespaces differ. They also show that
 `Builder.addFresh` rejects a key that is already present. The `Entry`
-constructor is private. A client module can create entries through
-`service_key`, but it cannot create a conflicting raw entry.
-The command generates a reducible abbreviation. Row normalization and
-projection must inspect the key during elaboration.
+constructor is private. The public type-based forms generate their internal
+entries during elaboration. Thus, normal application code does not use
+`service_key`. The command remains as a low-level tool for explicit row and
+builder tests. It cannot create a conflicting raw entry. The command generates
+a reducible abbreviation. Row normalization and projection must inspect the
+key during elaboration.
 
 For example:
 
@@ -614,9 +620,9 @@ list:
 ```lean
 def applicationLayer :
     KeyedLayer
-      (Environment [configEntry, storeEntry])
+      (Services[Config, Store])
       SharedGraphError
-      [metricsEntry, reporterEntry] := KeyedLayer.make [
+      (ServiceRow[Metrics, Reporter]) := KeyedLayer.make [
   metricsLayer,
   reporterLayer,
   githubLayer
@@ -635,7 +641,7 @@ uses parentheses in place of a Scala type argument:
 
 ```lean
 def applicationLayer := KeyedLayer.make
-  ([metricsEntry, reporterEntry]) [
+  (ServiceRow[Metrics, Reporter]) [
     metricsLayer,
     reporterLayer,
     githubLayer
@@ -652,9 +658,9 @@ The checked example above infers a result equivalent to:
 
 ```lean
 KeyedLayer
-  (Environment [configEntry, storeEntry])
+  (Services[Config, Store])
   (GithubBuildError ⊕ MetricsBuildError ⊕ ReporterBuildError)
-  [metricsEntry, reporterEntry]
+  (ServiceRow[Metrics, Reporter])
 ```
 
 The expected-type form remains useful when a service must stay external even
@@ -673,7 +679,7 @@ a layer value:
 
 ```lean
 #keyed_layer_graph
-  ([metricsEntry, reporterEntry])
+  (ServiceRow[Metrics, Reporter])
   [metricsLayer, reporterLayer, githubLayer]
 ```
 

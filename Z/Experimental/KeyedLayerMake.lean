@@ -135,7 +135,8 @@ private def providersFor
   return providers
 
 private def entryMessage (entry : Expr) : MetaM MessageData := do
-  return m!"{entry}"
+  let service ← whnf (← mkAppM ``Entry.Service #[entry])
+  return m!"{service}"
 
 private def candidateAt
     (candidates : Array Candidate)
@@ -464,11 +465,11 @@ private def analyze
     provider
   }
 
-private def entriesMessage (entries : Array Expr) : MessageData :=
+private def entriesMessage (entries : Array Expr) : MetaM MessageData := do
   if entries.isEmpty then
-    "(none)"
+    return "(none)"
   else
-    MessageData.joinSep (entries.toList.map fun entry => m!"{entry}") ", "
+    return MessageData.joinSep (← entries.toList.mapM entryMessage) ", "
 
 private def candidateMessage
     (candidates : Array Candidate)
@@ -490,21 +491,23 @@ private def renderAnalysis (analysis : Analysis) : MetaM MessageData := do
   let mut lines : Array MessageData := #[
     "Keyed layer graph",
     m!"error type: {analysis.expected.errorType}",
-    m!"external inputs: {entriesMessage analysis.external}",
-    m!"final outputs: {entriesMessage analysis.requested}",
+    m!"external inputs: {(← entriesMessage analysis.external)}",
+    m!"final outputs: {(← entriesMessage analysis.requested)}",
     "selected providers:"
   ]
   for output in analysis.requested do
     let providers ← providersFor analysis.candidates output
     let provider := providers[0]!.1
     lines := lines.push m!
-      "  {output} <- {candidateMessage analysis.candidates provider}"
+      "  {(← entryMessage output)} <- {candidateMessage analysis.candidates provider}"
   lines := lines.push "selected candidates:"
   for plan in analysis.plans do
     let candidate := candidateAt analysis.candidates plan.candidate
     lines := lines.push m!"  {candidateMessage analysis.candidates plan.candidate}"
-    lines := lines.push m!"    inputs: {entriesMessage candidate.inputs}"
-    lines := lines.push m!"    outputs: {entriesMessage candidate.outputs}"
+    lines := lines.push m!
+      "    inputs: {(← entriesMessage candidate.inputs)}"
+    lines := lines.push m!
+      "    outputs: {(← entriesMessage candidate.outputs)}"
   lines := lines.push "dependency edges:"
   let mut edgeCount : Nat := 0
   for plan in analysis.plans do
