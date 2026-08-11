@@ -84,15 +84,16 @@ namespace Fiber
     (<- self.interruptHandler.get)
 
 
-  /-- 
+  /--
   If the result is present, return it immediately.
-  Otherwise register the cc `observer` at the top of current observers.
+  Otherwise, add `observer` to the current observer list.
 
-  Note: Evaluated from the parent thread, by way of `Fiber.join`
+  This runs from the parent fiber through `Fiber.join`.
   -/
   protected def awaitAsync (observer: Observer E A) : IO Unit := do
     if <- RuntimeLog.isEnabled then
-      log self.fiberId s!"<-- Fiber.awaitAsync ({<- self.showState})" Color.yellow
+      RuntimeLog.write self.fiberId
+        s!"<-- Fiber.awaitAsync ({<- self.showState})" Color.yellow
     let result? : Option (Option (Exit E A)) <- self.state.modifyGet fun
       | .created => (none, .created)
       | .running task observers => (some none, .running task (observer :: observers))
@@ -102,12 +103,12 @@ namespace Fiber
       | some none => log self.fiberId "Still running, saved observer for later..." Color.yellow
       | some (some result) => observer result
 
-  /-- 
-  Sets state to `(.done result)` and evaluates all registered observers.
-  
-  Note: This is evaluated in a child thread. 
+  /--
+  Set the state to `.done result` and notify all registered observers.
+
+  This runs in the child fiber.
   -/
-  protected def complete: Observer E A := 
+  protected def complete : Observer E A :=
     fun (result: Exit E A) => do
       let observers? : Option (List (Observer E A)) <- self.state.modifyGet fun
         | .created => (some [], .done result)
@@ -118,7 +119,8 @@ namespace Fiber
         | some observers =>
           self.completion.resolve result
           if <- RuntimeLog.isEnabled then
-            log self.fiberId s!"Fiber.complete ({<- self.showState})" Color.yellow
+            RuntimeLog.write self.fiberId
+              s!"Fiber.complete ({<- self.showState})" Color.yellow
           for observer in observers do
             log self.fiberId s!"complete: calling observers" Color.yellow
             try observer result

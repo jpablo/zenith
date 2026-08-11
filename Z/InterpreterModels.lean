@@ -30,17 +30,16 @@ def Stack.size : Stack E A E₁ A₁ -> Nat
   | Stack.more (tail := tail) .. => 1 + Stack.size tail
   | Stack.done .. => 0
 
-/-- State needed to execute a Fiber  -/
-structure RunState (Rfiber) (E A E₁ A₁: Type) where
+/-- State needed to execute a fiber. -/
+structure RunState (Rfiber) (E A E₁ A₁ : Type) where
   interruption : Interruption
-  fiberInfos   : IO.Ref (List FiberInfo)
-  stack        : Stack E A E₁ A₁
-  environment  : Environment Rfiber
-  fiberId      : FiberId
-  initialTime  : Nat
+  fiberInfos : IO.Ref (List FiberInfo)
+  stack : Stack E A E₁ A₁
+  environment : Environment Rfiber
+  fiberId : FiberId
+  initialTime : Nat
   loggingEnabled : Bool
 
-
-/-- Generates a new random id using `fiberId` as prefix  -/
-def RunState.newId (self: RunState R E A E₁ A₁) : IO NodeId :=
+/-- Generate a new diagram node ID with `fiberId` as its prefix. -/
+def RunState.newId (self : RunState R E A E₁ A₁) : IO NodeId :=
   GraphViz.newId self.fiberId

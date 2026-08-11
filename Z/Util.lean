@@ -17,7 +17,7 @@ def isEnabled : IO Bool :=
 
 end RuntimeLog
 
-def IO.unit : IO Unit := 
+def IO.unit : IO Unit :=
   pure ()
 
 namespace Color
@@ -33,15 +33,29 @@ namespace Color
   def white  := "\u001b[37m"
 end Color
 
-def log (fiberId: String) (s: String) (color: String := Color.green) : IO Unit := do
-  if <- RuntimeLog.isEnabled then
-    try
-      IO.eprintln s!"{color}[{fiberId}] {s}{Color.reset}"
-    catch _ =>
-      pure ()
+namespace RuntimeLog
 
-instance toSEmpty: ToString Empty := 
-  ⟨fun _ => "Impossible!"⟩ 
+/-- Write a log message after the caller has checked that logging is enabled. -/
+def write
+    (fiberId : String)
+    (message : String)
+    (color : String := Color.green) : IO Unit := do
+  try
+    IO.eprintln s!"{color}[{fiberId}] {message}{Color.reset}"
+  catch _ =>
+    pure ()
+
+end RuntimeLog
+
+def log
+    (fiberId : String)
+    (message : String)
+    (color : String := Color.green) : IO Unit := do
+  if ← RuntimeLog.isEnabled then
+    RuntimeLog.write fiberId message color
+
+instance toSEmpty : ToString Empty :=
+  ⟨fun _ => "Impossible!"⟩
 
 
 def FiberId := String deriving ToString
@@ -50,7 +64,7 @@ structure TLift (α : Type u) : Type (max u v) where
   up :: down : α
 
 
-def NodeId := String 
+def NodeId := String
   deriving ToString, Repr
 
 

@@ -91,3 +91,7 @@ same configuration as the initial baseline.
 
 The first current-result run measured 325, 180, 200, 401, 305, and 12,641
 ns/op in the same row order. The two runs give the same overall result.
+
+A later style refactor extracted inline diagram helpers and a typed async
+resume gate. Its verification run measured 316, 171, 186, 388, 301, and
+12,293 ns/op in the same row order. The refactor caused no performance loss.
