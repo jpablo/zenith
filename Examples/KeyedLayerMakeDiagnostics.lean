@@ -258,4 +258,13 @@ private def unusedCandidate :
     KeyedLayer (Environment []) Empty [githubEntry] :=
   KeyedLayer.make [githubFromNothing, metricsFromNothing]
 
+private structure IndexedService (index : Nat) : Type 1 where
+  marker : Unit
+
+/--
+error: a service key currently supports only type arguments
+-/
+#guard_msgs (error, substring := true) in
+service_key unsupportedIndexedEntry : IndexedService 1
+
 end StableServiceKeys.KeyedLayerMakeDiagnostics

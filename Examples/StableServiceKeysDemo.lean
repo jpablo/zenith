@@ -46,15 +46,56 @@ end OtherLibrary
 
 service_key otherConfigEntry : OtherLibrary.Config
 
-example : configEntry.key = {
-    owner := "StableServiceKeys"
-    name := "Config"
-  } := rfl
+example : configEntry.key =
+    Key.named "StableServiceKeys" "Config" [] := rfl
 
-example : otherConfigEntry.key = {
-    owner := "StableServiceKeys.OtherLibrary"
-    name := "Config"
-  } := rfl
+example : otherConfigEntry.key =
+    Key.named "StableServiceKeys.OtherLibrary" "Config" [] := rfl
+
+/-! Concrete applications of parameterized service types have structural keys. -/
+
+structure User : Type 1 where
+  name : String
+
+structure Issue : Type 1 where
+  number : Nat
+
+structure Repository (A : Type 1) : Type 1 where
+  value : A
+
+service_key userRepositoryEntry : Repository User
+
+service_key issueRepositoryEntry : Repository Issue
+
+service_key userListRepositoryEntry : Repository (List User)
+
+abbrev UserRepository := Repository User
+
+service_key userRepositoryAliasEntry : UserRepository
+
+example : userRepositoryEntry.key =
+    Key.named "StableServiceKeys" "Repository" [
+      Key.named "StableServiceKeys" "User" []
+    ] := rfl
+
+example : userListRepositoryEntry.key =
+    Key.named "StableServiceKeys" "Repository" [
+      Key.named "" "List" [
+        Key.named "StableServiceKeys" "User" []
+      ]
+    ] := rfl
+
+example : userRepositoryAliasEntry = userRepositoryEntry := rfl
+
+example : Row.Fresh issueRepositoryEntry.key
+    [userRepositoryEntry] := by decide
+
+abbrev ParameterizedServices : List Entry.{1} :=
+  [issueRepositoryEntry, userRepositoryEntry]
+
+example : Row.normalize
+      [userRepositoryEntry, issueRepositoryEntry] =
+    ParameterizedServices := rfl
 
 abbrev Services : List Entry.{1} :=
   [configEntry, githubEntry, storeEntry]
@@ -83,6 +124,56 @@ def github : Github := {
 def store : Store := {
   label := "issue"
 }
+
+def userRepository : Repository User := {
+  value := { name := "Ada" }
+}
+
+def issueRepository : Repository Issue := {
+  value := { number := 42 }
+}
+
+def userRepositoryLayer :
+    KeyedLayer
+      (Environment ([] : List Entry.{1})) Empty [userRepositoryEntry] :=
+  KeyedLayer.singleton userRepositoryEntry <|
+    Layer.fromFunction fun _ => userRepository
+
+def issueRepositoryLayer :
+    KeyedLayer
+      (Environment ([] : List Entry.{1})) Empty [issueRepositoryEntry] :=
+  KeyedLayer.singleton issueRepositoryEntry <|
+    Layer.fromFunction fun _ => issueRepository
+
+def parameterizedProgram :
+    Z (Environment ParameterizedServices) Empty String := zdo
+  let name <- withServiceZ
+    (entries := ParameterizedServices)
+    userRepositoryEntry fun repository =>
+      Z.succeedNow repository.value.name
+  let number <- withServiceZ
+    (entries := ParameterizedServices)
+    issueRepositoryEntry fun repository =>
+      Z.succeedNow repository.value.number
+  pure s!"{name}:{number}"
+
+def automaticallyProvidedParameterized :=
+  Z.provide parameterizedProgram [
+    userRepositoryLayer,
+    issueRepositoryLayer
+  ]
+
+example : Z
+    (Environment ([] : List Entry.{1})) Empty String :=
+  automaticallyProvidedParameterized
+
+def checkParameterizedServiceKeys : IO Unit := do
+  let effect := automaticallyProvidedParameterized.provideEnvironment
+    (Environment.empty : Environment [])
+  match ← Z.unsafeRunSync effect "stable-parameterized-service-keys" with
+  | some (.success "Ada:42") => pure ()
+  | _ => throw (IO.userError
+      "Parameterized service-key provision failed.")
 
 def servicesForward : Builder Services :=
   Builder.empty
@@ -1049,6 +1140,8 @@ def demo : IO Unit := do
       throw (IO.userError "The stable service-key prototype failed.")
   | none =>
       throw (IO.userError "The stable service-key prototype returned no result.")
+  checkParameterizedServiceKeys
+  IO.println "Parameterized service-key checks passed."
   checkKeyedLayerSuccess
   checkKeyedLayerAcquisitionFailure
   checkKeyedLayerProgramFailure

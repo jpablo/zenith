@@ -409,8 +409,10 @@ Its compile-time diagnostic checks are in
 [`stable-service-keys.lean`](stable-service-keys.lean) is its documentation
 import.
 The experiment does not change the production `Z` environment. Each service
-entry contains an owner, a local name, and its service type. A lexical
-insertion sort gives service rows a stable order and removes duplicate keys.
+entry contains a structural type key and its service type. A key contains the
+fully qualified name of each concrete type constructor, its argument count,
+and the keys of its type arguments. A lexical insertion sort gives service
+rows a stable order and removes duplicate keys.
 
 The prototype provides these checked properties:
 
@@ -423,6 +425,13 @@ The prototype provides these checked properties:
 - A `Type 1` GitHub service runs through the existing `Z` and `Layer` types.
 - `service_key configEntry : Config` resolves `Config` and generates the key
   `StableServiceKeys.Config` from its full Lean declaration name.
+- `service_key userRepoEntry : Repository User` includes `User` in the key.
+  Thus, it stays distinct from `Repository Issue`.
+- Nested concrete applications such as `Repository (List User)` have
+  unambiguous structural keys.
+- Type abbreviations are unfolded before key generation. Two declarations for
+  `Repository User` and an abbreviation of it therefore produce the same
+  entry.
 - `KeyedLayer.singleton` converts one ordinary layer to a one-service keyed
   layer.
 - `KeyedLayer.zipFresh` combines disjoint service rows in canonical key order.
@@ -460,6 +469,23 @@ constructor is private. A client module can create entries through
 `service_key`, but it cannot create a conflicting raw entry.
 The command generates a reducible abbreviation. Row normalization and
 projection must inspect the key during elaboration.
+
+For example:
+
+```lean
+structure Repository (A : Type 1) : Type 1 where
+  value : A
+
+service_key userRepositoryEntry : Repository User
+service_key issueRepositoryEntry : Repository Issue
+```
+
+The command elaborates the complete service type. It does not use formatted
+type text. It converts the normalized type expression to a prefix sequence of
+named constructors. Every constructor records its argument count, so the
+encoding preserves the shape of nested applications. Only concrete named type
+arguments are supported. Value indices and unresolved type variables do not
+yet have stable keys.
 
 The entry stores a service type as data. Thus, a row uses one universe level
 above its service ceiling. Low-universe services must also be placed at that
@@ -622,11 +648,12 @@ successful provision, inferred typed failures, parallel sibling acquisition,
 fail-fast sibling cancellation, layer acquisition failure, program failure,
 and reverse-order release.
 
-The declaration command currently accepts only one named service type. It does
-not yet define identities for parameterized service types. Horizontal and
-vertical layer composition now handle different keyed inputs and errors, and
-pass-through uses a strict duplicate-key policy. Shared graphs work with an
-explicit scope, `keyed_graph` generates that scope automatically, and
+The declaration command accepts named service types with concrete named type
+arguments. It does not yet define identities for value indices or unresolved
+type variables. Horizontal and vertical layer composition now handle
+different keyed inputs and errors, and pass-through uses a strict
+duplicate-key policy. Shared graphs work with an explicit scope,
+`keyed_graph` generates that scope automatically, and
 `KeyedLayer.make` now generates the graph. Its standalone form requires only
 the requested output row. It uses exact stable-key matching and
 `ErrorChannel.CanInject` instances for the inferred or selected error type.

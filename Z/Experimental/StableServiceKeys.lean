@@ -10,11 +10,32 @@ replacement for product environments without changing the production API.
 
 namespace StableServiceKeys
 
-/-- A library owner and a service-local name form one stable identity. -/
-structure Key where
+/-- One node in the prefix encoding of a service type. -/
+structure KeyPart where
   owner : String
   name : String
+  argumentCount : Nat
   deriving BEq, DecidableEq, Ord, Repr
+
+/-- A stable prefix encoding of one concrete service type. -/
+structure Key where
+  parts : List KeyPart
+  deriving BEq, DecidableEq, Ord, Repr
+
+namespace Key
+
+/-- Build one structural key node from its argument keys. -/
+@[reducible] def named
+    (owner : String)
+    (name : String)
+    (arguments : List Key) : Key :=
+  ⟨{
+      owner
+      name
+      argumentCount := arguments.length
+    } :: arguments.flatMap (fun argument => argument.parts)⟩
+
+end Key
 
 /-- A stable qualified key and the service type assigned to it. -/
 structure Entry.{u} where
@@ -542,29 +563,49 @@ macro_rules
         keyed_graph (error := $errorType) { $rest* yield $result })
 
 /-!
-`service_key entryName : ServiceType` resolves `ServiceType` and uses its full
-Lean declaration name. Normal code does not write an owner string.
+`service_key entryName : ServiceType` resolves `ServiceType` and uses the full
+Lean declaration names of its constructor and concrete type arguments. Normal
+code does not write an owner string or construct a key.
 -/
 
-open Lean Elab Command Term
+open Lean Meta Elab Command Term
 
 syntax (name := serviceKeyDecl)
-  "service_key " ident " : " ident : command
+  "service_key " ident " : " term : command
+
+private partial def keySyntaxForType
+    (reference : Syntax)
+    (type : Expr) : TermElabM (TSyntax `term) := do
+  let type ← whnf (← instantiateMVars type)
+  let .const typeName _ := type.getAppFn |
+    throwErrorAt reference
+      "a service key requires a named type constructor"
+  let .str owner localName := typeName |
+    throwErrorAt reference
+      "a service key requires a named Lean declaration"
+  let mut argumentKeys : Array (TSyntax `term) := #[]
+  for argument in type.getAppArgs do
+    let argumentType ← whnf (← inferType argument)
+    let .sort _ := argumentType |
+      throwErrorAt reference
+        "a service key currently supports only type arguments"
+    argumentKeys := argumentKeys.push
+      (← keySyntaxForType reference argument)
+  let owner := Syntax.mkStrLit <| match owner with
+    | .anonymous => ""
+    | owner => owner.toString
+  let localName := Syntax.mkStrLit localName
+  `(Key.named $owner $localName [$argumentKeys,*])
 
 @[command_elab serviceKeyDecl]
 meta def elabServiceKeyDecl : CommandElab
-  | `(service_key $entryName:ident : $serviceType:ident) => do
-      let serviceName ← liftTermElabM <|
-        realizeGlobalConstNoOverloadWithInfo serviceType
-      let .str owner localName := serviceName |
-        throwErrorAt serviceType
-          "a service key requires a named Lean declaration"
-      let owner := Syntax.mkStrLit owner.toString
-      let localName := Syntax.mkStrLit localName
+  | `(service_key $entryName:ident : $serviceType:term) => do
+      let key ← liftTermElabM do
+        let serviceTypeExpr ← Term.elabType serviceType
+        Term.synthesizeSyntheticMVarsNoPostponing
+        keySyntaxForType serviceType (← instantiateMVars serviceTypeExpr)
       elabCommand <| ← `(abbrev $entryName : Entry :=
-        Entry.create
-          { owner := $owner, name := $localName }
-          $serviceType)
+        Entry.create $key $serviceType)
   | _ => throwUnsupportedSyntax
 
 /-- Select a high-universe service without returning it as a fiber result. -/
