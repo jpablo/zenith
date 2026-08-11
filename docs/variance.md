@@ -348,7 +348,8 @@ inference.
 The larger checked example is
 [`Examples/GithubIssueSync.lean`](../Examples/GithubIssueSync.lean). It uses
 four services, normalized source errors, reordered actions, two catch clauses,
-an audit finalizer, and composed fake layers. The runtime cases are in
+an audit finalizer, and fake services composed by `Z.provide`. Its environment
+uses the stable keyed row rather than a product. The runtime cases are in
 [`Tests.lean`](../Tests.lean).
 
 The checked examples are in [`variance.lean`](variance.lean). Run them from the

@@ -540,13 +540,14 @@ def makeIssueSyncServices
   }
   (config, github, store, audit)
 
-def issueSyncLayer
+def issueSyncProgram
     (events : IO.Ref (List String))
     (scenario : IssueSyncScenario) :
-    Layer Unit Empty GithubIssueSync.Services :=
+    Z Unit Empty Nat :=
   let (config, github, store, audit) :=
     makeIssueSyncServices events scenario
-  GithubIssueSync.layer config github store audit
+  (GithubIssueSync.application config github store audit).provideEnvironment
+    StableServiceKeys.Services.empty
 
 def testGithubIssueSync : IO Unit := do
   let issues : List GithubIssueSync.Issue := [
@@ -559,9 +560,9 @@ def testGithubIssueSync : IO Unit := do
     config := .ok { organization := "lean", dryRun := false }
     github := .ok issues
   }
-  match ← (issueSyncLayer successEvents successScenario).run ()
-      GithubIssueSync.sync "issue-sync-success" with
-  | some (.success 2) => pure ()
+  match ← runProgram "issue-sync-success"
+      (issueSyncProgram successEvents successScenario) with
+  | .success 2 => pure ()
   | _ => failTest "the issue sync success path failed"
   assertTrue "the issue sync success events are incorrect"
     ((← successEvents.get) ==
@@ -572,9 +573,9 @@ def testGithubIssueSync : IO Unit := do
     config := .ok { organization := "lean", dryRun := true }
     github := .ok issues
   }
-  match ← (issueSyncLayer dryRunEvents dryRunScenario).run ()
-      GithubIssueSync.sync "issue-sync-dry-run" with
-  | some (.success 2) => pure ()
+  match ← runProgram "issue-sync-dry-run"
+      (issueSyncProgram dryRunEvents dryRunScenario) with
+  | .success 2 => pure ()
   | _ => failTest "the issue sync dry-run path failed"
   assertTrue "the dry-run path wrote issues"
     ((← dryRunEvents.get) == ["config", "github:lean", "finish"])
@@ -584,9 +585,9 @@ def testGithubIssueSync : IO Unit := do
     config := .ok { organization := "lean", dryRun := false }
     github := .error .unavailable
   }
-  match ← (issueSyncLayer sourceFailureEvents sourceFailureScenario).run ()
-      GithubIssueSync.sync "issue-sync-source-recovery" with
-  | some (.success 0) => pure ()
+  match ← runProgram "issue-sync-source-recovery"
+      (issueSyncProgram sourceFailureEvents sourceFailureScenario) with
+  | .success 0 => pure ()
   | _ => failTest "the issue sync did not recover from a source failure"
   assertTrue "the source recovery or finalizer events are incorrect"
     ((← sourceFailureEvents.get) ==
@@ -598,9 +599,9 @@ def testGithubIssueSync : IO Unit := do
     github := .ok issues
     auditFails := true
   }
-  match ← (issueSyncLayer auditFailureEvents auditFailureScenario).run ()
-      GithubIssueSync.sync "issue-sync-audit-recovery" with
-  | some (.success 0) => pure ()
+  match ← runProgram "issue-sync-audit-recovery"
+      (issueSyncProgram auditFailureEvents auditFailureScenario) with
+  | .success 0 => pure ()
   | _ => failTest "a later catch did not recover from the audit failure"
   assertTrue "the finalizer did not run after the audit failure"
     ((← auditFailureEvents.get) ==
@@ -614,12 +615,11 @@ def testGithubIssueSync : IO Unit := do
   }
   let (rawConfig, rawGithub, rawStore, _) :=
     makeIssueSyncServices rawFailureEvents rawFailureScenario
-  let rawLayer : Layer Unit GithubIssueSync.SourceErrors
-      GithubIssueSync.RawServices :=
-    GithubIssueSync.rawLayer rawConfig rawGithub rawStore
-  match ← rawLayer.run () GithubIssueSync.syncRaw
-      "issue-sync-raw-failure" with
-  | some (.failure (.fail (.inr (.inr (.writeFailed 2))))) => pure ()
+  let rawProgram : Z Unit GithubIssueSync.SourceErrors Nat :=
+    (GithubIssueSync.rawApplication rawConfig rawGithub rawStore)
+      |>.provideEnvironment StableServiceKeys.Services.empty
+  match ← runProgram "issue-sync-raw-failure" rawProgram with
+  | .failure (.fail (.inr (.inr (.writeFailed 2)))) => pure ()
   | _ => failTest "the raw issue sync did not expose the store failure"
   assertTrue "the raw failure ran an unexpected finalizer"
     ((← rawFailureEvents.get) ==

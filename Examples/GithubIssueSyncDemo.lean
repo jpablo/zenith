@@ -3,6 +3,7 @@ import Examples.GithubIssueSync
 namespace GithubIssueSyncDemo
 
 open GithubIssueSync
+open StableServiceKeys
 
 def printStep (message : String) : Z Unit Empty Unit :=
   Z.succeed (IO.println message)
@@ -49,11 +50,16 @@ def audit : Audit := {
   finish := finishAudit
 }
 
-def demoLayer : Layer Unit Empty Services :=
-  GithubIssueSync.layer configService githubService issueStore audit
+def demoApplication :=
+  GithubIssueSync.application configService githubService issueStore audit
+
+example : Z (Services[]) Empty Nat :=
+  demoApplication
 
 def run : IO Unit := do
-  match <- demoLayer.run () GithubIssueSync.sync "github-issue-sync-demo" with
+  let effect := demoApplication.provideEnvironment
+    StableServiceKeys.Services.empty
+  match <- Z.unsafeRunSync effect "github-issue-sync-demo" with
   | some (.success count) =>
       IO.println s!"Synchronized {count} issues."
   | some (.failure _) =>

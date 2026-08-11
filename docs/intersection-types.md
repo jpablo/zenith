@@ -363,7 +363,12 @@ syncRaw : Z RawServices SourceErrors Nat
 requirementsForward : Z Services AllErrors Unit
 requirementsReverse : Z Services AllErrors Unit
 sync : Z Services Empty Nat
+rawApplication ... : Z (Services[]) SourceErrors Nat
+application ... : Z (Services[]) Empty Nat
 ```
+
+`RawServices` and `Services` are normalized, reified service rows. The service
+operations use `Z.serviceWith[Service]` and `Z.serviceWithZ[Service]`.
 
 `requirementsForward` and `requirementsReverse` request the same four
 services and four errors in opposite orders. They infer the same normalized
@@ -371,9 +376,11 @@ types. `sync` uses two ordered handlers. The first handler can fail with
 `AuditError`, and the second handler catches that error. An audit finalizer
 runs on every path.
 
-The tests use local fake layers. They check normal sync, dry-run branching,
-source-error recovery, handler-error recovery, finalizer execution, and an
-uncaught store error from `syncRaw`.
+`rawApplication` and `application` supply fake services with
+`KeyedLayer.succeed`. `Z.provide` selects and composes the required layers.
+The tests check normal sync, dry-run branching, source-error recovery,
+handler-error recovery, finalizer execution, and an uncaught store error from
+`syncRaw`.
 
 Run the standalone in-memory demo with:
 
@@ -381,20 +388,19 @@ Run the standalone in-memory demo with:
 lake exe githubIssueSync
 ```
 
-This is elaborator-level normalization, not a reified row type. The structural
-order is not a public service-key order. Explicit service keys are still
-necessary if the API needs an order that is independent of Lean's expression
-representation or compiler version.
+The application uses the stable service-key row. It has no explicit entry
+names and no manual product-layer construction.
 
-## Remaining research sequence
+## Remaining production sequence
 
 1. Define the Scala fragment that Zenith and other target libraries need.
 2. Formalize its subtype preorder, intersection rules, and equivalence laws.
-3. Decide whether cross-version API stability requires explicit service keys.
-4. If explicit keys are necessary, define them and prove the row meet laws.
+3. Prove the normalization, merge, projection, and freshness laws for stable
+   service rows.
+4. Move the checked keyed environment and layer API out of `Z.Experimental`.
 
-The issue-sync case gives the first combined test of normalized environments,
-normalized errors, and ordered catch chains in a larger program.
+The issue-sync case combines stable environments, normalized errors, ordered
+catch chains, and automatic layer composition in a larger program.
 
 ## Stable service-key prototype
 

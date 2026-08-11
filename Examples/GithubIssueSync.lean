@@ -1,14 +1,18 @@
-import Z
+import Z.Experimental.KeyedLayerMake
 
 /-!
-A larger `zdo` example based on a GitHub issue synchronization job.
+A larger `zdo` and automatic-layer example based on a GitHub issue
+synchronization job.
 
 The example uses four services and three source error types. `syncRaw` shows
 the inferred environment and error union. `sync` catches source and audit
-errors, and it always runs an audit finalizer.
+errors, and it always runs an audit finalizer. `Z.provide` selects and
+composes the service layers.
 -/
 
 namespace GithubIssueSync
+
+open StableServiceKeys
 
 structure Issue where
   id : Nat
@@ -54,37 +58,45 @@ instance : ToString AuditError where
 
 structure ConfigService : Type 1 where
   load : Z Unit ConfigError SyncConfig
+  deriving ServiceKey
 
 structure GithubService : Type 1 where
   openIssues : String -> Z Unit GithubError (List Issue)
+  deriving ServiceKey
 
 structure IssueStore : Type 1 where
   save : Issue -> Z Unit StoreError Unit
+  deriving ServiceKey
 
 structure Audit : Type 1 where
   recordFailure : String -> Z Unit AuditError Unit
   finish : Z Unit Empty Unit
+  deriving ServiceKey
 
 abbrev SourceErrors := ConfigError ⊕ GithubError ⊕ StoreError
 abbrev AllErrors := AuditError ⊕ ConfigError ⊕ GithubError ⊕ StoreError
-abbrev RawServices := ConfigService × GithubService × IssueStore
-abbrev Services := Audit × ConfigService × GithubService × IssueStore
+abbrev RawServices := Services[ConfigService, GithubService, IssueStore]
+abbrev Services := Services[Audit, ConfigService, GithubService, IssueStore]
 
-def loadConfig : Z ConfigService ConfigError SyncConfig :=
-  Z.serviceWithZ fun service => service.load
+def loadConfig : Z (Services[ConfigService]) ConfigError SyncConfig :=
+  Z.serviceWithZ[ConfigService] fun service => service.load
 
 def getOpenIssues
-    (organization : String) : Z GithubService GithubError (List Issue) :=
-  Z.serviceWithZ fun service => service.openIssues organization
+    (organization : String) :
+    Z (Services[GithubService]) GithubError (List Issue) :=
+  Z.serviceWithZ[GithubService] fun service =>
+    service.openIssues organization
 
-def saveIssue (issue : Issue) : Z IssueStore StoreError Unit :=
-  Z.serviceWithZ fun service => service.save issue
+def saveIssue
+    (issue : Issue) : Z (Services[IssueStore]) StoreError Unit :=
+  Z.serviceWithZ[IssueStore] fun service => service.save issue
 
-def recordFailure (message : String) : Z Audit AuditError Unit :=
-  Z.serviceWithZ fun service => service.recordFailure message
+def recordFailure
+    (message : String) : Z (Services[Audit]) AuditError Unit :=
+  Z.serviceWithZ[Audit] fun service => service.recordFailure message
 
-def finishAudit : Z Audit Empty Unit :=
-  Z.serviceWithZ fun service => service.finish
+def finishAudit : Z (Services[Audit]) Empty Unit :=
+  Z.serviceWithZ[Audit] fun service => service.finish
 
 def describeSourceError : SourceErrors -> String
   | .inl .unavailable => "configuration unavailable"
@@ -145,26 +157,38 @@ def sync := zdo
 
 example : Z Services Empty Nat := sync
 
-/-- Build the three services that `syncRaw` needs. -/
-def rawLayer
+/-- Supply the three services that `syncRaw` needs. -/
+def rawApplication
     (config : ConfigService)
     (github : GithubService)
-    (store : IssueStore) : Layer Unit Empty RawServices :=
-  let configLayer : Layer Unit Empty ConfigService := Layer.succeed config
-  let githubLayer : Layer Unit Empty GithubService := Layer.succeed github
-  let storeLayer : Layer Unit Empty IssueStore := Layer.succeed store
-  configLayer.zipWith
-    (githubLayer.zipWith storeLayer fun github store => (github, store))
-    fun config services => (config, services)
+    (store : IssueStore) :=
+  Z.provide syncRaw [
+    KeyedLayer.succeed config,
+    KeyedLayer.succeed github,
+    KeyedLayer.succeed store
+  ]
 
-/-- Build all four services in the normalized environment order. -/
-def layer
+example (config : ConfigService) (github : GithubService)
+    (store : IssueStore) :
+    Z (Services[]) SourceErrors Nat :=
+  rawApplication config github store
+
+/-- Supply all four services through automatic layer composition. -/
+def application
     (config : ConfigService)
     (github : GithubService)
     (store : IssueStore)
-    (audit : Audit) : Layer Unit Empty Services :=
-  let auditLayer : Layer Unit Empty Audit := Layer.succeed audit
-  auditLayer.zipWith (rawLayer config github store)
-    fun audit services => (audit, services)
+    (audit : Audit) :=
+  Z.provide sync [
+    KeyedLayer.succeed audit,
+    KeyedLayer.succeed config,
+    KeyedLayer.succeed github,
+    KeyedLayer.succeed store
+  ]
+
+example (config : ConfigService) (github : GithubService)
+    (store : IssueStore) (audit : Audit) :
+    Z (Services[]) Empty Nat :=
+  application config github store audit
 
 end GithubIssueSync

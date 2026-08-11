@@ -582,7 +582,7 @@ syntax "let " ident " := " term ";" : keyedGraphBinding
 syntax "let " ident " := " ident " >>> " term ";" : keyedGraphBinding
 syntax "let " ident " := " ident " ++ " ident ";" : keyedGraphBinding
 syntax "keyed_graph" "{" keyedGraphBinding* "yield " term "}" : term
-syntax "keyed_graph" "(" "error" " := " term ")"
+syntax "keyed_graph" "(" ident " := " term ")"
   "{" keyedGraphBinding* "yield " term "}" : term
 
 macro_rules
