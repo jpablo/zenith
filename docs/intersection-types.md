@@ -447,6 +447,33 @@ Custom layer functions can read an input with
 `Services.get[Service] environment`. Application code does not use an entry
 name.
 
+Generic code carries a key witness for each abstract type. `ServiceKey` has
+the same role that ZIO's `Tag` has in generic service code:
+
+```lean
+structure User : Type 1 where
+  name : String
+  deriving ServiceKey
+
+structure Repository (A : Type 1) : Type 1 where
+  value : A
+  deriving ServiceKey
+
+def genericLayer
+    (Service : Type 1)
+    [ServiceKey Service]
+    (service : Service) :
+    KeyedLayer (Services[]) Empty (ServiceRow[Service]) :=
+  KeyedLayer.succeed service
+```
+
+The deriving handler gives `Repository A` a key that contains the key from
+`ServiceKey A`. Therefore, `Repository User` and `Repository Issue` remain
+different when they pass through generic code. Concrete application code does
+not pass the witness. Lean finds the derived instance. For a type that cannot
+use a deriving clause, `serviceKey[ExistingType]` creates the same canonical
+witness for a local or named instance.
+
 The stable environment registers `Row.normalize` with the general `zdo`
 collector through `[zdo_row_environment Row.normalize]`. During elaboration,
 the collector groups all requirements for that environment, combines their
@@ -479,6 +506,11 @@ The prototype provides these checked properties:
   Thus, it stays distinct from `Repository Issue`.
 - Nested concrete applications such as `Repository (List User)` have
   unambiguous structural keys.
+- Generic definitions can use `ServiceRow[Repository A]`,
+  `Z.serviceWith[Repository A]`, and `Services.get[Repository A]` when they
+  have `[ServiceKey A]`.
+- `deriving ServiceKey` builds recursive instances for named constructors
+  whose parameters are types.
 - Type abbreviations are unfolded before key generation. Two declarations for
   `Repository User` and an abbreviation of it therefore produce the same
   entry.
@@ -548,9 +580,10 @@ service_key issueRepositoryEntry : Repository Issue
 The command elaborates the complete service type. It does not use formatted
 type text. It converts the normalized type expression to a prefix sequence of
 named constructors. Every constructor records its argument count, so the
-encoding preserves the shape of nested applications. Only concrete named type
-arguments are supported. Value indices and unresolved type variables do not
-yet have stable keys.
+encoding preserves the shape of nested applications. An abstract type uses
+its `ServiceKey` witness. Value indices do not yet have stable keys. The
+deriving handler rejects indexed families and constructors with value
+parameters.
 
 The entry stores a service type as data. Thus, a row uses one universe level
 above its service ceiling. Low-universe services must also be placed at that
@@ -713,11 +746,11 @@ successful provision, inferred typed failures, parallel sibling acquisition,
 fail-fast sibling cancellation, layer acquisition failure, program failure,
 and reverse-order release.
 
-The declaration command accepts named service types with concrete named type
-arguments. It does not yet define identities for value indices or unresolved
-type variables. Horizontal and vertical layer composition now handle
-different keyed inputs and errors, and pass-through uses a strict
-duplicate-key policy. Shared graphs work with an explicit scope,
+The key elaborator accepts named service types and abstract types that have a
+`ServiceKey` witness. It does not yet define identities for value indices.
+Horizontal and vertical layer composition now handle different keyed inputs
+and errors, and pass-through uses a strict duplicate-key policy. Shared graphs
+work with an explicit scope,
 `keyed_graph` generates that scope automatically, and
 `KeyedLayer.make` now generates the graph. Its standalone form requires only
 the requested output row. It uses exact stable-key matching and

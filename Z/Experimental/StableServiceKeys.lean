@@ -17,7 +17,7 @@ structure KeyPart where
   argumentCount : Nat
   deriving BEq, DecidableEq, Ord, Repr
 
-/-- A stable prefix encoding of one concrete service type. -/
+/-- A stable prefix encoding of one service type. -/
 structure Key where
   parts : List KeyPart
   deriving BEq, DecidableEq, Ord, Repr
@@ -36,6 +36,20 @@ namespace Key
     } :: arguments.flatMap (fun argument => argument.parts)⟩
 
 end Key
+
+/-- A stable key for a service type that is abstract in generic code. -/
+class ServiceKey (Service : Type u) where
+  private mk ::
+  key : Key
+
+namespace ServiceKey
+
+private abbrev create
+    {Service : Type u}
+    (key : Key) : ServiceKey Service :=
+  ⟨key⟩
+
+end ServiceKey
 
 /-- A stable qualified key and the service type assigned to it. -/
 structure Entry.{u} where
@@ -641,11 +655,13 @@ def withServiceZEntry
 
 /-!
 `service_key entryName : ServiceType` resolves `ServiceType` and uses the full
-Lean declaration names of its constructor and concrete type arguments. Normal
-code does not write an owner string or construct a key.
+Lean declaration names of its constructor and type arguments. An abstract type
+argument uses its `ServiceKey` witness. Normal code does not write an owner
+string or construct a key.
 -/
 
 open Lean Meta Elab Command Term
+open Parser.Term
 
 syntax (name := serviceKeyDecl)
   "service_key " ident " : " term : command
@@ -655,6 +671,9 @@ syntax (name := serviceRowType)
 
 syntax (name := servicesType)
   "Services[" term,* "]" : term
+
+syntax (name := serviceKeyTerm)
+  "serviceKey[" term "]" : term
 
 syntax (name := keyedLayerFromLayerType)
   "KeyedLayer.fromLayer" term:arg : term
@@ -681,9 +700,13 @@ private partial def keySyntaxForType
     (reference : Syntax)
     (type : Expr) : TermElabM (TSyntax `term) := do
   let type ← whnf (← instantiateMVars type)
-  let .const typeName _ := type.getAppFn |
+  let typeFunction := type.getAppFn
+  if typeFunction.isFVar then
+    let typeSyntax ← Term.exprToSyntax type
+    return ← `(ServiceKey.key (Service := $typeSyntax))
+  let .const typeName _ := typeFunction |
     throwErrorAt reference
-      "a service key requires a named type constructor"
+      "a service key requires a named type constructor or a `ServiceKey` witness"
   let .str owner localName := typeName |
     throwErrorAt reference
       "a service key requires a named Lean declaration"
@@ -700,6 +723,45 @@ private partial def keySyntaxForType
     | owner => owner.toString
   let localName := Syntax.mkStrLit localName
   `(Key.named $owner $localName [$argumentKeys,*])
+
+@[term_elab serviceKeyTerm]
+def elabServiceKeyTerm : TermElab := fun stx expectedType? => do
+  let `(serviceKey[$serviceType]) := stx | throwUnsupportedSyntax
+  let serviceTypeExpr ← Term.elabType serviceType
+  let key ← keySyntaxForType serviceType
+    (← instantiateMVars serviceTypeExpr)
+  let generated ←
+    `(ServiceKey.create (Service := $serviceType) $key)
+  Term.elabTerm generated expectedType?
+
+private def deriveServiceKey
+    (declarationNames : Array Name) : CommandElabM Bool := do
+  let #[typeName] := declarationNames | return false
+  let inductiveValue ← getConstInfoInduct typeName
+  if inductiveValue.all.length != 1 then
+    throwError "mutually inductive service-key derivation is not supported"
+  if inductiveValue.numIndices != 0 then
+    throwError "indexed service-key derivation is not supported"
+  elabCommand <| ← liftTermElabM do
+    forallTelescopeReducing inductiveValue.type fun parameters _ => do
+      let typeParameters ← parameters.filterM (isType ·)
+      unless typeParameters.size == parameters.size do
+        throwError
+          "service-key derivation supports only type parameters"
+      let instanceBinders ← typeParameters.mapM fun parameter => do
+        let parameterName :=
+          mkIdent (← getFVarLocalDecl parameter).userName
+        `(bracketedBinderF| [ServiceKey $parameterName:ident])
+      let parameterNames ← parameters.mapM fun parameter =>
+        return mkIdent (← getFVarLocalDecl parameter).userName
+      let serviceType ←
+        `(@$(mkCIdent typeName) $parameterNames*)
+      `(variable $instanceBinders* in
+        instance : ServiceKey $serviceType := serviceKey[$serviceType])
+  return true
+
+initialize
+  registerDerivingHandler ``ServiceKey deriveServiceKey
 
 private def entrySyntaxForType
     (reference : Syntax)

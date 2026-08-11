@@ -55,16 +55,22 @@ example : configEntry.key =
 example : otherConfigEntry.key =
     Key.named "StableServiceKeys.OtherLibrary" "Config" [] := rfl
 
+example : ServiceKey Config :=
+  serviceKey[Config]
+
 /-! Concrete applications of parameterized service types have structural keys. -/
 
 structure User : Type 1 where
   name : String
+  deriving ServiceKey
 
 structure Issue : Type 1 where
   number : Nat
+  deriving ServiceKey
 
 structure Repository (A : Type 1) : Type 1 where
   value : A
+  deriving ServiceKey
 
 service_key userRepositoryEntry : Repository User
 
@@ -89,6 +95,14 @@ example : userListRepositoryEntry.key =
     ] := rfl
 
 example : userRepositoryAliasEntry = userRepositoryEntry := rfl
+
+example : ServiceKey.key (Service := User) =
+    Key.named "StableServiceKeys" "User" [] := rfl
+
+example : ServiceKey.key (Service := Repository User) =
+    Key.named "StableServiceKeys" "Repository" [
+      Key.named "StableServiceKeys" "User" []
+    ] := rfl
 
 example : Row.Fresh issueRepositoryEntry.key
     [userRepositoryEntry] := by decide
@@ -147,6 +161,39 @@ def userRepositoryLayer :=
 
 def issueRepositoryLayer :=
   KeyedLayer.succeed issueRepository
+
+def genericServiceLayer
+    (Service : Type 1)
+    [ServiceKey Service]
+    (service : Service) :
+    KeyedLayer (Services[]) Empty (ServiceRow[Service]) :=
+  KeyedLayer.succeed service
+
+def genericRepositoryProgram
+    (A : Type 1)
+    [ServiceKey A]
+    (inspect : A → Nat) :
+    Z (Services[Repository A]) Empty Nat :=
+  Z.serviceWith[Repository A] fun repository =>
+    inspect repository.value
+
+def getGenericService
+    (Service : Type 1)
+    [ServiceKey Service]
+    (environment : Services[Service]) : Service :=
+  Services.get[Service] environment
+
+example : KeyedLayer (Services[]) Empty (ServiceRow[Repository User]) :=
+  genericServiceLayer (Repository User) userRepository
+
+example : KeyedLayer (Services[]) Empty (ServiceRow[Repository Issue]) :=
+  genericServiceLayer (Repository Issue) issueRepository
+
+example : Z (Services[Repository User]) Empty Nat :=
+  genericRepositoryProgram User (fun user => user.name.length)
+
+example (environment : Services[Repository User]) : Repository User :=
+  getGenericService (Repository User) environment
 
 def userRepositoryLayerFromLayer :=
   KeyedLayer.fromLayer (Layer.succeed userRepository)
@@ -264,8 +311,8 @@ example : Z
 
 def automaticallyProvidedParameterized :=
   Z.provide parameterizedProgram [
-    userRepositoryLayer,
-    issueRepositoryLayer
+    genericServiceLayer (Repository User) userRepository,
+    genericServiceLayer (Repository Issue) issueRepository
   ]
 
 example : Z
