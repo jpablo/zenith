@@ -15,14 +15,78 @@ structure KeyPart where
   owner : String
   name : String
   argumentCount : Nat
-  deriving BEq, DecidableEq, Ord, Repr
+  deriving BEq, DecidableEq, Repr
+
+namespace KeyPart
+
+/-- Compare key nodes by owner, name, and argument count. -/
+@[reducible] def compareKeyPart : KeyPart → KeyPart → Ordering :=
+  compareLex
+    (compareOn KeyPart.owner)
+    (compareLex
+      (compareOn KeyPart.name)
+      (compareOn KeyPart.argumentCount))
+
+instance : Ord KeyPart where
+  compare := compareKeyPart
+
+instance : Std.TransOrd KeyPart := by
+  change Std.TransCmp
+    (compareLex
+      (compareOn KeyPart.owner)
+      (compareLex
+        (compareOn KeyPart.name)
+        (compareOn KeyPart.argumentCount)))
+  infer_instance
+
+instance : Std.LawfulEqOrd KeyPart where
+  eq_of_compare {a b} equality := by
+    simp only [compare, compareKeyPart, compareLex_eq_eq, compareOn]
+      at equality
+    obtain ⟨ownerEquality, nameEquality, argumentCountEquality⟩ :=
+      equality
+    change compare a.owner b.owner = .eq at ownerEquality
+    change compare a.name b.name = .eq at nameEquality
+    change compare a.argumentCount b.argumentCount = .eq
+      at argumentCountEquality
+    have ownerEquality :=
+      Std.LawfulEqOrd.eq_of_compare ownerEquality
+    have nameEquality :=
+      Std.LawfulEqOrd.eq_of_compare nameEquality
+    have argumentCountEquality :=
+      Std.LawfulEqOrd.eq_of_compare argumentCountEquality
+    cases a
+    cases b
+    simp_all
+
+end KeyPart
 
 /-- A stable prefix encoding of one service type. -/
 structure Key where
   parts : List KeyPart
-  deriving BEq, DecidableEq, Ord, Repr
+  deriving BEq, DecidableEq, Repr
 
 namespace Key
+
+/-- Compare structural keys by their prefix encodings. -/
+@[reducible] def compareKey : Key → Key → Ordering :=
+  compareOn Key.parts
+
+instance : Ord Key where
+  compare := compareKey
+
+instance : Std.TransOrd Key := by
+  change Std.TransCmp (compareOn Key.parts)
+  infer_instance
+
+instance : Std.LawfulEqOrd Key where
+  eq_of_compare {a b} equality := by
+    change compare a.parts b.parts = .eq at equality
+    have partsEquality :=
+      Std.LawfulEqOrd.eq_of_compare equality
+    cases a
+    cases b
+    simp_all
 
 /-- Build one structural key node from its argument keys. -/
 @[reducible] def named

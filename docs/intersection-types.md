@@ -395,8 +395,8 @@ names and no manual product-layer construction.
 
 1. Define the Scala fragment that Zenith and other target libraries need.
 2. Formalize its subtype preorder, intersection rules, and equivalence laws.
-3. Add a lawful key comparator and a key-to-service coherence condition. Then
-   lift the service-key laws to exact canonical-row equality.
+3. Make key-to-service coherence intrinsic to public entry construction. The
+   exact laws currently take `Row.Coherent` as an explicit condition.
 4. Move the checked keyed environment and layer API out of `Z.Experimental`.
 
 The issue-sync case combines stable environments, normalized errors, ordered
@@ -503,6 +503,13 @@ The prototype provides these checked properties:
 
 - Normalization preserves the set of qualified service keys and is
   idempotent at that boundary.
+- `KeyPart` and `Key` have checked transitive comparators whose `.eq` result
+  is equivalent to logical key equality.
+- Normalization is exactly idempotent. Compatible rows with the same keys
+  normalize to exact `List Entry` equality.
+- Coherent permutations have exactly equal normal forms. Merge has exact
+  associative, commutative, idempotent, and identity laws for ordered,
+  coherent rows.
 - Merge is associative, commutative, and idempotent at the service-key
   boundary, with the empty row as its identity.
 - Normalization and merge produce rows with unique qualified keys.
