@@ -547,7 +547,8 @@ The next step is to formalize the core profile in
 the two syntax sorts, their subtype relations, normalization, and obligations
 1 through 6. After those proofs exist, the production service-row laws can be
 related to the abstract requirement model. The error representation can then
-be checked against the same specification.
+be checked against the same specification. The ordered implementation plan is
+in [`intersection-formalization-plan.md`](intersection-formalization-plan.md).
 
 The issue-sync case combines stable environments, normalized errors, ordered
 catch chains, and automatic layer composition in a larger program.
