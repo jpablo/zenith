@@ -1,6 +1,7 @@
 import Z
 import Examples.GithubIssueSync
 import Examples.StableServiceKeysDemo
+import Examples.TodoReport
 
 open Fiber
 
@@ -1174,4 +1175,5 @@ def main : IO Unit := do
   testZDoInferredMultipleCatch
   testZDoInferredFinally
   StableServiceKeys.demo
+  TodoReport.test
   IO.println "All regression tests passed."

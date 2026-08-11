@@ -23,6 +23,10 @@ lean_exe stableServiceKeys {
   root := `Examples.StableServiceKeysDemoMain
 }
 
+lean_exe todoReport {
+  root := `Examples.TodoReportMain
+}
+
 lean_lib Z
 lean_lib Examples
 

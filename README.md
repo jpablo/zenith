@@ -60,6 +60,15 @@ Run the standalone GitHub issue-sync demo:
 lake exe githubIssueSync
 ```
 
+Generate a Markdown TODO report for a workspace:
+
+```bash
+lake exe todoReport [ROOT] [OUTPUT]
+```
+
+`ROOT` defaults to the current directory. `OUTPUT` defaults to
+`ROOT/todo-report.md`. A relative `OUTPUT` is resolved from `ROOT`.
+
 #### Regenerate svg diagrams
 
 (Graphviz needs to be installed)
