@@ -1,5 +1,6 @@
 import Z.Util
 import Z.Interruption
+import Init.System.Promise
 
 open IO (userError)
 
@@ -28,6 +29,7 @@ structure Fiber (E A: Type) where
   interrupted: IO.Ref Bool
   interruptHandler : IO.Ref (IO Unit)
   task       : IO.Ref (Option (Task (Except IO.Error Unit)))
+  completion : IO.Promise (Exit E A)
 
 
 namespace Fiber
@@ -35,12 +37,15 @@ namespace Fiber
   /- Constructors -/
 
   protected def empty (fiberId: FiberId): IO (Fiber E A) := do
+    let _ : Nonempty (Exit E A) :=
+      ⟨.failure .interrupt⟩
     return Fiber.mk
       fiberId
       (<- IO.mkRef .created)
       (<- IO.mkRef false)
       (<- IO.mkRef IO.unit)
       (<- IO.mkRef none)
+      (<- IO.Promise.new (α := Exit E A))
 
 
   /- "Methods" -/
@@ -60,18 +65,12 @@ namespace Fiber
       | .done _  => return s!"Fiber: (fiberId: {self.fiberId}) (interrupted: {<- self.interrupted.get}) (state: .done)"
       | .running task observers => return s!"Fiber: (fiberId: {self.fiberId}) (interrupted: {<- self.interrupted.get}) (state: .running) (hasFinished: {(<- IO.hasFinished task)}) (observers : {observers.length})"
 
-  /-- Use polling for now. When available use a promise or something similar. -/
-  partial def awaitPoll (pollMs: UInt32 := 100) (fiberId: FiberId): IO (Option (Exit E A)) := do
-    -- dbg_trace s!"({fiberId}) Fiber.await (fiberId: {self.fiberId})"
-    match (<- self.state.get) with
-      | .created => IO.sleep pollMs *> awaitPoll pollMs fiberId
-
-      | .running task .. =>
-        match (<- IO.wait task) with
-          | .error ex => return some (.failure (.die ex))
-          | _         => IO.sleep pollMs *> awaitPoll pollMs fiberId
-
-      | .done a => return some a
+  /-- Wait until this fiber has one final exit value. -/
+  def await : IO (Exit E A) := do
+    match <- IO.wait self.completion.result? with
+    | some exit => pure exit
+    | none => throw (userError
+        s!"Internal defect: completion promise was dropped for fiber {self.fiberId}")
 
   partial def awaitTask (self : Fiber E A) : IO Unit := do
     match <- self.task.get with
@@ -109,7 +108,6 @@ namespace Fiber
   -/
   protected def complete: Observer E A := 
     fun (result: Exit E A) => do
-      log self.fiberId s!"Fiber.complete ({<- self.showState})" Color.yellow
       let observers? : Option (List (Observer E A)) <- self.state.modifyGet fun
         | .created => (some [], .done result)
         | .running _ observers => (some observers, .done result)
@@ -117,9 +115,12 @@ namespace Fiber
       match observers? with
         | none => IO.unit
         | some observers =>
+          self.completion.resolve result
+          log self.fiberId s!"Fiber.complete ({<- self.showState})" Color.yellow
           for observer in observers do
             log self.fiberId s!"complete: calling observers" Color.yellow
-            observer result
+            try observer result
+            catch _ => pure ()
 
 
   /-- Contains some data needed to interact with Fibers without exposing the types `E`, `A`  -/
@@ -134,7 +135,7 @@ namespace Fiber
     interrupt   := self.requestInterrupt
     interrupted := self.interrupted.get
     await       := do
-      let _ <- self.awaitPoll (fiberId := self.fiberId)
+      let _ <- self.await
       return ()
   
 

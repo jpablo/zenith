@@ -11,12 +11,41 @@ open Function (const)
 
 namespace ZCore
 
+private initialize nextFiberSerial : IO.Ref Nat <- IO.mkRef 0
+
+private def freshFiberId (parentFiberId : FiberId) (name : String) : IO FiberId := do
+  let serial <- nextFiberSerial.modifyGet fun current =>
+    (current, current + 1)
+  pure s!"{parentFiberId}-{name}-{serial}"
+
 private def interruptChildren (fiberInfos : IO.Ref (List FiberInfo)) : IO Unit := do
   let children <- fiberInfos.get
   for child in children do
     child.interrupt
   for child in children do
     child.await
+
+private def completeStackWithDefect
+    (stack : Stack E A E₁ A₁)
+    (error : IO.Error) : IO Unit :=
+  match stack with
+  | .more (tail := tail) .. => completeStackWithDefect tail error
+  | .done complete => complete (.failure (.die error))
+
+private def terminateWithDefect
+    (fiberInfos : IO.Ref (List FiberInfo))
+    (stack : Stack E A E₁ A₁)
+    (error : IO.Error) : IO Unit := do
+  let finalError <-
+    try
+      interruptChildren fiberInfos
+      pure error
+    catch cleanupError =>
+      pure cleanupError
+  try
+    completeStackWithDefect stack finalError
+  catch _ =>
+    pure ()
 
 mutual
 
@@ -28,7 +57,7 @@ mutual
   Runs the given effect in IO and returns a Fiber  
   -/
   partial def unsafeRunFiber (self : ZCore R E A) (env : Environment Rfiber) [R ∣ Rfiber] (parentFiberId : FiberId) (name : String) (startTime : Nat) : IO (Fiber E A) := do
-    let fiberId := s!"{parentFiberId}-{name}-{<- IO.rand 0 100000}"
+    let fiberId <- freshFiberId parentFiberId name
     let fiber <- Fiber.empty fiberId
     let state : RunState .. := {
         interruption := (<- fiber.toInterruption)
@@ -45,8 +74,7 @@ mutual
         self.runLoop state
         log fiberId s!"<-- Z.unsafeRunFiber -- finishing execution\n"
       catch ioError =>
-        interruptChildren state.fiberInfos
-        fiber.complete (.failure (.die ioError))
+        terminateWithDefect state.fiberInfos state.stack ioError
     fiber.setTask task
     return fiber
 
@@ -130,11 +158,16 @@ mutual
           let resume (exit : Exit E A) : IO Unit := do
             let isFirst <- resumed.modifyGet fun alreadyResumed => (!alreadyResumed, true)
             if isFirst then
-              state.interruption.interruptHandler.set IO.unit
-              diagram.async state.fiberId self.nodeId t₀
-              match exit with
-                | .failure cause => runWithErrorHandler cause state
-                | .success value => continueOrComplete value state
+              let _ <- IO.asTask do
+                try
+                  state.interruption.interruptHandler.set IO.unit
+                  diagram.async state.fiberId self.nodeId t₀
+                  match exit with
+                    | .failure cause => runWithErrorHandler cause state
+                    | .success value => continueOrComplete value state
+                catch ioError =>
+                  terminateWithDefect state.fiberInfos state.stack ioError
+              pure ()
           let interrupt := do
             if <- state.interruption.shouldInterrupt then
               resume (.failure .interrupt)
@@ -157,11 +190,16 @@ mutual
             let isFirst <- resumed.modifyGet fun alreadyResumed =>
               (!alreadyResumed, true)
             if isFirst then
-              state.interruption.interruptHandler.set IO.unit
-              diagram.async state.fiberId self.nodeId t₀
-              match exit with
-              | .failure cause => runWithErrorHandler cause state
-              | .success value => continueOrComplete value state
+              let _ <- IO.asTask do
+                try
+                  state.interruption.interruptHandler.set IO.unit
+                  diagram.async state.fiberId self.nodeId t₀
+                  match exit with
+                  | .failure cause => runWithErrorHandler cause state
+                  | .success value => continueOrComplete value state
+                catch ioError =>
+                  terminateWithDefect state.fiberInfos state.stack ioError
+              pure ()
           let interrupt := do
             if <- state.interruption.shouldInterrupt then
               match ← IO.wait cancelReady.result? with
@@ -262,7 +300,8 @@ mutual
         runWithErrorHandler cause₁ {state with stack := tail}
 
       | .more _ none none .. => do
-        log state.fiberId "Internal defect: Stack not empty but don't know what do do next. (This should not happen)"
+        throw <| userError
+          "Internal defect: stack entry has no error handler or error-type proof"
 
       -- nothing else to do, return control to the user
       | .done complete => do
@@ -331,7 +370,7 @@ def unsafeFork
 def unsafeRunSync
     (self : Z Unit E A)
     (fiberId : FiberId := "main")
-    (useDiagram : Option String := none) : IO (Option (Exit E A)) := do
+    (useDiagram : Option String := none) : IO (Exit E A) := do
   let diagram <-
     match useDiagram with
     | some file =>
@@ -347,7 +386,7 @@ def unsafeRunSync
     ""
     fiberId
     startTime
-  let exit <- fiber.awaitPoll (fiberId := fiberId)
+  let exit <- fiber.await
   fiber.awaitTask
   diagram.footer
   pure exit

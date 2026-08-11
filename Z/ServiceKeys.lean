@@ -747,10 +747,7 @@ def provide
                   (program.provideEnvironment resource.value)
                   fiberId
                 let waiter ← IO.asTask do
-                  match ← fiber.awaitPoll (fiberId := fiber.fiberId) with
-                  | some exit => callback (.ok exit)
-                  | none => callback (.error (.die <| IO.userError
-                      "the provided program did not return an exit value"))
+                  callback (.ok (<- fiber.await))
                   fiber.awaitTask
                 pure do
                   fiber.requestInterrupt

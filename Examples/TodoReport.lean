@@ -342,9 +342,7 @@ private def runTestApplication
     (effect : Z (Services[]) AppError ScanResult) :
     IO (Exit AppError ScanResult) := do
   let closed := effect.provideEnvironment Z.Services.empty
-  match <- Z.unsafeRunSync closed name with
-  | some exit => pure exit
-  | none => throw (IO.userError s!"{name}: no exit value")
+  Z.unsafeRunSync closed name
 
 def test : IO Unit := do
   match parseConfig [".", "todo-report.md"] with

@@ -23,7 +23,7 @@ def githubLayer : Layer Unit IO.Error Github :=
       getIssues := fun _ => Z.succeedNow ([] : List Issue)
     }
 
-def runProgram : IO (Option (Exit IO.Error (List Issue))) :=
+def runProgram : IO (Exit IO.Error (List Issue)) :=
   githubLayer.run () program
 
 #check githubLayer

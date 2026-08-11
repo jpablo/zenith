@@ -1,12 +1,16 @@
 # Interpreter
 
-The function `Z.unsafeRunSync` is the entry point for the interpreter.
+The function `Z.unsafeRunSync` is the entry point for the interpreter. It waits
+for completion and returns `Exit E A` directly.
 
 ![Zenith-runLoop](Zenith-runLoop.svg)
 
 
 
 `Z.unsafeRunSync` will launch a new thread to run the current effect and wait until execution completes, so it is meant to be used only once per Zenith program.
+
+Interpreter logging is disabled by default. A host program can call
+`RuntimeLog.setEnabled true` to write interpreter traces to standard error.
 
 The interpreter is defined in several mutually recursive, partial functions:
 
@@ -51,6 +55,5 @@ structure RunState (Rfiber) (E A E₁ A₁: Type) where
 ```
 
 Every fiber has a `RunState`  is associated with a single fiber (via `FiberId`).
-
 
 

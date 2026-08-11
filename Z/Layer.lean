@@ -371,11 +371,8 @@ private def runZ
           fiberId)
       fun result =>
         match result.down with
-        | some (.success value) => HEIO.pure value
-        | some (.failure cause) => HEIO.throw cause
-        | none =>
-            HEIO.throw <| .die <|
-              IO.userError "the layer fiber did not return a result"
+        | .success value => HEIO.pure value
+        | .failure cause => HEIO.throw cause
 
 /-- Build a low-universe layer output with a normal Zenith effect. -/
 def fromZ
@@ -408,8 +405,8 @@ def run.{uin, uout}
     (input : RIn)
     (program : Z ROut E A)
     (fiberId : FiberId := "main")
-    (useDiagram : Option String := none) : IO (Option (Exit E A)) := do
-  let builtAndRun : HEIO (Cause E) (ULift.{uout} (Option (Exit E A))) :=
+    (useDiagram : Option String := none) : IO (Exit E A) := do
+  let builtAndRun : HEIO (Cause E) (ULift.{uout} (Exit E A)) :=
     HEIO.bind (self.build input) fun resource =>
       (HEIO.liftIO.{uout} Cause.die <|
           Z.unsafeRunSync
@@ -418,6 +415,6 @@ def run.{uin, uout}
             useDiagram).ensuring resource.release
   match <- HEIO.toIOResult builtAndRun with
   | .ok result => pure result
-  | .error cause => pure (some (.failure cause))
+  | .error cause => pure (.failure cause)
 
 end Layer

@@ -60,12 +60,10 @@ def run : IO Unit := do
   let effect := demoApplication.provideEnvironment
     Z.Services.empty
   match <- Z.unsafeRunSync effect "github-issue-sync-demo" with
-  | some (.success count) =>
+  | .success count =>
       IO.println s!"Synchronized {count} issues."
-  | some (.failure _) =>
+  | .failure _ =>
       throw (IO.userError "The GitHub issue sync failed.")
-  | none =>
-      throw (IO.userError "The GitHub issue sync returned no result.")
 
 end GithubIssueSyncDemo
 

@@ -407,7 +407,7 @@ def checkParameterizedServiceKeys : IO Unit := do
   let effect := automaticallyProvidedParameterized.provideEnvironment
     Services.empty
   match ← Z.unsafeRunSync effect "stable-parameterized-service-keys" with
-  | some (.success "Ada:42") => pure ()
+  | .success "Ada:42" => pure ()
   | _ => throw (IO.userError
       "Parameterized service-key provision failed.")
 
@@ -437,7 +437,7 @@ def checkValueIndexedServiceKeys : IO Unit := do
   let effect := automaticallyProvidedValueIndexed.provideEnvironment
     Services.empty
   match ← Z.unsafeRunSync effect "stable-value-indexed-service-keys" with
-  | some (.success "primary:replica") => pure ()
+  | .success "primary:replica" => pure ()
   | _ => throw (IO.userError
       "Value-indexed service-key provision failed.")
 
@@ -475,7 +475,7 @@ def program := zdo
 example : Z (Services[Config, Github, Store]) Empty String :=
   program
 
-def run : IO (Option (Exit Empty String)) :=
+def run : IO (Exit Empty String) :=
   servicesReverse.toLayer.run () program "stable-service-keys"
 
 def recordLayerEvent
@@ -583,7 +583,7 @@ def checkKeyedLayerSuccess : IO Unit := do
   let effect : Z (Environment Services) String String := program
   match <- (keyedServicesReverse events).toLayer.run () effect
       "stable-keyed-layer-success" with
-  | some (.success "issue:2") => pure ()
+  | .success "issue:2" => pure ()
   | _ => throw (IO.userError "The keyed service layer did not run.")
   assertEvents "keyed success" events [
     "acquire-store",
@@ -600,7 +600,7 @@ def checkKeyedLayerAcquisitionFailure : IO Unit := do
     Z.serviceWith fun _ => ()
   match <- (failingKeyedServices events).toLayer.run () effect
       "stable-keyed-layer-acquisition-failure" with
-  | some (.failure (.fail "github acquisition failed")) => pure ()
+  | .failure (.fail "github acquisition failed") => pure ()
   | _ => throw (IO.userError "The keyed layer failure was not preserved.")
   assertEvents "keyed acquisition failure" events [
     "acquire-config",
@@ -614,7 +614,7 @@ def checkKeyedLayerProgramFailure : IO Unit := do
     Z.fail "program failed"
   match <- (keyedServicesReverse events).toLayer.run () effect
       "stable-keyed-layer-program-failure" with
-  | some (.failure (.fail "program failed")) => pure ()
+  | .failure (.fail "program failed") => pure ()
   | _ => throw (IO.userError "The keyed program failure was not preserved.")
   assertEvents "keyed program failure" events [
     "acquire-store",
@@ -743,7 +743,7 @@ def checkHeterogeneousKeyedLayers : IO Unit := do
       String := heterogeneousProgram
   match <- (heterogeneousKeyedServices events).toLayer.run
       heterogeneousInputs.environment effect "stable-keyed-layer-heterogeneous" with
-  | some (.success "issue:2") => pure ()
+  | .success "issue:2" => pure ()
   | _ => throw (IO.userError "The heterogeneous keyed layers did not run.")
   assertEvents "heterogeneous keyed layers" events [
     "acquire-github-from-config",
@@ -761,7 +761,7 @@ def checkHeterogeneousKeyedLayersReverse : IO Unit := do
   match <- (heterogeneousKeyedServicesReverse events).toLayer.run
       heterogeneousInputs.environment effect
       "stable-keyed-layer-heterogeneous-reverse" with
-  | some (.success "issue:2") => pure ()
+  | .success "issue:2" => pure ()
   | _ => throw (IO.userError "The reversed heterogeneous layers did not run.")
   assertEvents "reversed heterogeneous keyed layers" events [
     "acquire-other-config-from-store",
@@ -779,7 +779,7 @@ def checkHeterogeneousKeyedLayerFailure : IO Unit := do
   match <- (failingHeterogeneousKeyedServices events).toLayer.run
       heterogeneousInputs.environment effect
       "stable-keyed-layer-heterogeneous-failure" with
-  | some (.failure (.fail (.inr .unavailable))) => pure ()
+  | .failure (.fail (.inr .unavailable)) => pure ()
   | _ => throw (IO.userError "The joined layer error was not preserved.")
   assertEvents "heterogeneous keyed layer failure" events [
     "acquire-github-from-config",
@@ -861,7 +861,7 @@ def checkVerticalKeyedLayers : IO Unit := do
       String := reporterProgram
   match <- (verticalKeyedServices events).toLayer.run
       heterogeneousInputs.environment effect "stable-keyed-layer-vertical" with
-  | some (.success "issue:2") => pure ()
+  | .success "issue:2" => pure ()
   | _ => throw (IO.userError "The vertical keyed layers did not run.")
   assertEvents "vertical keyed layers" events [
     "acquire-github-from-config",
@@ -879,7 +879,7 @@ def checkVerticalKeyedLayerFailure : IO Unit := do
   match <- (failingVerticalKeyedServices events).toLayer.run
       heterogeneousInputs.environment effect
       "stable-keyed-layer-vertical-failure" with
-  | some (.failure (.fail (.inr .unavailable))) => pure ()
+  | .failure (.fail (.inr .unavailable)) => pure ()
   | _ => throw (IO.userError "The vertical layer error was not preserved.")
   assertEvents "vertical keyed layer failure" events [
     "acquire-github-from-config",
@@ -944,7 +944,7 @@ def checkPassThroughKeyedLayers : IO Unit := do
   match <- (passThroughKeyedServices events).toLayer.run
       heterogeneousInputs.environment effect
       "stable-keyed-layer-pass-through" with
-  | some (.success "issue:2:2") => pure ()
+  | .success "issue:2:2" => pure ()
   | _ => throw (IO.userError "The pass-through keyed layers did not run.")
   assertEvents "pass-through keyed layers" events [
     "acquire-github-from-config",
@@ -962,7 +962,7 @@ def checkPassThroughKeyedLayerFailure : IO Unit := do
   match <- (failingPassThroughKeyedServices events).toLayer.run
       heterogeneousInputs.environment effect
       "stable-keyed-layer-pass-through-failure" with
-  | some (.failure (.fail (.inr .unavailable))) => pure ()
+  | .failure (.fail (.inr .unavailable)) => pure ()
   | _ => throw (IO.userError "The pass-through layer error was not preserved.")
   assertEvents "pass-through keyed layer failure" events [
     "acquire-github-from-config",
@@ -1255,7 +1255,7 @@ def checkSharedDependencyGraph : IO Unit := do
   match <- (sharedDependencyGraph events).toLayer.run
       heterogeneousInputs.environment effect
       "stable-keyed-layer-shared-graph" with
-  | some (.success "issue:2:2") => pure ()
+  | .success "issue:2:2" => pure ()
   | _ => throw (IO.userError "The shared dependency graph did not run.")
   assertParallelSiblingEvents "shared dependency graph" events
     "acquire-reporter" "acquire-metrics" [
@@ -1273,7 +1273,7 @@ def checkSharedDependencyGraphFailure : IO Unit := do
   match <- (failingSharedDependencyGraph events).toLayer.run
       heterogeneousInputs.environment effect
       "stable-keyed-layer-shared-graph-failure" with
-  | some (.failure (.fail (.inr (.inr .unavailable)))) => pure ()
+  | .failure (.fail (.inr (.inr .unavailable))) => pure ()
   | _ => throw (IO.userError "The shared graph error was not preserved.")
   assertParallelFailureEvents "shared dependency graph failure" events
     "acquire-metrics" "acquire-reporter" "release-reporter"
@@ -1287,7 +1287,7 @@ def checkAutomaticSharedDependencyGraph : IO Unit := do
   match <- (automaticSharedDependencyGraph events).toLayer.run
       heterogeneousInputs.environment effect
       "stable-keyed-layer-automatic-graph" with
-  | some (.success "issue:2:2") => pure ()
+  | .success "issue:2:2" => pure ()
   | _ => throw (IO.userError "The automatic dependency graph did not run.")
   assertParallelSiblingEvents "automatic dependency graph" events
     "acquire-metrics" "acquire-reporter" [
@@ -1305,7 +1305,7 @@ def checkAutomaticParallelDependencyGraph : IO Unit := do
   match ← (automaticParallelDependencyGraph events counter barrier).toLayer.run
       input.environment parallelGraphProgram
       "stable-keyed-layer-automatic-parallel" with
-  | some (.success (2, "2")) => pure ()
+  | .success (2, "2") => pure ()
   | _ => throw (IO.userError
       "Independent automatic layer branches did not overlap.")
   assertEvents "automatic parallel dependency graph" events [
@@ -1322,7 +1322,7 @@ def checkAutomaticSharedDependencyGraphFailure : IO Unit := do
   match <- (automaticFailingSharedDependencyGraph events).toLayer.run
       heterogeneousInputs.environment effect
       "stable-keyed-layer-automatic-graph-failure" with
-  | some (.failure (.fail (.inr (.inr .unavailable)))) => pure ()
+  | .failure (.fail (.inr (.inr .unavailable))) => pure ()
   | _ => throw (IO.userError "The automatic graph error was not preserved.")
   assertParallelFailureEvents "automatic dependency graph failure" events
     "acquire-metrics" "acquire-reporter" "release-reporter"
@@ -1333,7 +1333,7 @@ def checkZProvide : IO Unit := do
     (automaticallyProvidedSharedGraph events).provideEnvironment
       heterogeneousInputs.environment
   match <- Z.unsafeRunSync effect "stable-keyed-z-provide" with
-  | some (.success "issue:2:2") => pure ()
+  | .success "issue:2:2" => pure ()
   | _ => throw (IO.userError "Z.provide did not run the program.")
   assertParallelSiblingEvents "Z.provide" events
     "acquire-metrics" "acquire-reporter" [
@@ -1347,7 +1347,7 @@ def checkTypeFacadeApplication : IO Unit := do
   let effect := (typeFacadeApplication events).provideEnvironment
     Services.empty
   match ← Z.unsafeRunSync effect "stable-keyed-type-facade" with
-  | some (.success "issue:2:2") => pure ()
+  | .success "issue:2:2" => pure ()
   | _ => throw (IO.userError "The type-based application did not run.")
   assertParallelSiblingEvents "type-based application" events
     "acquire-metrics" "acquire-reporter" [
@@ -1362,7 +1362,7 @@ def checkZProvideFailure : IO Unit := do
     (automaticallyProvidedFailingSharedGraph events).provideEnvironment
       heterogeneousInputs.environment
   match <- Z.unsafeRunSync effect "stable-keyed-z-provide-failure" with
-  | some (.failure (.fail (.inr (.inl .unavailable)))) => pure ()
+  | .failure (.fail (.inr (.inl .unavailable))) => pure ()
   | _ => throw (IO.userError "Z.provide did not preserve the layer error.")
   assertParallelFailureEvents "Z.provide failure" events
     "acquire-metrics" "acquire-reporter" "release-reporter"
@@ -1373,7 +1373,7 @@ def checkZProvideProgramFailure : IO Unit := do
     (automaticallyProvidedFailingProgram events).provideEnvironment
       heterogeneousInputs.environment
   match <- Z.unsafeRunSync effect "stable-keyed-z-provide-program-failure" with
-  | some (.failure (.fail (.inl .unavailable))) => pure ()
+  | .failure (.fail (.inl .unavailable)) => pure ()
   | _ => throw (IO.userError "Z.provide did not preserve the program error.")
   assertParallelSiblingEvents "Z.provide program failure" events
     "acquire-metrics" "acquire-reporter" [
@@ -1391,8 +1391,8 @@ def checkZProvideInterruption : IO Unit := do
   let fiber ← Z.unsafeFork effect "stable-keyed-z-provide-interruption"
   waitForSignal "provided program" started
   fiber.requestInterrupt
-  match ← fiber.awaitPoll (fiberId := fiber.fiberId) with
-  | some (.failure .interrupt) => pure ()
+  match ← fiber.await with
+  | .failure .interrupt => pure ()
   | _ => throw (IO.userError "Z.provide did not preserve interruption.")
   fiber.awaitTask
   assertParallelSiblingEvents "Z.provide interruption" events
@@ -1414,8 +1414,8 @@ def checkZProvideAcquisitionInterruption : IO Unit := do
     "stable-keyed-z-provide-acquisition-interruption"
   waitForSignal "slow layer acquisition" started
   fiber.requestInterrupt
-  match ← fiber.awaitPoll (fiberId := fiber.fiberId) with
-  | some (.failure .interrupt) => pure ()
+  match ← fiber.await with
+  | .failure .interrupt => pure ()
   | _ => throw (IO.userError
       "Z.provide did not preserve acquisition interruption.")
   fiber.awaitTask
@@ -1428,14 +1428,12 @@ def checkZProvideAcquisitionInterruption : IO Unit := do
 
 def demo : IO Unit := do
   match <- run with
-  | some (.success "issue:2") =>
+  | .success "issue:2" =>
       IO.println "Stable service-key checks passed."
-  | some (.success value) =>
+  | .success value =>
       throw (IO.userError s!"Unexpected stable service-key value: {value}")
-  | some (.failure _) =>
+  | .failure _ =>
       throw (IO.userError "The stable service-key checks failed.")
-  | none =>
-      throw (IO.userError "The stable service-key checks returned no result.")
   checkParameterizedServiceKeys
   IO.println "Parameterized service-key checks passed."
   checkValueIndexedServiceKeys

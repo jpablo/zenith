@@ -2,6 +2,7 @@ import Z
 import Examples.GithubIssueSync
 import Examples.StableServiceKeysDemo
 import Examples.TodoReport
+import Std.Data.HashSet
 
 open Fiber
 
@@ -13,9 +14,7 @@ def assertTrue (message : String) (condition : Bool) : IO Unit :=
     failTest message
 
 def runProgram [ToString A] (name : String) (program : Z Unit E A) : IO (Exit E A) := do
-  match <- Z.unsafeRunSync program name with
-  | some exit => pure exit
-  | none => failTest s!"{name}: the fiber did not return an exit value"
+  Z.unsafeRunSync program name
 
 def observerRaceOnce (index : Nat) : IO Bool := do
   let fiber : Fiber Empty Nat <- Fiber.empty s!"observer-race-{index}"
@@ -100,8 +99,8 @@ def testAsyncInterruptCanceler : IO Unit := do
   let fiber ← Z.unsafeFork pending "async-interrupt-canceler"
   waitForFlag "cancellable async registration" registering
   fiber.requestInterrupt
-  match ← fiber.awaitPoll (fiberId := fiber.fiberId) with
-  | some (.failure .interrupt) => pure ()
+  match ← fiber.await with
+  | .failure .interrupt => pure ()
   | _ => failTest "cancellable async interruption returned the wrong exit"
   fiber.awaitTask
   assertTrue "cancellable async interruption did not run its canceler"
@@ -115,10 +114,107 @@ def testAsyncInterruptCancelerFailure : IO Unit := do
   let fiber ← Z.unsafeFork pending "async-interrupt-canceler-failure"
   waitForFlag "failing cancellable async registration" registered
   fiber.requestInterrupt
-  match ← fiber.awaitPoll (fiberId := fiber.fiberId) with
-  | some (.failure (.die _)) => pure ()
+  match ← fiber.await with
+  | .failure (.die _) => pure ()
   | _ => failTest "a cancellable async canceler defect did not complete the fiber"
   fiber.awaitTask
+
+private def failingAsyncDiagram : ExecutionDiagram (IO Unit) :=
+  { ExecutionDiagram.empty with
+    async := fun _ _ _ =>
+      throw (IO.userError "asynchronous diagram write failed") }
+
+private partial def waitForFiberExit
+    (fiber : Fiber E A)
+    (attempts : Nat := 1000) : IO (Option (Exit E A)) := do
+  match <- fiber.state.get with
+  | .done exit => pure (some exit)
+  | _ =>
+      if attempts == 0 then
+        pure none
+      else
+        IO.sleep 1
+        waitForFiberExit fiber (attempts - 1)
+
+private partial def waitForCallback
+    (callbackRef : IO.Ref (Option (Observer E A)))
+    (attempts : Nat := 1000) : IO Unit := do
+  if (<- callbackRef.get).isSome then
+    pure ()
+  else if attempts == 0 then
+    failTest "timed out while waiting for callback registration"
+  else
+    IO.sleep 1
+    waitForCallback callbackRef (attempts - 1)
+
+private def runFailingAsyncResume
+    (name : String)
+    (effect : IO.Ref (Option (Observer Empty Unit)) ->
+      ZCore Unit Empty Unit) : IO Unit := do
+  let callbackRef <- IO.mkRef (none : Option (Observer Empty Unit))
+  let startTime <- IO.monoMsNow.toIO
+  let fiber <- ZCore.unsafeRunFiber failingAsyncDiagram
+    (effect callbackRef) Environment.empty "" name startTime
+  waitForCallback callbackRef
+  match <- callbackRef.get with
+  | none => failTest s!"{name}: callback was not registered"
+  | some callback =>
+      try callback (.success ())
+      catch _ => pure ()
+  match <- waitForFiberExit fiber with
+  | some (.failure (.die _)) => pure ()
+  | _ => failTest s!"{name}: callback defect did not complete the fiber"
+
+def testAsyncResumeDefect : IO Unit :=
+  runFailingAsyncResume "async-resume-defect" fun callbackRef =>
+    ZCore.async fun callback => callbackRef.set (some callback)
+
+def testAsyncInterruptResumeDefect : IO Unit :=
+  runFailingAsyncResume "async-interrupt-resume-defect" fun callbackRef =>
+    ZCore.asyncInterrupt fun callback => do
+      callbackRef.set (some callback)
+      pure IO.unit
+
+def testUnsafeRunSyncHasNoPollingDelay : IO Unit := do
+  let before <- IO.monoMsNow.toIO
+  for index in [0:4] do
+    let _ <- Z.unsafeRunSync (Z.succeedNow index) s!"direct-wait-{index}"
+  let elapsed := (<- IO.monoMsNow.toIO) - before
+  assertTrue s!"four immediate runs took {elapsed} ms" (elapsed < 250)
+
+def testInterpreterLoggingIsDisabledByDefault : IO Unit := do
+  assertTrue "the interpreter wrote a trace with default settings"
+    !ENABLE_LOG
+  assertTrue "runtime logging was enabled by default"
+    !(<- RuntimeLog.isEnabled)
+  let (output, _) <- IO.FS.withIsolatedStreams do
+    RuntimeLog.setEnabled true
+    try
+      log "logging-test" "enabled"
+    finally
+      RuntimeLog.setEnabled false
+  assertTrue "runtime logging could not be enabled"
+    (output.contains "[logging-test] enabled")
+
+def testFiberIdsAreUnique : IO Unit := do
+  let ids <- IO.mkRef ({} : Std.HashSet String)
+  let fibers <- IO.mkRef ([] : List (Fiber Empty Unit))
+  let duplicate <- IO.mkRef false
+  for _ in [0:1000] do
+    let fiber <- Z.unsafeFork (Z.succeedNow ()) "unique-id"
+    fibers.modify (fiber :: ·)
+    let fiberId := toString fiber.fiberId
+    let isDuplicate <- ids.modifyGet fun current =>
+      if current.contains fiberId then
+        (true, current)
+      else
+        (false, current.insert fiberId)
+    if isDuplicate then
+      duplicate.set true
+  for fiber in (<- fibers.get) do
+    let _ <- fiber.await
+  assertTrue "the runtime generated duplicate fiber IDs"
+    !(<- duplicate.get)
 
 def testHEIOAsyncInterruption : IO Unit := do
   let registered ← IO.mkRef false
@@ -249,7 +345,7 @@ def highGithubProgram : Z HighGithub IO.Error Nat := do
 
 def testHighUniverseEnvironment : IO Unit := do
   match <- highGithubLayer.run () highGithubProgram "high-environment" with
-  | some (.success 1) => pure ()
+  | .success 1 => pure ()
   | _ => failTest "the high-universe service did not run"
 
 def failingHighGithubLayer : Layer Unit IO.Error HighGithub :=
@@ -257,7 +353,7 @@ def failingHighGithubLayer : Layer Unit IO.Error HighGithub :=
 
 def testHighUniverseLayerFailure : IO Unit := do
   match <- failingHighGithubLayer.run () highGithubProgram "high-layer-failure" with
-  | some (.failure (.fail _)) => pure ()
+  | .failure (.fail _) => pure ()
   | _ => failTest "the high-universe layer failure was not preserved"
 
 def stringLayer : Layer Nat IO.Error String :=
@@ -268,7 +364,7 @@ def stringProgram : Z String IO.Error String :=
 
 def testLayerFromZ : IO Unit := do
   match <- stringLayer.run 42 stringProgram "layer-from-z" with
-  | some (.success "42") => pure ()
+  | .success "42" => pure ()
   | _ => failTest "Layer.fromZ did not build and provide its output"
 
 def recordLayerEvent
@@ -296,7 +392,7 @@ def testLayerReleaseOrder : IO Unit := do
   let program : Z (String × String) IO.Error Unit :=
     Z.serviceWith fun _ => ()
   match <- layer.run () program "layer-release-order" with
-  | some (.success ()) => pure ()
+  | .success () => pure ()
   | _ => failTest "the composed layer did not run"
   assertTrue "layer resources were not released in reverse order"
     ((<- events.get) == [
@@ -312,7 +408,7 @@ def testLayerReleaseAfterProgramFailure : IO Unit := do
     (Z.fail (IO.userError "program failed")).map impossible
   match <- (trackedLayer events "service").run
       () program "layer-program-failure" with
-  | some (.failure (.fail _)) => pure ()
+  | .failure (.fail _) => pure ()
   | _ => failTest "the program failure was not preserved"
   assertTrue "the layer resource was not released after program failure"
     ((<- events.get) == ["acquire-service", "release-service"])
@@ -327,7 +423,7 @@ def testLayerCleanupAfterAcquisitionFailure : IO Unit := do
   let program : Z (String × String) IO.Error Unit :=
     Z.serviceWith fun _ => ()
   match <- layer.run () program "layer-acquisition-failure" with
-  | some (.failure (.fail _)) => pure ()
+  | .failure (.fail _) => pure ()
   | _ => failTest "the layer acquisition failure was not preserved"
   assertTrue "an earlier resource was not released after acquisition failure"
     ((<- events.get) == [
@@ -349,7 +445,7 @@ def testLayerReleaseFailure : IO Unit := do
   let program : Z String IO.Error Unit :=
     Z.serviceWith fun _ => ()
   match <- layer.run () program "layer-release-failure" with
-  | some (.failure (.die _)) => pure ()
+  | .failure (.die _) => pure ()
   | _ => failTest "the layer release failure was not returned"
   assertTrue "the failing release action did not run exactly once"
     ((<- events.get) == ["acquire", "release"])
@@ -365,7 +461,7 @@ def testHighUniverseLayerRelease : IO Unit := do
           })
       (fun _ _ => recordLayerEvent events "release-high")
   match <- layer.run () highGithubProgram "high-layer-release" with
-  | some (.success 1) => pure ()
+  | .success 1 => pure ()
   | _ => failTest "the scoped high-universe layer did not run"
   assertTrue "the high-universe layer resource was not released"
     ((<- events.get) == ["acquire-high", "release-high"])
@@ -383,12 +479,11 @@ def testHighUniverseLayerSharing : IO Unit := do
   let sharedSource := source.share fun shared =>
     shared.zipWithPar shared fun first _ => first
   match <- sharedSource.run () highGithubProgram "high-layer-sharing" with
-  | some (.success 1) => pure ()
-  | some (.success value) =>
+  | .success 1 => pure ()
+  | .success value =>
       failTest s!"the shared high-universe layer returned {value}"
-  | some (.failure cause) =>
+  | .failure cause =>
       failTest s!"the shared high-universe layer failed: {cause}"
-  | none => failTest "the shared high-universe layer returned no result"
   assertTrue "the shared layer was not acquired and released once"
     ((<- events.get) == ["acquire-shared", "release-shared"])
 
@@ -403,7 +498,7 @@ def testHighUniverseParallelLayers : IO Unit := do
     }
   let combined := left.zipWithPar right fun first _ => first
   match <- combined.run () highGithubProgram "high-layer-parallel" with
-  | some (.success 1) => pure ()
+  | .success 1 => pure ()
   | _ => failTest "parallel high-universe layers did not run"
 
 def observeParallelStart (counter : Std.Mutex Nat) : IO Nat := do
@@ -422,7 +517,7 @@ def testParallelLayerOverlap : IO Unit := do
   let program : Z (Nat × Nat) IO.Error (Nat × Nat) :=
     Z.serviceWith id
   match <- combined.run () program "layer-parallel-overlap" with
-  | some (.success (2, 2)) => pure ()
+  | .success (2, 2) => pure ()
   | _ => failTest "parallel layer acquisitions did not overlap"
 
 def testParallelLayerFailureCleanup : IO Unit := do
@@ -439,7 +534,7 @@ def testParallelLayerFailureCleanup : IO Unit := do
   let program : Z (String × String) IO.Error Unit :=
     Z.serviceWith fun _ => ()
   match <- combined.run () program "layer-parallel-failure" with
-  | some (.failure (.fail _)) => pure ()
+  | .failure (.fail _) => pure ()
   | _ => failTest "the parallel layer failure was not preserved"
   assertTrue "the successful parallel acquisition was not released"
     (<- released.get)
@@ -467,7 +562,7 @@ def testParallelLayerFailureCancelsSibling : IO Unit := do
   let program : Z (String × String) IO.Error Unit :=
     Z.serviceWith fun _ => ()
   match ← combined.run () program "layer-parallel-fail-fast" with
-  | some (.failure (.fail _)) => pure ()
+  | .failure (.fail _) => pure ()
   | _ => failTest "parallel layer failure did not preserve its typed error"
   assertTrue "parallel layer failure did not cancel its pending sibling"
     (← leftCancelled.get)
@@ -484,7 +579,7 @@ def testAcquireReleaseZLayer : IO Unit := do
   let program : Z String IO.Error Unit :=
     Z.serviceWith fun _ => ()
   match <- layer.run () program "layer-acquire-release-z" with
-  | some (.success ()) => pure ()
+  | .success () => pure ()
   | _ => failTest "the acquireReleaseZ layer did not run"
   assertTrue "acquireReleaseZ did not release its resource"
     ((<- events.get) == ["acquire-z", "release-z"])
@@ -1144,6 +1239,11 @@ def main : IO Unit := do
   testAsyncInterruption
   testAsyncInterruptCanceler
   testAsyncInterruptCancelerFailure
+  testAsyncResumeDefect
+  testAsyncInterruptResumeDefect
+  testUnsafeRunSyncHasNoPollingDelay
+  testInterpreterLoggingIsDisabledByDefault
+  testFiberIdsAreUnique
   testHEIOAsyncInterruption
   testPreInterruptedLayerBuild
   testParallelLayerInterruption

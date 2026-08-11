@@ -4,11 +4,9 @@ def dotFile (name: String) := s!"diagrams/{name}.dot"
 
 def runExample (name : String) (program : Z Unit E A) : IO Unit := do
   match <- Z.unsafeRunSync program name (some (dotFile name)) with
-  | some (.success _) => pure ()
-  | some (.failure _) =>
+  | .success _ => pure ()
+  | .failure _ =>
       throw (IO.userError s!"Example '{name}' failed.")
-  | none =>
-      throw (IO.userError s!"Example '{name}' returned no result.")
 
 def main : IO Unit := do
   runExample "succeedNowExample" succeedNowExample
