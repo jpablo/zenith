@@ -424,8 +424,7 @@ def userRepositoryLayer :=
 def issueRepositoryLayer :=
   KeyedLayer.succeed (Repository Issue) issueRepository
 
-def program :
-    Z (Services[Repository User, Repository Issue]) Empty String := zdo
+def program := zdo
   let name <- Z.serviceWithType (Repository User)
     (fun repository => repository.value.name)
   let number <- Z.serviceWithZType (Repository Issue)
@@ -444,13 +443,22 @@ existing layer. `Z.serviceWithType` selects a value from a service.
 `Z.serviceWithZType` runs an effect that uses a service. The callback forms are
 necessary because a fiber result cannot contain a `Type 1` service.
 
-The complete `Services[...]` type annotation is currently necessary when one
-`zdo` block reads more than one typed service. Without this expected type, the
-general `zdo` collector combines the singleton environments as a product. Its
-type-class search cannot reduce the internal keyed-row merge. With the
-expected environment, the keyed projection instance gives each operation its
-requested service. `Z.provide` and the keyed layer planner then infer the
-remaining graph information.
+The stable environment registers `Row.normalize` with the general `zdo`
+collector through `[zdo_row_environment Row.normalize]`. During elaboration,
+the collector groups all requirements for that environment, combines their
+entry lists, normalizes the result, and emits one materialized environment
+type. It does this before it applies `Environment.Meet`. Thus, the definition
+of `program` infers this type without an annotation:
+
+```lean
+Z (Services[Repository User, Repository Issue]) Empty String
+```
+
+The registration mechanism is in `Z.Do`. It does not refer to stable service
+keys. Other row-environment packages can register their own list normalizer.
+The package must also supply `Environment.CanProvide` instances that project a
+complete row to each requested row. Stable service keys supply these instances
+for a direct environment and for an environment inside a product.
 
 The prototype provides these checked properties:
 
@@ -474,6 +482,13 @@ The prototype provides these checked properties:
   environment type as the equivalent explicit entry row.
 - `Z.serviceWithType` and `Z.serviceWithZType` infer an internal singleton
   entry from a concrete service type.
+- Plain `zdo` combines these singleton entries into one normalized keyed
+  environment. Access order and repeated access do not change the inferred
+  type.
+- Branches and scoped `try/catch/finally` regions use the same row
+  normalization.
+- A keyed environment can stay inside a product with an ordinary environment.
+  Recursive projection finds the keyed row in that product.
 - `KeyedLayer.succeed` and `KeyedLayer.fromLayer` infer the output entry from
   a concrete service type.
 - `KeyedLayer.singleton` converts one ordinary layer to a one-service keyed

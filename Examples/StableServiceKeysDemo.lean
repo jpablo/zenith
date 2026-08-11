@@ -151,13 +151,113 @@ def userRepositoryLayerFromLayer :=
 example : KeyedLayer Unit Empty (ServiceRow[Repository User]) :=
   userRepositoryLayerFromLayer
 
-def parameterizedProgram :
-    Z (Services[Repository User, Repository Issue]) Empty String := zdo
+def parameterizedProgram := zdo
   let name <- Z.serviceWithType (Repository User)
     (fun repository => repository.value.name)
   let number <- Z.serviceWithZType (Repository Issue)
     (fun repository => Z.succeedNow repository.value.number)
   pure s!"{name}:{number}"
+
+example : Z
+    (Services[Repository User, Repository Issue]) Empty String :=
+  parameterizedProgram
+
+def parameterizedProgramReverse := zdo
+  let number <- Z.serviceWithType (Repository Issue)
+    (fun repository => repository.value.number)
+  let name <- Z.serviceWithType (Repository User)
+    (fun repository => repository.value.name)
+  pure s!"{name}:{number}"
+
+example : Z
+    (Services[Repository User, Repository Issue]) Empty String :=
+  parameterizedProgramReverse
+
+def parameterizedProgramWithFixedError := zdo[Empty]
+  let name <- Z.serviceWithType (Repository User)
+    (fun repository => repository.value.name)
+  let number <- Z.serviceWithType (Repository Issue)
+    (fun repository => repository.value.number)
+  pure s!"{name}:{number}"
+
+example : Z
+    (Services[Repository User, Repository Issue]) Empty String :=
+  parameterizedProgramWithFixedError
+
+def repeatedParameterizedService := zdo
+  let first <- Z.serviceWithType (Repository User)
+    (fun repository => repository.value.name)
+  let second <- Z.serviceWithType (Repository User)
+    (fun repository => repository.value.name)
+  pure s!"{first}:{second}"
+
+example : Z (Services[Repository User]) Empty String :=
+  repeatedParameterizedService
+
+def branchedParameterizedProgram (useUser : Bool) := zdo
+  if useUser then
+    let name <- Z.serviceWithType (Repository User)
+      (fun repository => repository.value.name)
+    pure name
+  else
+    let number <- Z.serviceWithType (Repository Issue)
+      (fun repository => repository.value.number)
+    pure s!"{number}"
+
+example : Bool → Z
+    (Services[Repository User, Repository Issue]) Empty String :=
+  branchedParameterizedProgram
+
+def scopedParameterizedProgram := zdo
+  try
+    Z.serviceWithZType (Repository User) fun repository =>
+      (Z.succeedNow repository.value.name : Z Unit String String)
+  catch _ =>
+    let number <- Z.serviceWithType (Repository Issue)
+      (fun repository => repository.value.number)
+    pure s!"{number}"
+  finally
+    let _ <- Z.serviceWithType (Repository (List User))
+      (fun repository => repository.value.length)
+    pure ()
+
+example : Z
+    (Services[
+      Repository User,
+      Repository Issue,
+      Repository (List User)
+    ])
+    Empty
+    String :=
+  scopedParameterizedProgram
+
+def parameterizedProgramWithErrors := zdo
+  let name <- Z.serviceWithZType (Repository User)
+    (fun repository =>
+      (Z.succeedNow repository.value.name : Z Unit String String))
+  let number <- Z.serviceWithZType (Repository Issue)
+    (fun repository => Z.attempt (pure repository.value.number))
+  pure s!"{name}:{number}"
+
+example : Z
+    (Services[Repository User, Repository Issue])
+    (IO.Error ⊕ String)
+    String :=
+  parameterizedProgramWithErrors
+
+def mixedParameterizedProgram := zdo
+  let offset <- Z.environment Nat
+  let name <- Z.serviceWithType (Repository User)
+    (fun repository => repository.value.name)
+  let number <- Z.serviceWithType (Repository Issue)
+    (fun repository => repository.value.number)
+  pure s!"{name}:{number + offset}"
+
+example : Z
+    (Nat × Services[Repository User, Repository Issue])
+    Empty
+    String :=
+  mixedParameterizedProgram
 
 def automaticallyProvidedParameterized :=
   Z.provide parameterizedProgram [

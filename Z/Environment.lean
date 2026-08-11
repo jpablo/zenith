@@ -130,6 +130,17 @@ namespace Environment
 
   namespace Meet
 
+    /-- Build a selected meet from projections of one known result type. -/
+    @[reducible] def ofCanProvide
+        {Left : Type u}
+        {Right : Type v}
+        {Result : Type w}
+        [leftProvider : CanProvide Result Left]
+        [rightProvider : CanProvide Result Right] :
+        Meet Left Right Result where
+      left := leftProvider.provide
+      right := rightProvider.provide
+
     instance (priority := high)
         [provider : CanProvide Right Left] : Meet Left Right Right where
       left := provider.provide

@@ -109,6 +109,7 @@ instance (left right : List Entry) : Decidable (Disjoint left right) := by
 end Row
 
 /-- A typed value for every entry in a service row. -/
+@[zdo_row_environment Row.normalize]
 inductive Environment.{u} : List Entry.{u} -> Type (u + 1) where
   | empty : Environment []
   | cons (value : entry.Service) (tail : Environment entries) :
@@ -200,6 +201,24 @@ instance (priority := high)
       (Environment available)
       (Environment required) where
   provide := projection.provide
+
+/-- Find and project a keyed row in the left side of a product environment. -/
+instance (priority := high)
+    [projection : _root_.Environment.CanProvide
+      left (Environment required)] :
+    _root_.Environment.CanProvide
+      (left × right)
+      (Environment required) where
+  provide environment := projection.provide environment.1
+
+/-- Find and project a keyed row in the right side of a product environment. -/
+instance (priority := high)
+    [projection : _root_.Environment.CanProvide
+      right (Environment required)] :
+    _root_.Environment.CanProvide
+      (left × right)
+      (Environment required) where
+  provide environment := projection.provide environment.2
 
 namespace Services
 

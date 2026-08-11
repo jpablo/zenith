@@ -13,6 +13,12 @@ use `R` and can convert its error to `E`.
 environment. It flattens and sorts those requirements before it applies
 `Environment.Meet`. The error type `E` stays explicit.
 
+An environment type can use `[zdo_row_environment normalize]` to register one
+explicit list argument as a row. The collector combines and normalizes all
+requirements for that environment type before it applies `Environment.Meet`.
+The package that owns the environment supplies its normalizer and projection
+instances. `Z.Do` does not depend on that package.
+
 Without a complete expected type, plain `zdo` also collects, normalizes, and
 joins action errors. A native `catch` gets private environment and error
 inference scopes for its body and handler. The body error is handled, so only
@@ -34,6 +40,20 @@ syntax (name := zdoScopedTry)
   "zdo_scoped_try%[" term "," term "," term "," term "] " doElem : doElem
 
 namespace Z.Elab
+
+/--
+Register a unary row-environment type and the function that normalizes its
+row argument. The `zdo` collector combines requirements that use the same
+registered environment before it applies `Environment.Meet`.
+-/
+initialize rowEnvironmentAttr : ParametricAttribute Name ←
+  registerParametricAttribute {
+    name := `zdo_row_environment
+    descr := "row normalizer used by the `zdo` environment collector"
+    getParam := fun _ stx => do
+      let normalizerSyntax ← Attribute.Builtin.getIdent stx
+      Elab.realizeGlobalConstNoOverloadWithInfo normalizerSyntax
+  }
 
 private structure ExpectedZ where
   level : Level
@@ -283,11 +303,90 @@ private partial def flattenEnvironmentRequirement
     return left ++ right
   return #[requirement]
 
+private structure RowEnvironmentGroup where
+  wrapper : Name
+  normalizer : Name
+  elementType : Expr
+  entries : Array Expr := #[]
+  deriving Inhabited
+
+private partial def rowEntries
+    (wrapper : Name)
+    (row : Expr) : TermElabM (Expr × Array Expr) := do
+  let rowType ← whnf (← inferType row)
+  unless rowType.isAppOfArity ``List 1 do
+    throwError
+      "`[{rowEnvironmentAttr.attr.name}]` requires a list row argument on `{wrapper}`"
+  let elementType := rowType.getAppArgs[0]!
+  let row ← whnf (← instantiateMVars row)
+  if row.getAppFn.isConstOf ``List.nil then
+    return (elementType, #[])
+  if row.getAppFn.isConstOf ``List.cons then
+    let arguments := row.getAppArgs
+    unless arguments.size == 3 do
+      throwError "invalid list row in registered environment `{wrapper}`"
+    let (tailElementType, tail) ← rowEntries wrapper arguments[2]!
+    unless ← isDefEq elementType tailElementType do
+      throwError "inconsistent list row in registered environment `{wrapper}`"
+    return (elementType, #[arguments[1]!] ++ tail)
+  throwError
+    "the row argument of registered environment `{wrapper}` must reduce to a list"
+
+private def rowEnvironment? (requirement : Expr) :
+    TermElabM (Option (Name × Name × Expr)) := do
+  let requirement ← whnf (← instantiateMVars requirement)
+  let .const wrapper _ := requirement.getAppFn | return none
+  let some normalizer := rowEnvironmentAttr.getParam? (← getEnv) wrapper |
+    return none
+  let arguments := requirement.getAppArgs
+  unless arguments.size == 1 do
+    throwError
+      "registered row environment `{wrapper}` must have one explicit row argument"
+  return some (wrapper, normalizer, arguments[0]!)
+
+private def normalizeRowEnvironments
+    (requirements : Array Expr) : TermElabM (Array Expr) := do
+  let mut ordinary := #[]
+  let mut groups : Array RowEnvironmentGroup := #[]
+  for requirement in requirements do
+    match ← rowEnvironment? requirement with
+    | none => ordinary := ordinary.push requirement
+    | some (wrapper, normalizer, row) =>
+        let (elementType, entries) ← rowEntries wrapper row
+        let mut groupIndex? : Option Nat := none
+        for index in [:groups.size] do
+          let group := groups[index]!
+          if group.wrapper == wrapper && group.normalizer == normalizer &&
+              (← isDefEq group.elementType elementType) then
+            groupIndex? := some index
+            break
+        match groupIndex? with
+        | some index =>
+            let group := groups[index]!
+            groups := groups.set! index {
+              group with entries := group.entries ++ entries
+            }
+        | none =>
+            groups := groups.push {
+              wrapper
+              normalizer
+              elementType
+              entries
+            }
+  for group in groups do
+    let row ← mkListLit group.elementType group.entries.toList
+    let normalized ← mkAppM group.normalizer #[row]
+    let (_, normalizedEntries) ← rowEntries group.wrapper normalized
+    let normalizedRow ←
+      mkListLit group.elementType normalizedEntries.toList
+    ordinary := ordinary.push (← mkAppM group.wrapper #[normalizedRow])
+  return ordinary
+
 private def normalizeEnvironmentRequirements
     (requirements : Array Expr) : TermElabM (Array Expr) := do
   let flattened ← requirements.foldlM (init := #[]) fun result requirement => do
     return result ++ (← flattenEnvironmentRequirement requirement)
-  return Lean.sortExprs flattened |>.1
+  return Lean.sortExprs (← normalizeRowEnvironments flattened) |>.1
 
 private def meetEnvironments (requirements : Array Expr) : TermElabM Expr := do
   requirements.reverse.foldlM (init := mkConst ``Unit) fun right left => do
@@ -305,6 +404,30 @@ private def meetEnvironments (requirements : Array Expr) : TermElabM Expr := do
 
 private def inferEnvironment (requirements : Array Expr) : TermElabM Expr := do
   meetEnvironments (← normalizeEnvironmentRequirements requirements)
+
+private def inferEnvironmentMeet
+    (left right : Expr) : TermElabM (Expr × Expr) := do
+  let left ← instantiateMVars left
+  let right ← instantiateMVars right
+  let result ← inferEnvironment #[left, right]
+  let leftLevel ← getDecLevel left
+  let rightLevel ← getDecLevel right
+  let resultLevel ← getDecLevel result
+  let leftProviderType := mkApp2
+    (mkConst ``Environment.CanProvide [resultLevel, leftLevel]) result left
+  let rightProviderType := mkApp2
+    (mkConst ``Environment.CanProvide [resultLevel, rightLevel]) result right
+  let leftProvider ← synthInstance leftProviderType
+  let rightProvider ← synthInstance rightProviderType
+  let meet := mkAppN
+    (mkConst ``Environment.Meet.ofCanProvide
+      [leftLevel, rightLevel, resultLevel]) #[
+      left,
+      right,
+      result,
+      leftProvider,
+      rightProvider]
+  return (result, meet)
 
 private partial def flattenErrorRequirement
     (requirement : Expr) : TermElabM (Array Expr) := do
@@ -550,12 +673,9 @@ private def combineScopedCatch
     (handler : ScopedHandler) : DoElabM ScopedSequence := do
   let bodyLevel ← getDecLevel body.environment
   let handlerLevel ← getDecLevel handler.environment
-  let combinedLevel ← mkFreshLevelMVar
-  let combinedEnvironment ← mkFreshExprMVar (mkSort combinedLevel.succ)
-  let meetType := mkApp3
-    (mkConst ``Environment.Meet [bodyLevel, handlerLevel, combinedLevel])
-    body.environment handler.environment combinedEnvironment
-  let meet ← Term.mkInstMVar meetType
+  let (combinedEnvironment, meet) ←
+    inferEnvironmentMeet body.environment handler.environment
+  let combinedLevel ← getDecLevel combinedEnvironment
   let packedType := body.lifter.liftedDoBlockResultType
   unless ← isDefEq packedType handler.lifter.liftedDoBlockResultType do
     throwError "the protected body and catch handler use different control types"
@@ -601,12 +721,9 @@ private def combineScopedFinally
     (finalizer : ScopedFinalizer) : DoElabM ScopedSequence := do
   let bodyLevel ← getDecLevel body.environment
   let finalizerLevel ← getDecLevel finalizer.environment
-  let combinedLevel ← mkFreshLevelMVar
-  let combinedEnvironment ← mkFreshExprMVar (mkSort combinedLevel.succ)
-  let meetType := mkApp3
-    (mkConst ``Environment.Meet [bodyLevel, finalizerLevel, combinedLevel])
-    body.environment finalizer.environment combinedEnvironment
-  let meet ← Term.mkInstMVar meetType
+  let (combinedEnvironment, meet) ←
+    inferEnvironmentMeet body.environment finalizer.environment
+  let combinedLevel ← getDecLevel combinedEnvironment
   let combinedErrorLevel ← mkFreshLevelMVar
   let combinedError ← mkFreshExprMVar (mkSort combinedErrorLevel.succ)
   let joinType := mkApp3
