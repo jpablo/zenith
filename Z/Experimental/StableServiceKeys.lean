@@ -943,6 +943,23 @@ private partial def serviceRowEntries
       (← serviceRowEntries reference arguments[2]!)
   throwErrorAt reference "a service row must reduce to a list"
 
+/-- Reject a stable-key collision before normalization can hide it. -/
+private def ensureCompatibleEntries
+    (reference : Syntax)
+    (entries : Array Expr) : TermElabM Unit := do
+  for leftPosition in [0:entries.size] do
+    for rightPosition in [leftPosition + 1:entries.size] do
+      let left := entries[leftPosition]!
+      let right := entries[rightPosition]!
+      let leftKey ← mkAppM ``Entry.key #[left]
+      let rightKey ← mkAppM ``Entry.key #[right]
+      if ← isDefEq leftKey rightKey then
+        unless ← isDefEq left right do
+          let leftService ← whnf (← mkAppM ``Entry.Service #[left])
+          let rightService ← whnf (← mkAppM ``Entry.Service #[right])
+          throwErrorAt reference m!
+            "service types {leftService} and {rightService} have the same stable key"
+
 private def elaborateServiceRow
     (reference : Syntax)
     (serviceTypes : Array Term) : TermElabM Expr := do
@@ -960,6 +977,7 @@ private def elaborateServiceRow
     unless ← isDefEq (← inferType entry) entryType do
       throwErrorAt reference
         "all services in one row must use the same universe"
+  ensureCompatibleEntries reference entries
   let row ← mkListLit entryType entries.toList
   let normalized ← mkAppM ``Row.normalize #[row]
   let normalizedEntries ← serviceRowEntries reference normalized

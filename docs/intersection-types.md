@@ -395,8 +395,9 @@ names and no manual product-layer construction.
 
 1. Define the Scala fragment that Zenith and other target libraries need.
 2. Formalize its subtype preorder, intersection rules, and equivalence laws.
-3. Make key-to-service coherence intrinsic to public entry construction. The
-   exact laws currently take `Row.Coherent` as an explicit condition.
+3. Decide whether promotion needs a proof-carrying row wrapper. Public row
+   syntax now rejects key-to-service conflicts, and every normalized row has
+   a checked `Row.Coherent` proof.
 4. Move the checked keyed environment and layer API out of `Z.Experimental`.
 
 The issue-sync case combines stable environments, normalized errors, ordered
@@ -510,6 +511,10 @@ The prototype provides these checked properties:
 - Coherent permutations have exactly equal normal forms. Merge has exact
   associative, commutative, idempotent, and identity laws for ordered,
   coherent rows.
+- Every normalized row is provably coherent. Exact merge laws for disjoint
+  ordered rows derive coherence automatically and need no coherence argument.
+- `ServiceRow[...]` and `Services[...]` reject two different service entries
+  that have the same stable key before normalization can hide the conflict.
 - Merge is associative, commutative, and idempotent at the service-key
   boundary, with the empty row as its identity.
 - Normalization and merge produce rows with unique qualified keys.

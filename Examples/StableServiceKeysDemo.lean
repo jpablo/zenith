@@ -124,6 +124,16 @@ example : Services[Repository User, Repository Issue] =
 abbrev Services : List Entry.{1} :=
   ServiceRow[Config, Github, Store]
 
+example : Row.Ordered Services := by
+  change Row.Ordered
+    (Row.normalize [configEntry, githubEntry, storeEntry])
+  exact Row.ordered_normalize _
+
+example : Row.Coherent Services := by
+  change Row.Coherent
+    (Row.normalize [configEntry, githubEntry, storeEntry])
+  exact Row.normalize_coherent _
+
 example : Row.normalize [configEntry, githubEntry, storeEntry] =
     Row.normalize [storeEntry, configEntry, githubEntry] := rfl
 
@@ -782,6 +792,13 @@ abbrev PassThroughOutputs : List Entry.{1} :=
 example : Row.Disjoint [githubEntry] [reporterEntry] := by decide
 
 example : ¬ Row.Disjoint [githubEntry] [githubEntry] := by decide
+
+example : Row.merge [githubEntry] [reporterEntry] =
+    Row.merge [reporterEntry] [githubEntry] := by
+  apply Row.merge_comm_exact_of_disjoint
+  · simp [Row.Ordered]
+  · simp [Row.Ordered]
+  · decide
 
 def passThroughKeyedServices
     (events : IO.Ref (List String)) :

@@ -249,6 +249,72 @@ def Compatible (left right : List Entry) : Prop :=
 def Coherent (entries : List Entry) : Prop :=
   Compatible entries entries
 
+/-- A row with unique keys is coherent. -/
+theorem uniqueKeys_coherent
+    {entries : List Entry}
+    (unique : UniqueKeys entries) :
+    Coherent entries := by
+  induction entries with
+  | nil =>
+      intro leftEntry leftMembership
+      contradiction
+  | cons head tail inductionHypothesis =>
+      change Fresh head.key tail ∧ UniqueKeys tail at unique
+      intro leftEntry leftMembership rightEntry rightMembership equality
+      rw [List.mem_cons] at leftMembership rightMembership
+      rcases leftMembership with leftHead | leftTail
+      · subst leftEntry
+        rcases rightMembership with rightHead | rightTail
+        · exact rightHead.symm
+        · have different :=
+            (fresh_iff_forall head.key tail).mp unique.1
+              rightEntry rightTail
+          exact (different equality).elim
+      · rcases rightMembership with rightHead | rightTail
+        · subst rightEntry
+          have different :=
+            (fresh_iff_forall head.key tail).mp unique.1
+              leftEntry leftTail
+          exact (different equality.symm).elim
+        · exact inductionHypothesis unique.2
+            leftEntry leftTail rightEntry rightTail equality
+
+/-- Every strictly ordered row has unique keys. -/
+theorem ordered_uniqueKeys
+    {entries : List Entry}
+    (ordered : Ordered entries) :
+    UniqueKeys entries := by
+  induction entries with
+  | nil => trivial
+  | cons head tail inductionHypothesis =>
+      rw [Ordered, List.pairwise_cons] at ordered
+      have fresh : Fresh head.key tail := by
+        rw [fresh_iff_forall]
+        intro candidate membership equality
+        have order := ordered.1 candidate membership
+        change compare head.key candidate.key = .lt at order
+        have compareEquality :
+            compare head.key candidate.key = .eq :=
+          Std.LawfulEqOrd.compare_eq_iff_eq.mpr equality
+        rw [compareEquality] at order
+        contradiction
+      exact ⟨
+        fresh,
+        inductionHypothesis ordered.2
+      ⟩
+
+/-- Every strictly ordered row is coherent. -/
+theorem ordered_coherent
+    {entries : List Entry}
+    (ordered : Ordered entries) :
+    Coherent entries :=
+  uniqueKeys_coherent (ordered_uniqueKeys ordered)
+
+/-- Every normalized row is coherent. -/
+theorem normalize_coherent (entries : List Entry) :
+    Coherent (normalize entries) :=
+  uniqueKeys_coherent (uniqueKeys_normalize entries)
+
 /-- Every entry produced by insertion comes from its input entry or row. -/
 theorem mem_insert_subset
     (candidate entry : Entry)
@@ -823,6 +889,102 @@ theorem disjoint_normalize (left right : List Entry) :
   disjoint_congr
     (fun key => fresh_normalize key left)
     (fun key => fresh_normalize key right)
+
+/-- Disjoint coherent rows remain coherent when appended. -/
+theorem coherent_append_of_disjoint
+    {left right : List Entry}
+    (leftCoherent : Coherent left)
+    (rightCoherent : Coherent right)
+    (disjoint : Disjoint left right) :
+    Coherent (left ++ right) := by
+  intro leftEntry leftMembership rightEntry rightMembership equality
+  rw [List.mem_append] at leftMembership rightMembership
+  rcases leftMembership with leftFromLeft | leftFromRight
+  · rcases rightMembership with rightFromLeft | rightFromRight
+    · exact leftCoherent leftEntry leftFromLeft
+        rightEntry rightFromLeft equality
+    · have different :=
+        (disjoint_iff_forall left right).mp disjoint
+          rightEntry rightFromRight leftEntry leftFromLeft
+      exact (different equality.symm).elim
+  · rcases rightMembership with rightFromLeft | rightFromRight
+    · have different :=
+        (disjoint_iff_forall left right).mp disjoint
+          leftEntry leftFromRight rightEntry rightFromLeft
+      exact (different equality).elim
+    · exact rightCoherent leftEntry leftFromRight
+        rightEntry rightFromRight equality
+
+/-- Disjointness distributes over appending the right row. -/
+theorem disjoint_append_right
+    (left second third : List Entry) :
+    Disjoint left (second ++ third) ↔
+      Disjoint left second ∧ Disjoint left third := by
+  rw [disjoint_iff_forall, disjoint_iff_forall, disjoint_iff_forall]
+  constructor
+  · intro combined
+    constructor
+    · intro entry membership
+      exact combined entry (List.mem_append.mpr (Or.inl membership))
+    · intro entry membership
+      exact combined entry (List.mem_append.mpr (Or.inr membership))
+  · rintro ⟨secondDisjoint, thirdDisjoint⟩ entry membership
+    rw [List.mem_append] at membership
+    rcases membership with secondMembership | thirdMembership
+    · exact secondDisjoint entry secondMembership
+    · exact thirdDisjoint entry thirdMembership
+
+/-- Exact merge commutativity needs no coherence argument for disjoint rows. -/
+theorem merge_comm_exact_of_disjoint
+    {left right : List Entry}
+    (leftOrdered : Ordered left)
+    (rightOrdered : Ordered right)
+    (disjoint : Disjoint left right) :
+    merge left right = merge right left :=
+  merge_comm_exact leftOrdered rightOrdered
+    (coherent_append_of_disjoint
+      (ordered_coherent leftOrdered)
+      (ordered_coherent rightOrdered)
+      disjoint)
+
+/-- Exact merge idempotence follows from canonical row order. -/
+theorem merge_idempotent_exact_of_ordered
+    {entries : List Entry}
+    (ordered : Ordered entries) :
+    merge entries entries = entries :=
+  merge_idempotent_exact ordered (ordered_coherent ordered)
+
+/-- The empty row is an exact left identity for every canonical row. -/
+theorem merge_empty_left_exact_of_ordered
+    {entries : List Entry}
+    (ordered : Ordered entries) :
+    merge [] entries = entries :=
+  merge_empty_left_exact ordered (ordered_coherent ordered)
+
+/-- Exact associativity needs no coherence argument for pairwise-disjoint rows. -/
+theorem merge_assoc_exact_of_pairwise_disjoint
+    {first second third : List Entry}
+    (firstOrdered : Ordered first)
+    (secondOrdered : Ordered second)
+    (thirdOrdered : Ordered third)
+    (firstSecond : Disjoint first second)
+    (firstThird : Disjoint first third)
+    (secondThird : Disjoint second third) :
+    merge (merge first second) third =
+      merge first (merge second third) := by
+  have secondThirdCoherent : Coherent (second ++ third) :=
+    coherent_append_of_disjoint
+      (ordered_coherent secondOrdered)
+      (ordered_coherent thirdOrdered)
+      secondThird
+  have firstRestDisjoint : Disjoint first (second ++ third) :=
+    (disjoint_append_right first second third).mpr
+      ⟨firstSecond, firstThird⟩
+  exact merge_assoc_exact firstOrdered
+    (coherent_append_of_disjoint
+      (ordered_coherent firstOrdered)
+      secondThirdCoherent
+      firstRestDisjoint)
 
 /-- Every entry selected by `missing` is fresh in the provided row. -/
 theorem fresh_of_mem_missing
