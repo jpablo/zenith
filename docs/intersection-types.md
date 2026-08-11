@@ -398,27 +398,29 @@ names and no manual product-layer construction.
 3. Decide whether promotion needs a proof-carrying row wrapper. Public row
    syntax now rejects key-to-service conflicts, and every normalized row has
    a checked `Row.Coherent` proof.
-4. Move the checked keyed environment and layer API out of `Z.Experimental`.
+
+The checked keyed environment and layer API now form part of the public `Z`
+library. Promotion did not add a proof-carrying wrapper.
 
 The issue-sync case combines stable environments, normalized errors, ordered
 catch chains, and automatic layer composition in a larger program.
 
-## Stable service-key prototype
+## Stable service-key API
 
-The reusable experiment is in
-[`Z/Experimental/StableServiceKeys.lean`](../Z/Experimental/StableServiceKeys.lean).
+The reusable implementation is in
+[`Z/ServiceKeys.lean`](../Z/ServiceKeys.lean).
 The checked row laws are in
-[`Z/Experimental/StableServiceKeyLaws.lean`](../Z/Experimental/StableServiceKeyLaws.lean).
+[`Z/ServiceKeyLaws.lean`](../Z/ServiceKeyLaws.lean).
 The automatic graph elaborator is in
-[`Z/Experimental/KeyedLayerMake.lean`](../Z/Experimental/KeyedLayerMake.lean).
+[`Z/KeyedLayerMake.lean`](../Z/KeyedLayerMake.lean).
 The native checked example is
 [`Examples/StableServiceKeysDemo.lean`](../Examples/StableServiceKeysDemo.lean).
 Its compile-time diagnostic checks are in
 [`Examples/KeyedLayerMakeDiagnostics.lean`](../Examples/KeyedLayerMakeDiagnostics.lean).
 [`stable-service-keys.lean`](stable-service-keys.lean) is its documentation
 import.
-The experiment does not change the production `Z` environment. Each service
-entry contains a structural type key and its service type. A key contains the
+The public keyed environment is separate from the product environment. Each
+service entry contains a structural type key and its service type. A key contains the
 fully qualified name of each concrete type constructor, its argument count,
 and the keys of its type arguments. A lexical insertion sort gives service
 rows a stable order and removes duplicate keys.
@@ -500,7 +502,7 @@ The package must also supply `Environment.CanProvide` instances that project a
 complete row to each requested row. Stable service keys supply these instances
 for a direct environment and for an environment inside a product.
 
-The prototype provides these checked properties:
+The public implementation provides these checked properties:
 
 - Normalization preserves the set of qualified service keys and is
   idempotent at that boundary.
@@ -790,7 +792,7 @@ Independent horizontal branches now lower to `zipFreshPar`. The
 parallel and shared nodes. A child `HEIO` interruption scope cancels sibling
 branches after failure or interruption, waits for their completion, and
 releases completed resources. The constructor infers canonical external input
-rows and normalized graph errors. The experimental `Z.provide` bridge runs the
+rows and normalized graph errors. The public `Z.provide` bridge runs the
 closed program in a nested fiber because `ZCore`
 cannot store high-universe services. `ZCore.asyncInterrupt` connects outer
 interruption to the layer scope and waits for release before it completes the

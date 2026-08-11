@@ -1,4 +1,4 @@
-import Z.Experimental.KeyedLayerMake
+import Z.KeyedLayerMake
 
 /-!
 A small onion-style application built with the current keyed service API.

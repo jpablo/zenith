@@ -1,11 +1,12 @@
 import Lean
-import Z
+import Z.Layer
+import Z.Do
 
 /-!
-Experimental stable, normalized service rows.
+Stable, normalized service rows and keyed layers.
 
-This module is not imported by the public `Z` module. It tests a possible
-replacement for product environments without changing the production API.
+The public `Z` module imports this implementation. Service types receive
+structural keys, and normalized rows provide canonical environment types.
 -/
 
 namespace StableServiceKeys

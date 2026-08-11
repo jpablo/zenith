@@ -1,15 +1,13 @@
-import Z.Experimental.KeyedLayerMake
-import Z.Experimental.StableServiceKeyLaws
+import Z.KeyedLayerMake
+import Z.ServiceKeyLaws
 
 /-!
-A separate experiment for stable, normalized service rows with type-derived
-keys.
+Checks for the public stable, normalized service rows with type-derived keys.
 
-This file does not change the production `Z` environment. It tests whether an
-internal qualified service key can remove product-order knowledge from layer
-code without one central numeric registry. The explicit `service_key`
-declarations below test the low-level key and builder APIs. The application
-examples use only service types.
+The examples test how an internal qualified service key removes product-order
+knowledge from layer code without one central numeric registry. The explicit
+`service_key` declarations below test the low-level key and builder APIs. The
+application examples use only service types.
 -/
 
 namespace StableServiceKeys
@@ -1326,13 +1324,13 @@ def checkZProvideAcquisitionInterruption : IO Unit := do
 def demo : IO Unit := do
   match <- run with
   | some (.success "issue:2") =>
-      IO.println "Stable service-key prototype passed."
+      IO.println "Stable service-key checks passed."
   | some (.success value) =>
-      throw (IO.userError s!"Unexpected prototype value: {value}")
+      throw (IO.userError s!"Unexpected stable service-key value: {value}")
   | some (.failure _) =>
-      throw (IO.userError "The stable service-key prototype failed.")
+      throw (IO.userError "The stable service-key checks failed.")
   | none =>
-      throw (IO.userError "The stable service-key prototype returned no result.")
+      throw (IO.userError "The stable service-key checks returned no result.")
   checkParameterizedServiceKeys
   IO.println "Parameterized service-key checks passed."
   checkKeyedLayerSuccess

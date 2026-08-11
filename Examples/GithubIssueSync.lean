@@ -1,4 +1,4 @@
-import Z.Experimental.KeyedLayerMake
+import Z.KeyedLayerMake
 
 /-!
 A larger `zdo` and automatic-layer example based on a GitHub issue

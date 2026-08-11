@@ -1,6 +1,6 @@
 import Examples.StableServiceKeysDemo
 
 /-!
-The executable stable service-key experiment is in
+The executable checks for the public stable service-key API are in
 `Examples/StableServiceKeysDemo.lean`.
 -/

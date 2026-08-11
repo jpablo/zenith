@@ -1,4 +1,4 @@
-import Z.Experimental.StableServiceKeys
+import Z.ServiceKeys
 
 /-!
 Automatic construction for keyed layers.

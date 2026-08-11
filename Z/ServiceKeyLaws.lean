@@ -1,7 +1,7 @@
-import Z.Experimental.StableServiceKeys
+import Z.ServiceKeys
 
 /-!
-Checked laws for the experimental stable service-row representation.
+Checked laws for the stable service-row representation.
 
 `Row.SameKeys` is capability equality: two rows contain the same qualified
 service keys. It does not claim that two `Entry` values with the same key have
