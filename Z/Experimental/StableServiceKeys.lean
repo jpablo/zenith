@@ -193,6 +193,22 @@ end CanProvide
 
 end Environment
 
+/-- Let ordinary `Z` combinators project one keyed environment row. -/
+instance (priority := high)
+    [projection : Environment.CanProvide available required] :
+    _root_.Environment.CanProvide
+      (Environment available)
+      (Environment required) where
+  provide := projection.provide
+
+namespace Services
+
+/-- The empty keyed service environment. -/
+def empty : Environment ([] : List Entry.{u}) :=
+  .empty
+
+end Services
+
 /-- Build a typed environment without knowledge of its final storage order. -/
 structure Builder.{u} (entries : List Entry.{u}) where
   environment : Environment entries
@@ -239,6 +255,16 @@ def singleton
     (layer : Layer R E entry.Service) :
     KeyedLayer R E [entry] :=
   ⟨layer.map fun value => .cons value .empty⟩
+
+/-- Build a closed one-service keyed layer. -/
+def succeedEntry
+    (entry : Entry.{u})
+    (value : entry.Service) :
+    KeyedLayer
+      (Environment ([] : List Entry.{u}))
+      Empty
+      [entry] :=
+  singleton entry (Layer.fromFunction fun _ => value)
 
 /-- Let a keyed layer read its required row from a larger input row. -/
 def widenInput
@@ -562,6 +588,38 @@ macro_rules
       `(KeyedLayer.shareInto (EOut := $errorType) $value fun $name =>
         keyed_graph (error := $errorType) { $rest* yield $result })
 
+/-- Select a low-universe result from a keyed service. -/
+def withService
+    (entry : Entry)
+    [Contains entry entries]
+    (operation : entry.Service -> A) :
+    Z (Environment entries) Empty A :=
+  Z.serviceWith fun environment =>
+    operation (Contains.get environment)
+
+/-- Select a high-universe service without returning it as a fiber result. -/
+def withServiceZ
+    (entry : Entry)
+    [Contains entry entries]
+    (operation : entry.Service -> Z Unit E A) :
+    Z (Environment entries) E A :=
+  Z.serviceWithZ fun environment =>
+    operation (Contains.get environment)
+
+/-- Select a low-universe result from one inferred service entry. -/
+def withServiceEntry
+    (entry : Entry)
+    (operation : entry.Service -> A) :
+    Z (Environment [entry]) Empty A :=
+  withService (entries := [entry]) entry operation
+
+/-- Run an effect with one inferred high-universe service entry. -/
+def withServiceZEntry
+    (entry : Entry)
+    (operation : entry.Service -> Z Unit E A) :
+    Z (Environment [entry]) E A :=
+  withServiceZ (entries := [entry]) entry operation
+
 /-!
 `service_key entryName : ServiceType` resolves `ServiceType` and uses the full
 Lean declaration names of its constructor and concrete type arguments. Normal
@@ -572,6 +630,24 @@ open Lean Meta Elab Command Term
 
 syntax (name := serviceKeyDecl)
   "service_key " ident " : " term : command
+
+syntax (name := serviceRowType)
+  "ServiceRow[" term,* "]" : term
+
+syntax (name := servicesType)
+  "Services[" term,* "]" : term
+
+syntax (name := keyedLayerFromLayerType)
+  "KeyedLayer.fromLayer" "(" term ")" term:arg : term
+
+syntax (name := keyedLayerSucceedType)
+  "KeyedLayer.succeed" "(" term ")" term:arg : term
+
+syntax (name := keyedServiceWithType)
+  "Z.serviceWithType" "(" term ")" term:arg : term
+
+syntax (name := keyedServiceWithZType)
+  "Z.serviceWithZType" "(" term ")" term:arg : term
 
 private partial def keySyntaxForType
     (reference : Syntax)
@@ -597,24 +673,120 @@ private partial def keySyntaxForType
   let localName := Syntax.mkStrLit localName
   `(Key.named $owner $localName [$argumentKeys,*])
 
+private def entrySyntaxForType
+    (reference : Syntax)
+    (serviceType : Term) : TermElabM Term := do
+  let serviceTypeExpr ← Term.elabType serviceType
+  let key ← keySyntaxForType reference
+    (← instantiateMVars serviceTypeExpr)
+  `(Entry.create $key $serviceType)
+
+private partial def serviceRowEntries
+    (reference : Syntax)
+    (row : Expr) : TermElabM (Array Expr) := do
+  let row ← whnf row
+  if row.getAppFn.isConstOf ``List.nil then
+    return #[]
+  if row.getAppFn.isConstOf ``List.cons then
+    let arguments := row.getAppArgs
+    unless arguments.size == 3 do
+      throwErrorAt reference "invalid service row"
+    return #[arguments[1]!] ++
+      (← serviceRowEntries reference arguments[2]!)
+  throwErrorAt reference "a service row must reduce to a list"
+
+private def elaborateServiceRow
+    (reference : Syntax)
+    (serviceTypes : Array Term) : TermElabM Expr := do
+  let mut entries := #[]
+  for serviceType in serviceTypes do
+    let entrySyntax ← entrySyntaxForType serviceType serviceType
+    let entry ← Term.elabTerm entrySyntax none
+    entries := entries.push (← instantiateMVars entry)
+  let entryType ←
+    if entries.isEmpty then
+      pure <| Lean.mkConst ``Entry [← mkFreshLevelMVar]
+    else
+      inferType entries[0]!
+  for entry in entries do
+    unless ← isDefEq (← inferType entry) entryType do
+      throwErrorAt reference
+        "all services in one row must use the same universe"
+  let row ← mkListLit entryType entries.toList
+  let normalized ← mkAppM ``Row.normalize #[row]
+  let normalizedEntries ← serviceRowEntries reference normalized
+  mkListLit entryType normalizedEntries.toList
+
+private def ensureExpectedType
+    (expectedType? : Option Expr)
+    (expression : Expr) : TermElabM Expr :=
+  match expectedType? with
+  | some expectedType => Term.ensureHasType expectedType expression
+  | none => pure expression
+
+@[term_elab serviceRowType]
+def elabServiceRowType : TermElab := fun stx expectedType? => do
+  let `(ServiceRow[$serviceTypes,*]) := stx | throwUnsupportedSyntax
+  let row ← elaborateServiceRow stx serviceTypes.getElems
+  ensureExpectedType expectedType? row
+
+@[term_elab servicesType]
+def elabServicesType : TermElab := fun stx expectedType? => do
+  let `(Services[$serviceTypes,*]) := stx | throwUnsupportedSyntax
+  let row ← elaborateServiceRow stx serviceTypes.getElems
+  let environment ← mkAppM ``Environment #[row]
+  ensureExpectedType expectedType? environment
+
+@[term_elab keyedLayerFromLayerType]
+def elabKeyedLayerFromLayerType : TermElab := fun stx expectedType? => do
+  let `(KeyedLayer.fromLayer ($serviceType) $layer) := stx |
+    throwUnsupportedSyntax
+  let entry ← entrySyntaxForType serviceType serviceType
+  let generated ← `(KeyedLayer.singleton $entry $layer)
+  Term.elabTerm generated expectedType?
+
+@[term_elab keyedLayerSucceedType]
+def elabKeyedLayerSucceedType : TermElab := fun stx expectedType? => do
+  let `(KeyedLayer.succeed ($serviceType) $value) := stx |
+    throwUnsupportedSyntax
+  let entry ← entrySyntaxForType serviceType serviceType
+  let generated ← `(KeyedLayer.succeedEntry $entry $value)
+  Term.elabTerm generated expectedType?
+
+@[term_elab keyedServiceWithType]
+def elabKeyedServiceWithType : TermElab := fun stx expectedType? => do
+  let `(Z.serviceWithType ($serviceType) $operation) := stx |
+    throwUnsupportedSyntax
+  let entry ← entrySyntaxForType serviceType serviceType
+  let generated ← `(withServiceEntry $entry $operation)
+  match expectedType? with
+  | some expectedType =>
+      if ← hasAssignableMVar expectedType then
+        Term.elabTerm generated none
+      else
+        Term.elabTerm generated expectedType?
+  | none => Term.elabTerm generated none
+
+@[term_elab keyedServiceWithZType]
+def elabKeyedServiceWithZType : TermElab := fun stx expectedType? => do
+  let `(Z.serviceWithZType ($serviceType) $operation) := stx |
+    throwUnsupportedSyntax
+  let entry ← entrySyntaxForType serviceType serviceType
+  let generated ← `(withServiceZEntry $entry $operation)
+  match expectedType? with
+  | some expectedType =>
+      if ← hasAssignableMVar expectedType then
+        Term.elabTerm generated none
+      else
+        Term.elabTerm generated expectedType?
+  | none => Term.elabTerm generated none
+
 @[command_elab serviceKeyDecl]
 meta def elabServiceKeyDecl : CommandElab
   | `(service_key $entryName:ident : $serviceType:term) => do
-      let key ← liftTermElabM do
-        let serviceTypeExpr ← Term.elabType serviceType
-        Term.synthesizeSyntheticMVarsNoPostponing
-        keySyntaxForType serviceType (← instantiateMVars serviceTypeExpr)
-      elabCommand <| ← `(abbrev $entryName : Entry :=
-        Entry.create $key $serviceType)
+      let entry ← liftTermElabM <|
+        entrySyntaxForType serviceType serviceType
+      elabCommand <| ← `(abbrev $entryName : Entry := $entry)
   | _ => throwUnsupportedSyntax
-
-/-- Select a high-universe service without returning it as a fiber result. -/
-def withServiceZ
-    (entry : Entry)
-    [Contains entry entries]
-    (operation : entry.Service -> Z Unit E A) :
-    Z (Environment entries) E A :=
-  Z.serviceWithZ fun environment =>
-    operation (Contains.get environment)
 
 end StableServiceKeys

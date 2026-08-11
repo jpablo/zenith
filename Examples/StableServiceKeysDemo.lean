@@ -90,12 +90,18 @@ example : userRepositoryAliasEntry = userRepositoryEntry := rfl
 example : Row.Fresh issueRepositoryEntry.key
     [userRepositoryEntry] := by decide
 
-abbrev ParameterizedServices : List Entry.{1} :=
+abbrev ParameterizedEntries : List Entry.{1} :=
   [issueRepositoryEntry, userRepositoryEntry]
 
 example : Row.normalize
       [userRepositoryEntry, issueRepositoryEntry] =
-    ParameterizedServices := rfl
+    ParameterizedEntries := rfl
+
+example : ServiceRow[Repository User, Repository Issue] =
+    ParameterizedEntries := rfl
+
+example : Services[Repository User, Repository Issue] =
+    Environment ParameterizedEntries := rfl
 
 abbrev Services : List Entry.{1} :=
   [configEntry, githubEntry, storeEntry]
@@ -133,28 +139,24 @@ def issueRepository : Repository Issue := {
   value := { number := 42 }
 }
 
-def userRepositoryLayer :
-    KeyedLayer
-      (Environment ([] : List Entry.{1})) Empty [userRepositoryEntry] :=
-  KeyedLayer.singleton userRepositoryEntry <|
-    Layer.fromFunction fun _ => userRepository
+def userRepositoryLayer :=
+  KeyedLayer.succeed (Repository User) userRepository
 
-def issueRepositoryLayer :
-    KeyedLayer
-      (Environment ([] : List Entry.{1})) Empty [issueRepositoryEntry] :=
-  KeyedLayer.singleton issueRepositoryEntry <|
-    Layer.fromFunction fun _ => issueRepository
+def issueRepositoryLayer :=
+  KeyedLayer.succeed (Repository Issue) issueRepository
+
+def userRepositoryLayerFromLayer :=
+  KeyedLayer.fromLayer (Repository User) (Layer.succeed userRepository)
+
+example : KeyedLayer Unit Empty (ServiceRow[Repository User]) :=
+  userRepositoryLayerFromLayer
 
 def parameterizedProgram :
-    Z (Environment ParameterizedServices) Empty String := zdo
-  let name <- withServiceZ
-    (entries := ParameterizedServices)
-    userRepositoryEntry fun repository =>
-      Z.succeedNow repository.value.name
-  let number <- withServiceZ
-    (entries := ParameterizedServices)
-    issueRepositoryEntry fun repository =>
-      Z.succeedNow repository.value.number
+    Z (Services[Repository User, Repository Issue]) Empty String := zdo
+  let name <- Z.serviceWithType (Repository User)
+    (fun repository => repository.value.name)
+  let number <- Z.serviceWithZType (Repository Issue)
+    (fun repository => Z.succeedNow repository.value.number)
   pure s!"{name}:{number}"
 
 def automaticallyProvidedParameterized :=
@@ -164,12 +166,12 @@ def automaticallyProvidedParameterized :=
   ]
 
 example : Z
-    (Environment ([] : List Entry.{1})) Empty String :=
+    (Services[]) Empty String :=
   automaticallyProvidedParameterized
 
 def checkParameterizedServiceKeys : IO Unit := do
   let effect := automaticallyProvidedParameterized.provideEnvironment
-    (Environment.empty : Environment [])
+    Services.empty
   match ← Z.unsafeRunSync effect "stable-parameterized-service-keys" with
   | some (.success "Ada:42") => pure ()
   | _ => throw (IO.userError
