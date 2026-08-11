@@ -27,6 +27,10 @@ lean_exe todoReport {
   root := `Examples.TodoReportMain
 }
 
+lean_exe interpreterBench {
+  root := `Benchmarks.Interpreter
+}
+
 lean_lib Z
 lean_lib Examples
 
