@@ -12,6 +12,8 @@ application examples use only service types.
 
 namespace StableServiceKeys
 
+open Z
+
 /-! Low-level checks use explicit names for keys from service declarations. -/
 
 structure Config : Type 1 where

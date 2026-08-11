@@ -5,11 +5,12 @@ import Z.Do
 /-!
 Stable, normalized service rows and keyed layers.
 
-The public `Z` module imports this implementation. Service types receive
-structural keys, and normalized rows provide canonical environment types.
+The public `Z` module imports this implementation. Its declarations are in
+the `Z` namespace. Service types receive structural keys, and normalized rows
+provide canonical environment types.
 -/
 
-namespace StableServiceKeys
+namespace Z
 
 /-- One node in the prefix encoding of a service type. -/
 structure KeyPart where
@@ -1106,4 +1107,4 @@ meta def elabServiceKeyDecl : CommandElab
       elabCommand <| ← `(abbrev $entryName : Entry := $entry)
   | _ => throwUnsupportedSyntax
 
-end StableServiceKeys
+end Z

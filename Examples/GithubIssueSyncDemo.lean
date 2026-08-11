@@ -3,7 +3,7 @@ import Examples.GithubIssueSync
 namespace GithubIssueSyncDemo
 
 open GithubIssueSync
-open StableServiceKeys
+open Z
 
 def printStep (message : String) : Z Unit Empty Unit :=
   Z.succeed (IO.println message)
@@ -58,7 +58,7 @@ example : Z (Services[]) Empty Nat :=
 
 def run : IO Unit := do
   let effect := demoApplication.provideEnvironment
-    StableServiceKeys.Services.empty
+    Z.Services.empty
   match <- Z.unsafeRunSync effect "github-issue-sync-demo" with
   | some (.success count) =>
       IO.println s!"Synchronized {count} issues."

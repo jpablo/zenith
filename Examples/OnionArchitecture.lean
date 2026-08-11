@@ -10,7 +10,7 @@ finally builds `HttpClient` from `HttpConfig`.
 
 namespace OnionArchitecture
 
-open StableServiceKeys
+open Z
 
 structure Issue where
   id : Nat
@@ -122,6 +122,6 @@ def demoApplication : Z (Services[]) HttpError Unit :=
 
 def runnableDemo : Z Unit HttpError Unit :=
   demoApplication.provideEnvironment
-    StableServiceKeys.Services.empty
+    Z.Services.empty
 
 end OnionArchitecture

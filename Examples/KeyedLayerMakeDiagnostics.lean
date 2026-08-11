@@ -4,6 +4,8 @@ import Examples.StableServiceKeysDemo
 
 namespace StableServiceKeys.KeyedLayerMakeDiagnostics
 
+open Z
+
 private def githubFromNothing :
     KeyedLayer (Environment ([] : List Entry.{1})) Empty [githubEntry] :=
   KeyedLayer.singleton githubEntry <|

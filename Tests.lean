@@ -547,7 +547,7 @@ def issueSyncProgram
   let (config, github, store, audit) :=
     makeIssueSyncServices events scenario
   (GithubIssueSync.application config github store audit).provideEnvironment
-    StableServiceKeys.Services.empty
+    Z.Services.empty
 
 def testGithubIssueSync : IO Unit := do
   let issues : List GithubIssueSync.Issue := [
@@ -617,7 +617,7 @@ def testGithubIssueSync : IO Unit := do
     makeIssueSyncServices rawFailureEvents rawFailureScenario
   let rawProgram : Z Unit GithubIssueSync.SourceErrors Nat :=
     (GithubIssueSync.rawApplication rawConfig rawGithub rawStore)
-      |>.provideEnvironment StableServiceKeys.Services.empty
+      |>.provideEnvironment Z.Services.empty
   match ← runProgram "issue-sync-raw-failure" rawProgram with
   | .failure (.fail (.inr (.inr (.writeFailed 2)))) => pure ()
   | _ => failTest "the raw issue sync did not expose the store failure"

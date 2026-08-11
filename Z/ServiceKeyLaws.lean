@@ -3,13 +3,15 @@ import Z.ServiceKeys
 /-!
 Checked laws for the stable service-row representation.
 
+The public declarations are in the `Z` namespace.
+
 `Row.SameKeys` is capability equality: two rows contain the same qualified
 service keys. It does not claim that two `Entry` values with the same key have
 definitionally equal `Service` fields. This distinction is necessary because
 `Entry` stores a type and its equality is not decidable.
 -/
 
-namespace StableServiceKeys
+namespace Z
 
 namespace Row
 
@@ -1078,4 +1080,4 @@ theorem provide_singleton
 
 end Environment
 
-end StableServiceKeys
+end Z

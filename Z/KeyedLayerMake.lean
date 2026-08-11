@@ -3,6 +3,8 @@ import Z.ServiceKeys
 /-!
 Automatic construction for keyed layers.
 
+The public declarations are in the `Z` namespace.
+
 `KeyedLayer.make (outputs) [layers]` finds one provider for each requested
 service, infers the external input row and normalized error channel, and emits
 ordinary `KeyedLayer` compositions. `KeyedLayer.make [layers]` keeps the
@@ -20,7 +22,7 @@ and prints the selected graph without building a value. An explicit target
 
 open Lean Meta Elab Term Command
 
-namespace StableServiceKeys
+namespace Z
 
 syntax (name := keyedLayerMake)
   "KeyedLayer.make" "[" term,* "]" : term
@@ -686,4 +688,4 @@ def elabZProvide : TermElab := fun stx expectedType? => do
   | some expectedType => Term.ensureHasType expectedType expression
   | none => pure expression
 
-end StableServiceKeys
+end Z

@@ -12,7 +12,7 @@ composes the service layers.
 
 namespace GithubIssueSync
 
-open StableServiceKeys
+open Z
 
 structure Issue where
   id : Nat

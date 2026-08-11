@@ -419,11 +419,18 @@ Its compile-time diagnostic checks are in
 [`Examples/KeyedLayerMakeDiagnostics.lean`](../Examples/KeyedLayerMakeDiagnostics.lean).
 [`stable-service-keys.lean`](stable-service-keys.lean) is its documentation
 import.
+The API declarations are in the `Z` namespace. The examples in this section
+use:
+
+```lean
+open Z
+```
+
 The public keyed environment is separate from the product environment. Each
-service entry contains a structural type key and its service type. A key contains the
-fully qualified name of each concrete type constructor, its argument count,
-and the keys of its type arguments. A lexical insertion sort gives service
-rows a stable order and removes duplicate keys.
+service entry contains a structural type key and its service type. A key
+contains the fully qualified name of each concrete type constructor, its
+argument count, and the keys of its type arguments. A lexical insertion sort
+gives service rows a stable order and removes duplicate keys.
 
 Normal application code can use service types and does not have to declare
 entry names:
