@@ -395,8 +395,8 @@ names and no manual product-layer construction.
 
 1. Define the Scala fragment that Zenith and other target libraries need.
 2. Formalize its subtype preorder, intersection rules, and equivalence laws.
-3. Prove the normalization, merge, projection, and freshness laws for stable
-   service rows.
+3. Add a lawful key comparator and a key-to-service coherence condition. Then
+   lift the service-key laws to exact canonical-row equality.
 4. Move the checked keyed environment and layer API out of `Z.Experimental`.
 
 The issue-sync case combines stable environments, normalized errors, ordered
@@ -406,6 +406,8 @@ catch chains, and automatic layer composition in a larger program.
 
 The reusable experiment is in
 [`Z/Experimental/StableServiceKeys.lean`](../Z/Experimental/StableServiceKeys.lean).
+The checked row laws are in
+[`Z/Experimental/StableServiceKeyLaws.lean`](../Z/Experimental/StableServiceKeyLaws.lean).
 The automatic graph elaborator is in
 [`Z/Experimental/KeyedLayerMake.lean`](../Z/Experimental/KeyedLayerMake.lean).
 The native checked example is
@@ -499,6 +501,16 @@ for a direct environment and for an environment inside a product.
 
 The prototype provides these checked properties:
 
+- Normalization preserves the set of qualified service keys and is
+  idempotent at that boundary.
+- Merge is associative, commutative, and idempotent at the service-key
+  boundary, with the empty row as its identity.
+- Normalization and merge produce rows with unique qualified keys.
+- Disjointness is symmetric, is invariant under normalization, and means
+  that no key occurs in both rows.
+- `Row.missing` produces keys that are fresh in the provided row.
+- Structural projection preserves each selected service value at its exact
+  output position.
 - Opposite insertion orders produce the same row type.
 - A repeated service key produces one row entry.
 - `Contains` returns only the service type assigned to the selected entry.

@@ -22,7 +22,9 @@ lean_exe stableServiceKeys {
   root := `Examples.StableServiceKeysDemo
 }
 
-lean_lib Z
+lean_lib Z {
+  roots := #[`Z, `Z.Experimental.StableServiceKeyLaws]
+}
 lean_lib Examples
 
 

@@ -66,23 +66,31 @@ end Entry
 
 namespace Row
 
+/-- Compute whether no row entry has this qualified key. -/
+def isFresh (key : Key) : List Entry -> Bool
+  | [] => true
+  | head :: tail =>
+      if key = head.key then false else isFresh key tail
+
 /-- Insert one entry in key order. Keep the existing entry for a duplicate. -/
 @[reducible] def insert (entry : Entry) : List Entry -> List Entry
   | [] => [entry]
   | head :: tail =>
-      match compare entry.key head.key with
-      | .lt => entry :: head :: tail
-      | .eq => head :: tail
-      | .gt => head :: insert entry tail
+      if entry.key = head.key then
+        head :: tail
+      else
+        match compare entry.key head.key with
+        | .lt =>
+            if isFresh entry.key tail then
+              entry :: head :: tail
+            else
+              head :: insert entry tail
+        | .eq => head :: insert entry tail
+        | .gt => head :: insert entry tail
 
 /-- Give any list of entries one stable order and remove duplicate keys. -/
 def normalize (entries : List Entry) : List Entry :=
   entries.foldr insert []
-
-/-- Compute whether no row entry has this qualified key. -/
-def isFresh (key : Key) : List Entry -> Bool
-  | [] => true
-  | head :: tail => key != head.key && isFresh key tail
 
 /-- No entry in the row has this qualified key. -/
 def Fresh (key : Key) (entries : List Entry) : Prop :=
@@ -111,7 +119,7 @@ instance (key : Key) (entries : List Entry) : Decidable (Fresh key entries) := b
 def canMerge (left : List Entry) : List Entry -> Bool
   | [] => true
   | head :: tail =>
-      isFresh head.key left && canMerge (insert head left) tail
+      isFresh head.key left && canMerge left tail
 
 def Disjoint (left right : List Entry) : Prop :=
   canMerge left right = true
@@ -139,18 +147,28 @@ def insert
       Environment entries -> Environment (Row.insert entry entries)
   | [], .empty => .cons value .empty
   | head :: tail, .cons headValue tailValues => by
-      cases order : compare entry.key head.key with
-      | lt =>
-          simpa [Row.insert, order] using
-            (Environment.cons value
-              (Environment.cons headValue tailValues))
-      | eq =>
-          simpa [Row.insert, order] using
-            (Environment.cons headValue tailValues)
-      | gt =>
-          simpa [Row.insert, order] using
-            (Environment.cons headValue
-              (insert entry value tailValues))
+      if equality : entry.key = head.key then
+        simpa [Row.insert, equality] using
+          (Environment.cons headValue tailValues)
+      else
+        cases order : compare entry.key head.key with
+        | lt =>
+            if tailFresh : Row.isFresh entry.key tail then
+              simpa [Row.insert, equality, order, tailFresh] using
+                (Environment.cons value
+                  (Environment.cons headValue tailValues))
+            else
+              simpa [Row.insert, equality, order, tailFresh] using
+                (Environment.cons headValue
+                  (insert entry value tailValues))
+        | eq =>
+            simpa [Row.insert, equality, order] using
+              (Environment.cons headValue
+                (insert entry value tailValues))
+        | gt =>
+            simpa [Row.insert, equality, order] using
+              (Environment.cons headValue
+                (insert entry value tailValues))
 
 /-- Merge two typed environments in stable key order. -/
 def merge
@@ -173,36 +191,103 @@ def append
 
 end Environment
 
-/-- Evidence that one exact entry occurs in a row. -/
+namespace Environment
+
+/-- The structural position of one exact entry in a service row. -/
+inductive Selection.{u}
+    (target : Entry.{u}) : List Entry.{u} -> Type (u + 1) where
+  | head : Selection target (target :: entries)
+  | tail :
+      Selection target entries -> Selection target (entry :: entries)
+
+namespace Selection
+
+/-- Read the service value at a structural row position. -/
+def get
+    (self : Selection target entries)
+    (environment : Environment entries) :
+    target.Service :=
+  match self with
+  | .head =>
+      match environment with
+      | .cons value _ => value
+  | .tail position =>
+      match environment with
+      | .cons _ tailValues => position.get tailValues
+
+end Selection
+
+end Environment
+
+/-- Structural evidence that one exact entry occurs in a row. -/
 class Contains (target : Entry) (entries : List Entry) where
-  get : Environment entries -> target.Service
+  selection : Environment.Selection target entries
+
+namespace Contains
+
+/-- Read the value selected by structural membership evidence. -/
+def get
+    [self : Contains target entries]
+    (environment : Environment entries) :
+    target.Service :=
+  self.selection.get environment
 
 instance (priority := high) : Contains entry (entry :: entries) where
-  get
-    | .cons value _ => value
+  selection := .head
 
-instance (priority := low) [Contains target entries] :
+instance (priority := low) [tail : Contains target entries] :
     Contains target (entry :: entries) where
-  get
-    | .cons _ tail => Contains.get tail
+  selection := .tail tail.selection
+
+end Contains
 
 namespace Environment
+
+/-- Structural evidence for each service selected from an available row. -/
+inductive Projection.{u}
+    (available : List Entry.{u}) : List Entry.{u} -> Type (u + 1) where
+  | empty : Projection available []
+  | cons
+      (contains : Contains entry available)
+      (tail : Projection available entries) :
+      Projection available (entry :: entries)
+
+namespace Projection
+
+/-- Apply structural projection evidence to a typed environment. -/
+def provide
+    (self : Projection available required)
+    (environment : Environment available) :
+    Environment required :=
+  match self with
+  | .empty => .empty
+  | .cons contains tail =>
+      .cons (contains.get environment) (tail.provide environment)
+
+end Projection
 
 /-- Project one required keyed row from a larger available keyed row. -/
 class CanProvide
     (available : List Entry)
     (required : List Entry) where
-  provide : Environment available -> Environment required
+  projection : Projection available required
 
 namespace CanProvide
 
-instance : CanProvide available [] where
-  provide _ := .empty
+def provide
+    (self : CanProvide available required)
+    (environment : Environment available) :
+    Environment required :=
+  self.projection.provide environment
 
-instance [Contains entry available] [CanProvide available entries] :
+instance : CanProvide available [] where
+  projection := .empty
+
+instance
+    [contains : Contains entry available]
+    [tail : CanProvide available entries] :
     CanProvide available (entry :: entries) where
-  provide environment :=
-    .cons (Contains.get environment) (CanProvide.provide environment)
+  projection := .cons contains tail.projection
 
 end CanProvide
 
