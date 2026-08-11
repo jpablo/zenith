@@ -137,6 +137,149 @@ is acceptable.
 Zenith can therefore use a smaller capability-intersection model. That model
 must not be presented as a complete encoding of Scala intersection types.
 
+## The Scala fragment required by Zenith
+
+Zenith targets a small, two-sorted fragment. It does not try to reproduce all
+Scala types. The two sorts prevent environment intersections and error unions
+from mixing when the effect API does not need that behavior.
+
+Let `Service` and `Failure` be nominal proper-type leaves. A leaf can contain
+type arguments, such as `Repository[User]`, but the core fragment treats the
+complete application as one leaf.
+
+```text
+Requirement R ::= Any | Service | And(R, R)
+Error       E ::= Nothing | Failure | Or(E, E)
+Effect      F ::= ZIO[R, E, A]
+```
+
+`And(R1, R2)` is Scala `R1 & R2`. `Or(E1, E2)` is Scala `E1 | E2`.
+
+`A` is an ordinary success type. It is not reified by this fragment.
+Its subtype or conversion relation comes from the host translation.
+Parametric code can use a symbolic leaf such as `Repository[A]`, provided that
+the translation gives that leaf a stable identity.
+
+This grammar is the **Zenith core profile**. It is the first formalization
+target. A later library-translation profile can add recursively interpreted
+type applications and declared constructor variance when a concrete library
+needs them.
+
+### Semantic model
+
+For the core profile, two leaves are in the base subtype relation only when
+they have the same stable identity. The model uses these finite sets:
+
+```text
+requirements(Any)       = {}
+requirements(Service)   = {Service}
+requirements(R1 & R2)   = requirements(R1) union requirements(R2)
+
+failures(Nothing)       = {}
+failures(Failure)       = {Failure}
+failures(E1 | E2)       = failures(E1) union failures(E2)
+```
+
+Environment subtyping uses reverse set inclusion because a value that has
+more services can meet a smaller requirement. Error subtyping uses ordinary
+set inclusion:
+
+```text
+R1 <: R2  exactly when  requirements(R1) includes requirements(R2)
+E1 <: E2  exactly when  failures(E1) is included in failures(E2)
+```
+
+This gives `&` the Scala greatest-lower-bound rules and gives `|` the dual
+least-upper-bound rules. It also gives the required identities:
+
+```text
+R & Any     =:= R
+R & R       =:= R
+E | Nothing =:= E
+E | E       =:= E
+```
+
+Both operators are associative and commutative up to mutual subtyping. A
+canonical representation can make the equivalent forms exactly equal by
+sorting the leaves and removing duplicates.
+
+The effect relation follows the three variances of `ZIO[-R, +E, +A]`:
+
+```text
+R2 <: R1    E1 <: E2    A1 <: A2
+---------------------------------
+ZIO[R1, E1, A1] <: ZIO[R2, E2, A2]
+```
+
+Composition computes both bounds:
+
+```text
+ZIO[R1, E1, A]    A -> ZIO[R2, E2, B]
+---------------------------------------
+       ZIO[R1 & R2, E1 | E2, B]
+```
+
+The official Scala rules make `&` a greatest lower bound and `|` a least
+upper bound. The set model above is a project specification inferred from
+those rules. It is not a claim that Scala implements all types as sets.
+
+### Required proof obligations
+
+An implementation of the core profile must establish these properties:
+
+1. `<:` is reflexive and transitive for each sort.
+2. Mutual subtyping is an equivalence relation.
+3. `R1 & R2` is a greatest lower bound.
+4. `E1 | E2` is a least upper bound.
+5. Normalization preserves meaning and is idempotent.
+6. Equivalent expressions have the same normal form.
+7. Environment projection and error injection agree with `<:`.
+8. Effect adaptation is contravariant in `R` and covariant in `E` and `A`.
+
+Items 1 through 6 define the type algebra. Items 7 and 8 connect that algebra
+to runtime values.
+
+### Mapping to the current Zenith implementation
+
+| Core-profile concept | Current Zenith representation |
+|---|---|
+| `Any` requirement | `Services[]`, or `Unit` in the product environment |
+| `R1 & R2` | normalized service-row merge |
+| `R1 <: R2` | `Environment.CanProvide R1 R2` |
+| `Nothing` error | `Empty` |
+| `E1 | E2` | normalized nested `Sum` |
+| `E1 <: E2` | `ErrorChannel.CanInject E1 E2` |
+| `ZIO[R, E, A]` | `Z R E A` |
+
+Stable service rows already implement canonical finite sets of service keys.
+The error channel has canonical order and duplicate removal during `zdo`
+elaboration, but its public representation is still a nested `Sum`. Direct
+`ErrorChannel.Join` and product `Environment.Meet` calls are less canonical
+than the inferred `zdo` forms.
+
+Zenith also permits explicit `CanConvert` instances. Such instances extend
+the leaf relation beyond stable-key equality. They are useful, but they are
+not yet part of the proved core algebra.
+
+### Explicit exclusions
+
+The core profile does not include:
+
+- arbitrary nesting of `&` and `|` in one type;
+- distribution between `&` and `|`;
+- member lookup or merging for intersection values;
+- one shared object identity for all intersection members;
+- nominal inheritance between different leaves;
+- recursively interpreted generic constructors or general variance rules;
+- refinements, structural types, path-dependent types, singleton types,
+  match types, type lambdas, wildcards, or capture sets;
+- Scala type-inference widening and visible-join rules; or
+- JVM erasure compatibility.
+
+These are extension points, not hidden promises. A translation of another
+Scala library must first list which of them it uses. The fragment should grow
+only from such a checked requirement.
+
 ## Candidate Lean encodings
 
 ### Products
@@ -391,16 +534,20 @@ lake exe githubIssueSync
 The application uses the stable service-key row. It has no explicit entry
 names and no manual product-layer construction.
 
-## Remaining production sequence
+## Work status and next step
 
-1. Define the Scala fragment that Zenith and other target libraries need.
-2. Formalize its subtype preorder, intersection rules, and equivalence laws.
-3. Decide whether promotion needs a proof-carrying row wrapper. Public row
-   syntax now rejects key-to-service conflicts, and every normalized row has
-   a checked `Row.Coherent` proof.
+The Zenith core profile above now defines the first target fragment. The
+checked keyed environment and layer API form part of the public `Z` library.
+Promotion did not add a proof-carrying wrapper. Public row syntax rejects
+key-to-service conflicts, and every normalized row has a checked
+`Row.Coherent` proof.
 
-The checked keyed environment and layer API now form part of the public `Z`
-library. Promotion did not add a proof-carrying wrapper.
+The next step is to formalize the core profile in
+[`intersection-types.lean`](intersection-types.lean). That model must define
+the two syntax sorts, their subtype relations, normalization, and obligations
+1 through 6. After those proofs exist, the production service-row laws can be
+related to the abstract requirement model. The error representation can then
+be checked against the same specification.
 
 The issue-sync case combines stable environments, normalized errors, ordered
 catch chains, and automatic layer composition in a larger program.
