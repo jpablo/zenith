@@ -10,6 +10,7 @@ lean_exe z {
   root := `Main
 }
 
+@[test_driver]
 lean_exe tests {
   root := `Tests
 }
@@ -19,7 +20,7 @@ lean_exe githubIssueSync {
 }
 
 lean_exe stableServiceKeys {
-  root := `Examples.StableServiceKeysDemo
+  root := `Examples.StableServiceKeysDemoMain
 }
 
 lean_lib Z

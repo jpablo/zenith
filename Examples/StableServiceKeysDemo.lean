@@ -1366,6 +1366,3 @@ def demo : IO Unit := do
   IO.println "Z.provide checks passed."
 
 end StableServiceKeys
-
-def main : IO Unit :=
-  StableServiceKeys.demo

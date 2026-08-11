@@ -21,7 +21,7 @@ The main goals are pedagogical:
 * Core data type and interpreter ✅
 * Fibers ✅
 * Environment ✅
-* Layers ❌
+* Layers and automatic keyed composition ✅
 
 ## Building and running examples
 
@@ -34,7 +34,13 @@ The main goals are pedagogical:
 lake build
 ```
 
-#### Recompile on chage
+#### Run all regression checks
+
+```bash
+lake test
+```
+
+#### Recompile on change
 
 Using the [`entr`](https://github.com/clibs/entr) file monitor
 
