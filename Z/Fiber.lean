@@ -91,7 +91,8 @@ namespace Fiber
   Note: Evaluated from the parent thread, by way of `Fiber.join`
   -/
   protected def awaitAsync (observer: Observer E A) : IO Unit := do
-    log self.fiberId s!"<-- Fiber.awaitAsync ({<- self.showState})" Color.yellow
+    if <- RuntimeLog.isEnabled then
+      log self.fiberId s!"<-- Fiber.awaitAsync ({<- self.showState})" Color.yellow
     let result? : Option (Option (Exit E A)) <- self.state.modifyGet fun
       | .created => (none, .created)
       | .running task observers => (some none, .running task (observer :: observers))
@@ -116,7 +117,8 @@ namespace Fiber
         | none => IO.unit
         | some observers =>
           self.completion.resolve result
-          log self.fiberId s!"Fiber.complete ({<- self.showState})" Color.yellow
+          if <- RuntimeLog.isEnabled then
+            log self.fiberId s!"Fiber.complete ({<- self.showState})" Color.yellow
           for observer in observers do
             log self.fiberId s!"complete: calling observers" Color.yellow
             try observer result

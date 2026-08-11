@@ -38,6 +38,7 @@ structure RunState (Rfiber) (E A E₁ A₁: Type) where
   environment  : Environment Rfiber
   fiberId      : FiberId
   initialTime  : Nat
+  loggingEnabled : Bool
 
 
 /-- Generates a new random id using `fiberId` as prefix  -/

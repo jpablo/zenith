@@ -68,6 +68,29 @@ def testAsyncRegistrationFailure : IO Unit := do
   | .failure (.die _) => pure ()
   | _ => failTest "an async registration failure did not complete the fiber"
 
+def testAsyncImmediateResumeWins : IO Unit := do
+  let program : Z Unit Empty Nat := Z.async fun callback => do
+    callback (.success 7)
+    callback (.success 8)
+    throw (IO.userError "registration failed after completion")
+  match <- runProgram "async-immediate-resume" program with
+  | .success 7 => pure ()
+  | _ => failTest "an immediate async effect did not keep its first exit"
+
+def testAsyncDelayedResume : IO Unit := do
+  let completed <- IO.mkRef false
+  let program : Z Unit Empty Nat := Z.async fun callback => do
+    let _ <- IO.asTask do
+      IO.sleep 5
+      completed.set true
+      callback (.success 42)
+    pure ()
+  match <- runProgram "async-delayed-resume" program with
+  | .success 42 => pure ()
+  | _ => failTest "unsafeRunSync did not wait for a delayed async exit"
+  assertTrue "unsafeRunSync returned before the delayed callback"
+    (<- completed.get)
+
 def testAsyncInterruption : IO Unit := do
   let pending : Z Unit Empty Nat := Z.async fun _ => pure ()
   let program : Z Unit Empty (Exit Empty Nat) := do
@@ -121,6 +144,7 @@ def testAsyncInterruptCancelerFailure : IO Unit := do
 
 private def failingAsyncDiagram : ExecutionDiagram (IO Unit) :=
   { ExecutionDiagram.empty with
+    enabled := true
     async := fun _ _ _ =>
       throw (IO.userError "asynchronous diagram write failed") }
 
@@ -191,10 +215,13 @@ def testInterpreterLoggingIsDisabledByDefault : IO Unit := do
     RuntimeLog.setEnabled true
     try
       log "logging-test" "enabled"
+      let _ <- Z.unsafeRunSync (Z.succeedNow ()) "logging-interpreter-test"
     finally
       RuntimeLog.setEnabled false
   assertTrue "runtime logging could not be enabled"
     (output.contains "[logging-test] enabled")
+  assertTrue "the interpreter did not use logging enabled before its run"
+    (output.contains "[runLoop]")
 
 def testFiberIdsAreUnique : IO Unit := do
   let ids <- IO.mkRef ({} : Std.HashSet String)
@@ -1236,6 +1263,8 @@ def main : IO Unit := do
   testExitEquality
   testCompleteBeforeTask
   testAsyncRegistrationFailure
+  testAsyncImmediateResumeWins
+  testAsyncDelayedResume
   testAsyncInterruption
   testAsyncInterruptCanceler
   testAsyncInterruptCancelerFailure

@@ -8,6 +8,7 @@ namespace RuntimeLog
 
 private initialize enabled : IO.Ref Bool <- IO.mkRef ENABLE_LOG
 
+/-- Set logging for fibers that start after this call. -/
 def setEnabled (value : Bool) : IO Unit :=
   enabled.set value
 

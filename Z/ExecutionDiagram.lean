@@ -2,6 +2,7 @@ import Z.Util
 import Z.Interruption
 
 structure ExecutionDiagram (A: Type) where
+  enabled               : Bool
   header                : A
   footer                : A
   errorHandler          : Option NodeId -> NodeId -> A
@@ -21,6 +22,7 @@ structure ExecutionDiagram (A: Type) where
 
 namespace ExecutionDiagram
   def empty: ExecutionDiagram (IO Unit) where
+    enabled                     := false
     header                      := IO.unit
     footer                      := IO.unit
     errorHandler _ _            := IO.unit

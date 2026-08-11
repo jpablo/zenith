@@ -45,6 +45,8 @@ def GraphViz.graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
 
   let diagram: ExecutionDiagram (IO Unit) := {
 
+    enabled := true
+
     header := println "digraph D {  node [shape=box]"
 
     footer := println "}"
