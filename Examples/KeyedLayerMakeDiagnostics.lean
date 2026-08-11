@@ -279,11 +279,12 @@ private def unusedCandidate :
 
 private structure IndexedService (index : Nat) : Type 1 where
   marker : Unit
+  deriving ServiceKey
 
-/--
-error: a service key currently supports only type arguments
--/
-#guard_msgs (error, substring := true) in
-service_key unsupportedIndexedEntry : IndexedService 1
+service_key indexedEntryOne : IndexedService 1
+
+service_key indexedEntryTwo : IndexedService 2
+
+example : Row.Fresh indexedEntryTwo.key [indexedEntryOne] := by decide
 
 end StableServiceKeys.KeyedLayerMakeDiagnostics

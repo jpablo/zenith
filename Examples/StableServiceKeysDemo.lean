@@ -121,6 +121,65 @@ example : ServiceRow[Repository User, Repository Issue] =
 example : Services[Repository User, Repository Issue] =
     Environment ParameterizedEntries := rfl
 
+/-! Value-indexed service types use stable value-key witnesses. -/
+
+structure ShardedRepository (shard : Nat) : Type 1 where
+  label : String
+  deriving ServiceKey
+
+service_key shardOneEntry : ShardedRepository 1
+
+service_key shardTwoEntry : ShardedRepository 2
+
+example : shardOneEntry.key =
+    Key.named "StableServiceKeys" "ShardedRepository" [
+      Key.value
+        (Key.named "" "Nat" [])
+        (Key.named "" "1" [])
+    ] := rfl
+
+example : ServiceKey (ShardedRepository 1) :=
+  serviceKey[ShardedRepository 1]
+
+example (shard : Nat) : ServiceKey (ShardedRepository shard) :=
+  inferInstance
+
+example : Row.Fresh shardTwoEntry.key [shardOneEntry] := by decide
+
+example : ServiceRow[ShardedRepository 2, ShardedRepository 1] =
+    [shardOneEntry, shardTwoEntry] := rfl
+
+inductive Region where
+  | east
+  | west
+
+instance : ServiceValueKey Region where
+  key
+    | .east => Key.named "StableServiceKeys" "Region.east" []
+    | .west => Key.named "StableServiceKeys" "Region.west" []
+
+structure RegionalRepository (region : Region) : Type 1 where
+  label : String
+  deriving ServiceKey
+
+service_key eastRegionalRepositoryEntry : RegionalRepository .east
+
+service_key westRegionalRepositoryEntry : RegionalRepository .west
+
+example : Row.Fresh eastRegionalRepositoryEntry.key
+    [westRegionalRepositoryEntry] := by decide
+
+inductive IndexedService : Nat -> Type 1 where
+  | at (index : Nat) : IndexedService index
+  deriving ServiceKey
+
+service_key indexedServiceOneEntry : IndexedService 1
+
+service_key indexedServiceTwoEntry : IndexedService 2
+
+example : Row.Fresh indexedServiceTwoEntry.key
+    [indexedServiceOneEntry] := by decide
+
 abbrev Services : List Entry.{1} :=
   ServiceRow[Config, Github, Store]
 
@@ -167,11 +226,25 @@ def issueRepository : Repository Issue := {
   value := { number := 42 }
 }
 
+def shardOneRepository : ShardedRepository 1 := {
+  label := "primary"
+}
+
+def shardTwoRepository : ShardedRepository 2 := {
+  label := "replica"
+}
+
 def userRepositoryLayer :=
   KeyedLayer.succeed userRepository
 
 def issueRepositoryLayer :=
   KeyedLayer.succeed issueRepository
+
+def shardOneRepositoryLayer :=
+  KeyedLayer.succeed shardOneRepository
+
+def shardTwoRepositoryLayer :=
+  KeyedLayer.succeed shardTwoRepository
 
 def genericServiceLayer
     (Service : Type 1)
@@ -337,6 +410,36 @@ def checkParameterizedServiceKeys : IO Unit := do
   | some (.success "Ada:42") => pure ()
   | _ => throw (IO.userError
       "Parameterized service-key provision failed.")
+
+def valueIndexedProgram := zdo
+  let primary <- Z.serviceWith[ShardedRepository 1]
+    (fun repository => repository.label)
+  let replica <- Z.serviceWith[ShardedRepository 2]
+    (fun repository => repository.label)
+  pure s!"{primary}:{replica}"
+
+example : Z
+    (Services[ShardedRepository 1, ShardedRepository 2])
+    Empty
+    String :=
+  valueIndexedProgram
+
+def automaticallyProvidedValueIndexed :=
+  Z.provide valueIndexedProgram [
+    shardTwoRepositoryLayer,
+    shardOneRepositoryLayer
+  ]
+
+example : Z (Services[]) Empty String :=
+  automaticallyProvidedValueIndexed
+
+def checkValueIndexedServiceKeys : IO Unit := do
+  let effect := automaticallyProvidedValueIndexed.provideEnvironment
+    Services.empty
+  match ← Z.unsafeRunSync effect "stable-value-indexed-service-keys" with
+  | some (.success "primary:replica") => pure ()
+  | _ => throw (IO.userError
+      "Value-indexed service-key provision failed.")
 
 def servicesForward : Builder Services :=
   Builder.empty
@@ -1335,6 +1438,8 @@ def demo : IO Unit := do
       throw (IO.userError "The stable service-key checks returned no result.")
   checkParameterizedServiceKeys
   IO.println "Parameterized service-key checks passed."
+  checkValueIndexedServiceKeys
+  IO.println "Value-indexed service-key checks passed."
   checkKeyedLayerSuccess
   checkKeyedLayerAcquisitionFailure
   checkKeyedLayerProgramFailure

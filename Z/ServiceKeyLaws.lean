@@ -13,6 +13,20 @@ definitionally equal `Service` fields. This distinction is necessary because
 
 namespace Z
 
+namespace Key
+
+/-- A marked value argument cannot equal a named type-constructor key. -/
+theorem value_ne_named
+    (type payload : Key)
+    (owner name : String)
+    (arguments : List Key) :
+    Key.value type payload ≠ Key.named owner name arguments := by
+  intro equality
+  have partsEquality := congrArg Key.parts equality
+  simp at partsEquality
+
+end Key
+
 namespace Row
 
 /-- Two rows contain exactly the same qualified service keys. -/

@@ -492,6 +492,31 @@ not pass the witness. Lean finds the derived instance. For a type that cannot
 use a deriving clause, `serviceKey[ExistingType]` creates the same canonical
 witness for a local or named instance.
 
+Value-indexed services use `ServiceValueKey`. The class supplies one stable,
+injective key function for an index type. Zenith includes instances for
+`Nat`, `Int`, `Bool`, `Char`, and `String`. Applications can define an
+instance for another index type:
+
+```lean
+inductive Region where
+  | east
+  | west
+
+instance : ServiceValueKey Region where
+  key
+    | .east => Key.named "MyApp" "Region.east" []
+    | .west => Key.named "MyApp" "Region.west" []
+
+structure RegionalRepository (region : Region) : Type 1 where
+  label : String
+  deriving ServiceKey
+```
+
+The key representation marks value arguments explicitly and includes the
+index type key. Thus, a value payload cannot be confused with a type argument
+or with a value of another type. `deriving ServiceKey` adds the required
+`ServiceValueKey` constraints for value parameters and inductive indices.
+
 The stable environment registers `Row.normalize` with the general `zdo`
 collector through `[zdo_row_environment Row.normalize]`. During elaboration,
 the collector groups all requirements for that environment, combines their
@@ -515,6 +540,7 @@ The public implementation provides these checked properties:
   idempotent at that boundary.
 - `KeyPart` and `Key` have checked transitive comparators whose `.eq` result
   is equivalent to logical key equality.
+- A marked value argument cannot equal a named type-constructor key.
 - Normalization is exactly idempotent. Compatible rows with the same keys
   normalize to exact `List Entry` equality.
 - Coherent permutations have exactly equal normal forms. Merge has exact
@@ -545,6 +571,8 @@ The public implementation provides these checked properties:
   Thus, it stays distinct from `Repository Issue`.
 - Nested concrete applications such as `Repository (List User)` have
   unambiguous structural keys.
+- Value parameters and inductive indices use stable `ServiceValueKey`
+  functions and stay distinct in normalized rows.
 - Generic definitions can use `ServiceRow[Repository A]`,
   `Z.serviceWith[Repository A]`, and `Services.get[Repository A]` when they
   have `[ServiceKey A]`.
@@ -620,9 +648,8 @@ The command elaborates the complete service type. It does not use formatted
 type text. It converts the normalized type expression to a prefix sequence of
 named constructors. Every constructor records its argument count, so the
 encoding preserves the shape of nested applications. An abstract type uses
-its `ServiceKey` witness. Value indices do not yet have stable keys. The
-deriving handler rejects indexed families and constructors with value
-parameters.
+its `ServiceKey` witness. A value parameter or index uses the
+`ServiceValueKey` function for its type.
 
 The entry stores a service type as data. Thus, a row uses one universe level
 above its service ceiling. Low-universe services must also be placed at that
@@ -785,8 +812,8 @@ successful provision, inferred typed failures, parallel sibling acquisition,
 fail-fast sibling cancellation, layer acquisition failure, program failure,
 and reverse-order release.
 
-The key elaborator accepts named service types and abstract types that have a
-`ServiceKey` witness. It does not yet define identities for value indices.
+The key elaborator accepts named service types, abstract types that have a
+`ServiceKey` witness, and value indices that have a `ServiceValueKey` witness.
 Horizontal and vertical layer composition now handle different keyed inputs
 and errors, and pass-through uses a strict duplicate-key policy. Shared graphs
 work with an explicit scope,

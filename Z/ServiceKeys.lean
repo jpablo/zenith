@@ -6,14 +6,16 @@ import Z.Do
 Stable, normalized service rows and keyed layers.
 
 The public `Z` module imports this implementation. Its declarations are in
-the `Z` namespace. Service types receive structural keys, and normalized rows
-provide canonical environment types.
+the `Z` namespace. Service types receive structural keys, value indices use
+stable key witnesses, and normalized rows provide canonical environment
+types.
 -/
 
 namespace Z
 
 /-- One node in the prefix encoding of a service type. -/
 structure KeyPart where
+  isValue : Bool
   owner : String
   name : String
   argumentCount : Nat
@@ -21,13 +23,15 @@ structure KeyPart where
 
 namespace KeyPart
 
-/-- Compare key nodes by owner, name, and argument count. -/
+/-- Compare key nodes by kind, owner, name, and argument count. -/
 @[reducible] def compareKeyPart : KeyPart → KeyPart → Ordering :=
   compareLex
-    (compareOn KeyPart.owner)
+    (compareOn KeyPart.isValue)
     (compareLex
-      (compareOn KeyPart.name)
-      (compareOn KeyPart.argumentCount))
+      (compareOn KeyPart.owner)
+      (compareLex
+        (compareOn KeyPart.name)
+        (compareOn KeyPart.argumentCount)))
 
 instance : Ord KeyPart where
   compare := compareKeyPart
@@ -35,22 +39,27 @@ instance : Ord KeyPart where
 instance : Std.TransOrd KeyPart := by
   change Std.TransCmp
     (compareLex
-      (compareOn KeyPart.owner)
+      (compareOn KeyPart.isValue)
       (compareLex
-        (compareOn KeyPart.name)
-        (compareOn KeyPart.argumentCount)))
+        (compareOn KeyPart.owner)
+        (compareLex
+          (compareOn KeyPart.name)
+          (compareOn KeyPart.argumentCount))))
   infer_instance
 
 instance : Std.LawfulEqOrd KeyPart where
   eq_of_compare {a b} equality := by
     simp only [compare, compareKeyPart, compareLex_eq_eq, compareOn]
       at equality
-    obtain ⟨ownerEquality, nameEquality, argumentCountEquality⟩ :=
-      equality
+    obtain ⟨kindEquality, ownerEquality, nameEquality,
+      argumentCountEquality⟩ := equality
+    change compare a.isValue b.isValue = .eq at kindEquality
     change compare a.owner b.owner = .eq at ownerEquality
     change compare a.name b.name = .eq at nameEquality
     change compare a.argumentCount b.argumentCount = .eq
       at argumentCountEquality
+    have kindEquality :=
+      Std.LawfulEqOrd.eq_of_compare kindEquality
     have ownerEquality :=
       Std.LawfulEqOrd.eq_of_compare ownerEquality
     have nameEquality :=
@@ -96,10 +105,20 @@ instance : Std.LawfulEqOrd Key where
     (name : String)
     (arguments : List Key) : Key :=
   ⟨{
+      isValue := false
       owner
       name
       argumentCount := arguments.length
     } :: arguments.flatMap (fun argument => argument.parts)⟩
+
+/-- Mark one type key and one value payload as a value argument. -/
+@[reducible] def value (type : Key) (payload : Key) : Key :=
+  ⟨{
+      isValue := true
+      owner := ""
+      name := ""
+      argumentCount := 2
+    } :: List.append type.parts payload.parts⟩
 
 end Key
 
@@ -116,6 +135,34 @@ private abbrev create
   ⟨key⟩
 
 end ServiceKey
+
+/-- A stable, injective key function for values used in service types. -/
+class ServiceValueKey (Value : Type u) where
+  key : Value -> Key
+
+namespace ServiceValueKey
+
+private def textPayload (value : String) : Key :=
+  Key.named "" value []
+
+instance : ServiceValueKey Nat where
+  key value := textPayload (toString value)
+
+instance : ServiceValueKey Int where
+  key value := textPayload (toString value)
+
+instance : ServiceValueKey Bool where
+  key
+    | false => textPayload "false"
+    | true => textPayload "true"
+
+instance : ServiceValueKey Char where
+  key value := textPayload (toString value.toNat)
+
+instance : ServiceValueKey String where
+  key := textPayload
+
+end ServiceValueKey
 
 /-- A stable qualified key and the service type assigned to it. -/
 structure Entry.{u} where
@@ -807,7 +854,8 @@ def withServiceZEntry
 /-!
 `service_key entryName : ServiceType` resolves `ServiceType` and uses the full
 Lean declaration names of its constructor and type arguments. An abstract type
-argument uses its `ServiceKey` witness. Normal code does not write an owner
+argument uses its `ServiceKey` witness. A value argument uses the
+`ServiceValueKey` function for its type. Normal code does not write an owner
 string or construct a key.
 -/
 
@@ -864,11 +912,20 @@ private partial def keySyntaxForType
   let mut argumentKeys : Array (TSyntax `term) := #[]
   for argument in type.getAppArgs do
     let argumentType ← whnf (← inferType argument)
-    let .sort _ := argumentType |
-      throwErrorAt reference
-        "a service key currently supports only type arguments"
-    argumentKeys := argumentKeys.push
-      (← keySyntaxForType reference argument)
+    if argumentType.isSort then
+      argumentKeys := argumentKeys.push
+        (← keySyntaxForType reference argument)
+    else
+      unless ← isType argumentType do
+        throwErrorAt reference
+          "a service value argument must have a type"
+      let argumentSyntax ← PrettyPrinter.delab argument
+      let argumentTypeSyntax ← PrettyPrinter.delab argumentType
+      let typeKey ← keySyntaxForType reference argumentType
+      let payload ← `(ServiceValueKey.key
+        (Value := $argumentTypeSyntax) $argumentSyntax)
+      argumentKeys := argumentKeys.push
+        (← `(Key.value $typeKey $payload))
   let owner := Syntax.mkStrLit <| match owner with
     | .anonymous => ""
     | owner => owner.toString
@@ -891,24 +948,46 @@ private def deriveServiceKey
   let inductiveValue ← getConstInfoInduct typeName
   if inductiveValue.all.length != 1 then
     throwError "mutually inductive service-key derivation is not supported"
-  if inductiveValue.numIndices != 0 then
-    throwError "indexed service-key derivation is not supported"
   elabCommand <| ← liftTermElabM do
     forallTelescopeReducing inductiveValue.type fun parameters _ => do
-      let typeParameters ← parameters.filterM (isType ·)
-      unless typeParameters.size == parameters.size do
-        throwError
-          "service-key derivation supports only type parameters"
-      let instanceBinders ← typeParameters.mapM fun parameter => do
-        let parameterName :=
-          mkIdent (← getFVarLocalDecl parameter).userName
-        `(bracketedBinderF| [ServiceKey $parameterName:ident])
-      let parameterNames ← parameters.mapM fun parameter =>
-        return mkIdent (← getFVarLocalDecl parameter).userName
-      let serviceType ←
-        `(@$(mkCIdent typeName) $parameterNames*)
-      `(variable $instanceBinders* in
-        instance : ServiceKey $serviceType := serviceKey[$serviceType])
+      let mut localContext ← getLCtx
+      for index in [0:parameters.size] do
+        let parameter := parameters[index]!
+        let userName := Name.mkSimple s!"serviceKeyParameter{index}"
+        localContext := localContext.setUserName
+          parameter.fvarId! userName
+      withLCtx' localContext do
+        let mut instanceBinders := #[]
+        let mut valueTypes : Array Expr := #[]
+        for parameter in parameters do
+          if ← isType parameter then
+            let parameterName :=
+              mkIdent (← getFVarLocalDecl parameter).userName
+            let binder ←
+              `(bracketedBinderF| [ServiceKey $parameterName:ident])
+            instanceBinders := instanceBinders.push binder
+          else
+            let parameterType ← whnf (← inferType parameter)
+            unless ← isType parameterType do
+              throwError
+                "a service value parameter must have a type"
+            let mut alreadyRequired := false
+            for existing in valueTypes do
+              if ← isDefEq existing parameterType then
+                alreadyRequired := true
+            unless alreadyRequired do
+              let parameterTypeSyntax ← PrettyPrinter.delab parameterType
+              let binder ←
+                `(bracketedBinderF|
+                  [ServiceValueKey $parameterTypeSyntax])
+              instanceBinders := instanceBinders.push binder
+              valueTypes := valueTypes.push parameterType
+        let parameterNames ← parameters.mapM fun parameter =>
+          return mkIdent (← getFVarLocalDecl parameter).userName
+        let serviceType ←
+          `(@$(mkCIdent typeName) $parameterNames*)
+        `(variable $instanceBinders* in
+          instance : ServiceKey $serviceType := serviceKey[$serviceType])
   return true
 
 initialize
