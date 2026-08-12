@@ -27,6 +27,7 @@ structure Fiber (E A: Type) where
   fiberId    : FiberId
   state      : IO.Ref (FiberState E A)
   interrupted: IO.Ref Bool
+  interruptDelivered : IO.Ref Bool
   interruptHandler : IO.Ref (IO Unit)
   task       : IO.Ref (Option (Task (Except IO.Error Unit)))
   completion : IO.Promise (Exit E A)
@@ -42,6 +43,7 @@ namespace Fiber
     return Fiber.mk
       fiberId
       (<- IO.mkRef .created)
+      (<- IO.mkRef false)
       (<- IO.mkRef false)
       (<- IO.mkRef IO.unit)
       (<- IO.mkRef none)
@@ -80,6 +82,7 @@ namespace Fiber
         return ()
 
   def requestInterrupt : IO Unit := do
+    self.interruptDelivered.set false
     self.interrupted.set true
     (<- self.interruptHandler.get)
 
@@ -144,10 +147,11 @@ namespace Fiber
   
 
   def toInterruption : IO Interruption := do
-    return Interruption.mk 
-      self.interrupted 
-      (isInterruptible := <- IO.mkRef true) 
+    return Interruption.mk
+      (interrupted := self.interrupted)
+      (isInterruptible := <- IO.mkRef true)
       (isInterrupting := false)
-      self.interruptHandler
+      (interruptDelivered := self.interruptDelivered)
+      (interruptHandler := self.interruptHandler)
 
 end Fiber

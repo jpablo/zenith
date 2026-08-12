@@ -13,47 +13,72 @@ namespace ZCore
 
 private initialize nextFiberSerial : IO.Ref Nat ← IO.mkRef 0
 
-private inductive AsyncResumeState (E A : Type)
+private inductive AsyncResumeState
   | registering
-  | synchronous (exit : Exit E A)
+  | synchronous (deliver : IO Unit)
   | suspended
   | resumed
 
-private structure AsyncResumeGate (E A : Type) where
-  state : IO.Ref (AsyncResumeState E A)
-  complete : Exit E A → IO Unit
+private structure AsyncResumeGate where
+  state : IO.Ref AsyncResumeState
 
-@[inline] private def AsyncResumeGate.create
-    (complete : Exit E A → IO Unit) : IO (AsyncResumeGate E A) := do
-  let state ← IO.mkRef
-    (AsyncResumeState.registering : AsyncResumeState E A)
-  pure { state, complete }
+@[inline] private def AsyncResumeGate.create : IO AsyncResumeGate := do
+  pure { state := ← IO.mkRef .registering }
 
+/--
+Deliver a resumption. A resumption produced while `register` is still running
+is replayed by `finishRegistration` on the fiber's own task, so a synchronous
+completion never pays for a task hop.
+-/
 @[inline] private def AsyncResumeGate.resume
-    (self : AsyncResumeGate E A)
-    (exit : Exit E A) : IO Unit := do
+    (self : AsyncResumeGate)
+    (deliver : IO Unit) : IO Unit := do
   let runInTask ← self.state.modifyGet fun
-    | .registering => (false, .synchronous exit)
+    | .registering => (false, .synchronous deliver)
     | .suspended => (true, .resumed)
     | current => (false, current)
   if runInTask then
-    let _ ← IO.asTask (self.complete exit)
+    let _ ← IO.asTask deliver
+    pure ()
+
+/--
+Deliver a resumption that cannot wait for `register` to return, such as an
+interruption reaching a fiber whose registration blocks.
+-/
+@[inline] private def AsyncResumeGate.resumeNow
+    (self : AsyncResumeGate)
+    (deliver : IO Unit) : IO Unit := do
+  let runInTask ← self.state.modifyGet fun
+    | .registering => (true, .resumed)
+    | .suspended => (true, .resumed)
+    | current => (false, current)
+  if runInTask then
+    let _ ← IO.asTask deliver
     pure ()
 
 @[inline] private def AsyncResumeGate.finishRegistration
-    (self : AsyncResumeGate E A) : IO Unit := do
-  let synchronousExit ← self.state.modifyGet fun
-    | .synchronous exit => (some exit, .resumed)
+    (self : AsyncResumeGate) : IO Unit := do
+  let synchronousDelivery ← self.state.modifyGet fun
+    | .synchronous deliver => (some deliver, .resumed)
     | .registering => (none, .suspended)
     | current => (none, current)
-  match synchronousExit with
-  | some exit => self.complete exit
+  match synchronousDelivery with
+  | some deliver => deliver
   | none => pure ()
+
+/-- Run interpreter bookkeeping and report the `IO.Error` it may raise. -/
+@[inline] private def captureDefect (action : IO Unit) : IO (Option IO.Error) := do
+  try
+    action
+    pure none
+  catch ioError =>
+    pure (some ioError)
 
 private def freshFiberId (parentFiberId : FiberId) (name : String) : IO FiberId := do
   let serial ← nextFiberSerial.modifyGet fun current =>
     (current, current + 1)
-  pure s!"{parentFiberId}-{name}-{serial}"
+  let scope := if parentFiberId.isEmpty then name else s!"{parentFiberId}-{name}"
+  pure s!"{scope}-{serial}"
 
 private def interruptChildren (fiberInfos : IO.Ref (List FiberInfo)) : IO Unit := do
   let children ← fiberInfos.get
@@ -78,11 +103,9 @@ private def terminateWithDefect
       interruptChildren fiberInfos
       pure error
     catch cleanupError =>
-      pure cleanupError
-  try
-    completeStackWithDefect stack finalError
-  catch _ =>
-    pure ()
+      pure <| userError
+        s!"{error}\nwhile interrupting the children of the failing fiber: {cleanupError}"
+  completeStackWithDefect stack finalError
 
 @[inline] private def freshDiagramNodeId
     (diagram : ExecutionDiagram (IO Unit))
@@ -155,6 +178,7 @@ mutual
       interrupted := (← IO.mkRef false)
       isInterruptible := (← IO.mkRef true)
       isInterrupting := false
+      interruptDelivered := (← IO.mkRef false)
       interruptHandler := (← IO.mkRef IO.unit)
     }
     let loggingEnabled ← RuntimeLog.isEnabled
@@ -218,10 +242,14 @@ mutual
       self.runWithInterruption startedAt state
     else
       -- Write the Graphviz node for the current effect.
-      if diagram.enabled then
-        diagram.currentNode
-          self.label (toString self) self.nodeId state.interruption
-          state.initialTime startedAt (Stack.size state.stack) color
+      let diagramDefect ← captureDefect do
+        if diagram.enabled then
+          diagram.currentNode
+            self.label (toString self) self.nodeId state.interruption
+            state.initialTime startedAt (Stack.size state.stack) color
+      if let some ioError := diagramDefect then
+        runWithErrorHandler (.die ioError) state
+        return
 
       /-
       Match on `validEnv` to propagate the instance into each GADT branch.
@@ -267,48 +295,69 @@ mutual
 
         -- Important special case: `registerCallback` can be `Fiber.await`.
         | .async register _, _ => do
-          let resumeGate ← AsyncResumeGate.create fun exit =>
+          let resumeGate ← AsyncResumeGate.create
+          let deliver (exit : Exit E A) : IO Unit :=
             completeAsyncExit self.nodeId startedAt exit state
+          let deliverInterrupt : IO Unit := do
+            let interruption ← state.interruption.beginUnwind
+            completeAsyncExit self.nodeId startedAt (.failure .interrupt)
+              { state with interruption }
           let interrupt := do
             if ← state.interruption.shouldInterrupt then
-              resumeGate.resume (.failure .interrupt)
+              resumeGate.resumeNow deliverInterrupt
           let callback (exit : Exit E A) := do
             if ← state.interruption.shouldInterrupt then
-              resumeGate.resume (.failure .interrupt)
+              resumeGate.resume deliverInterrupt
             else
-              resumeGate.resume exit
+              resumeGate.resume (deliver exit)
           state.interruption.interruptHandler.set interrupt
           if ← state.interruption.shouldInterrupt then
-            interrupt
+            resumeGate.resume deliverInterrupt
           else
             try register callback
-            catch ioError => resumeGate.resume (.failure (.die ioError))
+            catch ioError =>
+              resumeGate.resume (deliver (.failure (.die ioError)))
           resumeGate.finishRegistration
 
         | .asyncInterrupt register _, _ => do
-          let resumeGate ← AsyncResumeGate.create fun exit =>
-            completeAsyncExit self.nodeId startedAt exit state
+          let resumeGate ← AsyncResumeGate.create
           let cancelReady ← IO.Promise.new (α := IO Unit)
+          let cancelClaimed ← IO.mkRef false
+          -- Only the first claimant may run the user cancellation action.
+          let claimCancel : IO Bool :=
+            cancelClaimed.modifyGet fun claimed => (!claimed, true)
+          let deliver (exit : Exit E A) : IO Unit :=
+            completeAsyncExit self.nodeId startedAt exit state
+          let deliverUnwind (exit : Exit E A) : IO Unit := do
+            let interruption ← state.interruption.beginUnwind
+            completeAsyncExit self.nodeId startedAt exit
+              { state with interruption }
+          let runCancel : IO Unit := do
+            match ← IO.wait cancelReady.result? with
+            | some cancel =>
+                try
+                  cancel
+                  resumeGate.resumeNow (deliverUnwind (.failure .interrupt))
+                catch ioError =>
+                  resumeGate.resumeNow (deliverUnwind (.failure (.die ioError)))
+            | none =>
+                resumeGate.resumeNow (deliverUnwind (.failure .interrupt))
           let interrupt := do
             if ← state.interruption.shouldInterrupt then
-              match ← IO.wait cancelReady.result? with
-              | some cancel =>
-                  try
-                    cancel
-                    resumeGate.resume (.failure .interrupt)
-                  catch ioError =>
-                    resumeGate.resume (.failure (.die ioError))
-              | none =>
-                  resumeGate.resume (.failure .interrupt)
+              if ← claimCancel then
+                -- `runCancel` waits for a registration that may still block.
+                let _ ← IO.asTask runCancel
+                pure ()
           let callback (exit : Exit E A) := do
             if ← state.interruption.shouldInterrupt then
               pure ()
-            else
-              resumeGate.resume exit
+            else if ← claimCancel then
+              resumeGate.resume (deliver exit)
           state.interruption.interruptHandler.set interrupt
           if ← state.interruption.shouldInterrupt then
             cancelReady.resolve IO.unit
-            interrupt
+            if ← claimCancel then
+              resumeGate.resume (deliverUnwind (.failure .interrupt))
           else
             try
               let cancel ← register callback
@@ -318,9 +367,10 @@ mutual
             catch ioError =>
               cancelReady.resolve IO.unit
               if ← state.interruption.shouldInterrupt then
-                resumeGate.resume (.failure .interrupt)
-              else
-                resumeGate.resume (.failure (.die ioError))
+                if ← claimCancel then
+                  resumeGate.resume (deliverUnwind (.failure .interrupt))
+              else if ← claimCancel then
+                resumeGate.resume (deliver (.failure (.die ioError)))
           resumeGate.finishRegistration
 
         | ZCore.fork effect name _, _ => do
@@ -386,13 +436,17 @@ mutual
       (startedAt : Nat)
       (exit : Exit E A)
       (state : RunState Rfiber E A E₁ A₁) : IO Unit := do
-    try
+    let diagramDefect ← captureDefect do
       state.interruption.interruptHandler.set IO.unit
       if diagram.enabled then
         diagram.async state.fiberId nodeId startedAt
-      match exit with
-      | .failure cause => runWithErrorHandler cause state
-      | .success value => continueOrComplete value state
+    try
+      match diagramDefect with
+      | some ioError => runWithErrorHandler (.die ioError) state
+      | none =>
+        match exit with
+        | .failure cause => runWithErrorHandler cause state
+        | .success value => continueOrComplete value state
     catch ioError =>
       terminateWithDefect state.fiberInfos state.stack ioError
 
@@ -414,7 +468,10 @@ mutual
         if diagram.enabled then
           diagram.errorHandler parentId? nextEffect.nodeId
         nextEffect.runLoop (validEnv := validEnv)
-          { state with stack := tail, environment := env }
+          { state with
+            interruption := state.interruption.endUnwind
+            stack := tail
+            environment := env }
 
       -- The error type is unchanged, so continue with the stack tail.
       | .more _ none (some (.up eq_E_E₁)) tail .. => do
@@ -476,9 +533,10 @@ mutual
       diagram.interruption
         interruptedBoxId nextEffect.nodeId startedAt state.initialTime
 
+    let interruption ← state.interruption.beginUnwind
     nextEffect.runLoop
       { state with
-        interruption := {state.interruption with isInterrupting := true}
+        interruption := interruption
         stack := .more
           (fun _ : Empty => self)
           none
