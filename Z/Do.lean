@@ -20,13 +20,15 @@ The package that owns the environment supplies its normalizer and projection
 instances. `Z.Do` does not depend on that package.
 
 Without a complete expected type, plain `zdo` also collects, normalizes, and
-joins action errors. A native `catch` gets private environment and error
-inference scopes for its body and handler. The body error is handled, so only
-the handler error contributes to the enclosing block. A native `finally` gets
-another private scope. Its environment and error are combined with the
-protected effect, and it runs before forwarded control resumes.
+joins action errors.
 
-The private `zdo_action%` elaborator adapts terminal actions before Lean fixes
+Every spelling gives a native `catch` private environment and error inference
+scopes for its body and handler. The body error is handled, so only the handler
+error contributes to the enclosing block. A native `finally` gets another
+private scope. Its environment and error are combined with the protected
+effect, and it runs before forwarded control resumes.
+
+The private `zdo_collect%` elaborator adapts terminal actions before Lean fixes
 their branch type. This supports bare terminal actions in control-flow blocks.
 -/
 
@@ -95,52 +97,8 @@ private def zDoOps (expected : ExpectedZ) : DoOps where
   splitMonadApp? := DoOps.default.splitMonadApp?
   mkMonadApp := mkActionType
 
-private def isPureAction (action : Term) : TermElabM Bool := do
-  match action with
-  | `(pure $_) => return true
-  | _ => return false
-
-syntax (name := zdoAction) "zdo_action%[" term "," term "]" term : term
 syntax (name := zdoCollectAction)
   "zdo_collect%[" term "," term "," term "," term "," term "]" term : term
-
-@[term_elab zdoAction]
-private def elabZDoAction : TermElab := fun stx expectedType? => do
-  let `(zdo_action%[$targetEnvironmentSyntax, $targetErrorSyntax] $action) := stx |
-    throwUnsupportedSyntax
-  Term.tryPostponeIfNoneOrMVar expectedType?
-  let some expectedType := expectedType? | unreachable!
-  let expectedType ← instantiateMVars expectedType
-  let some expected ← expectedZ? expectedType | throwErrorAt stx
-    "internal `zdo` action requires an expected `Z R E A` type"
-  let targetEnvironment ← Term.elabType targetEnvironmentSyntax
-  let targetError ← Term.elabType targetErrorSyntax
-  let targetType :=
-    mkZType expected.level targetEnvironment targetError expected.success
-  let level ← mkFreshLevelMVar
-  let environment ← mkFreshExprMVar (mkSort level.succ)
-  let error ← mkFreshExprMVar (mkSort (.succ .zero))
-  let actionType := mkZType level environment error expected.success
-  let action ← Term.elabTerm action actionType
-  let some actual ← expectedZ? (← inferType action) | throwErrorAt stx
-    "a `zdo` action must have type `Z R E A`"
-  if actual.environment.isMVar then
-    discard <| isDefEq actual.environment targetEnvironment
-  if actual.error.isMVar then
-    discard <| isDefEq actual.error targetError
-  let sourceEnvironment ← instantiateMVars actual.environment
-  let sourceError ← instantiateMVars actual.error
-  let success ← instantiateMVars actual.success
-  let adapted ← mkAppOptM ``Z.into #[
-    some targetEnvironment,
-    some sourceEnvironment,
-    some sourceError,
-    some targetError,
-    some success,
-    none,
-    none,
-    some action]
-  Term.ensureHasType targetType adapted
 
 @[term_elab zdoCollectAction]
 private def elabZDoCollectAction : TermElab := fun stx expectedType? => do
@@ -197,26 +155,6 @@ private def elabZDoCollectAction : TermElab := fun stx expectedType? => do
     mkZType targetLevel targetEnvironment targetError expected.success
   Term.ensureHasType targetType adapted
 
-private partial def adaptActions
-    (node : Syntax)
-    (environment error : Term) : TermElabM Syntax := do
-  if node.getKind == ``Parser.Term.do then
-    return node
-  else if node.getKind == ``Parser.Term.doExpr then
-    let actionElement : DoElem := ⟨node⟩
-    let `(doExpr| $action:term) := actionElement | return node
-    if ← isPureAction action then return node
-    withRef action do
-      let adapted ← `(zdo_action%[$environment, $error] $action)
-      let element ← `(doElem| $adapted:term)
-      return element.raw
-  else
-    match node with
-    | .node info kind arguments =>
-      return .node info kind (← arguments.mapM fun argument =>
-          adaptActions argument environment error)
-    | _ => return node
-
 private structure CollectedActions where
   raw : Syntax
   environmentRequirements : Array Expr := #[]
@@ -224,11 +162,10 @@ private structure CollectedActions where
 
 private partial def collectActions
     (node : Syntax)
-    (environment error defaultError : Term)
-    (scopeCatches : Bool) : TermElabM CollectedActions := do
+    (environment error defaultError : Term) : TermElabM CollectedActions := do
   if node.getKind == ``Parser.Term.do then
     return { raw := node }
-  else if scopeCatches && node.getKind == ``Parser.Term.doTry then
+  else if node.getKind == ``Parser.Term.doTry then
     let original : DoElem := ⟨node⟩
     let environmentLevel ← mkFreshLevelMVar
     let environmentRequirement ←
@@ -252,7 +189,6 @@ private partial def collectActions
     let (action, nestedEnvironments, nestedErrors) ← match action with
       | `(pure $value) => do
           let collected ← collectActions value.raw environment error defaultError
-            scopeCatches
           let value : Term := ⟨collected.raw⟩
           let action ← `(Z.succeedNow $value)
           pure (action, collected.environmentRequirements,
@@ -281,7 +217,6 @@ private partial def collectActions
           (init := (#[], #[], #[]))
           fun (arguments, environments, errors) argument => do
         let collected ← collectActions argument environment error defaultError
-          scopeCatches
         pure (arguments.push collected.raw,
           environments ++ collected.environmentRequirements,
           errors ++ collected.errorRequirements)
@@ -560,7 +495,7 @@ private def elabScopedSequence
   let errorSyntax ← Term.exprToSyntax error
   let emptyErrorSyntax ← Term.exprToSyntax (mkConst ``Empty)
   let collected ← collectActions sequence.raw environmentSyntax errorSyntax
-    emptyErrorSyntax true
+    emptyErrorSyntax
   let sequence : DoSeq := ⟨collected.raw⟩
   let expected : ExpectedZ := {
     level
@@ -601,7 +536,7 @@ private def elabScopedFinalizer
   let errorSyntax ← Term.exprToSyntax error
   let emptyErrorSyntax ← Term.exprToSyntax (mkConst ``Empty)
   let collected ← collectActions sequence.raw environmentSyntax errorSyntax
-    emptyErrorSyntax true
+    emptyErrorSyntax
   let sequence : DoSeq := ⟨collected.raw⟩
   let expected : ExpectedZ := { level, environment, error, success }
   let continuation ← DoElemCont.mkPure success
@@ -841,8 +776,8 @@ private def elabZDoFixed
     (expected : ExpectedZ) : TermElabM Expr := do
   let environment ← Term.exprToSyntax expected.environment
   let error ← Term.exprToSyntax expected.error
-  let sequence : DoSeq :=
-    ⟨← adaptActions sequence.raw environment error⟩
+  let collected ← collectActions sequence.raw environment error error
+  let sequence : DoSeq := ⟨collected.raw⟩
   let result ← elabDoWith (zDoOps expected) sequence (some expectedType)
   Term.ensureHasType expectedType result
 
@@ -859,7 +794,7 @@ private def elabZDoInferAll
   let errorSyntax ← Term.exprToSyntax error
   let emptyErrorSyntax ← Term.exprToSyntax (mkConst ``Empty)
   let collected ← collectActions sequence.raw environmentSyntax errorSyntax
-    emptyErrorSyntax true
+    emptyErrorSyntax
   let sequence : DoSeq := ⟨collected.raw⟩
   let internalExpectedType := mkZType level environment error success
   let result ← elabDoWith (zDoOps expected) sequence internalExpectedType
@@ -909,8 +844,8 @@ def elabZDoInfer : TermElab := fun stx expectedType? => do
   let expected : ExpectedZ := { level, environment, error, success }
   let environmentSyntax ← Term.exprToSyntax environment
   let errorSyntax ← Term.exprToSyntax error
-  let collected ← collectActions sequence.raw environmentSyntax errorSyntax errorSyntax
-    false
+  let collected ← collectActions sequence.raw environmentSyntax errorSyntax
+    errorSyntax
   let sequence : DoSeq := ⟨collected.raw⟩
   let internalExpectedType := mkZType level environment error success
   let result ← elabDoWith (zDoOps expected) sequence internalExpectedType
