@@ -47,54 +47,42 @@ structure BusinessLogic : Type 1 where
   run : Z Unit HttpError Unit
   deriving ServiceKey
 
-def httpClientLayer :
-    KeyedLayer
-      (Services[HttpConfig])
-      Empty
-      (ServiceRow[HttpClient]) :=
-  KeyedLayer.fromLayer (Layer.fromFunction fun environment =>
-    let config := Services.get[HttpConfig] environment
-    {
-      get := fun path => Z.succeed do
-        IO.println s!"GET {config.baseUrl}{path}"
-        pure "ok"
-      post := fun path body => Z.succeed do
-        IO.println s!"POST {config.baseUrl}{path}: {body}"
-    })
+def makeHttpClient (config : HttpConfig) : HttpClient := {
+  get := fun path => Z.succeed do
+    IO.println s!"GET {config.baseUrl}{path}"
+    pure "ok"
+  post := fun path body => Z.succeed do
+    IO.println s!"POST {config.baseUrl}{path}: {body}"
+}
 
-def githubLayer :
-    KeyedLayer
-      (Services[HttpClient])
-      Empty
-      (ServiceRow[Github]) :=
-  KeyedLayer.fromLayer (Layer.fromFunction fun environment =>
-    let http := Services.get[HttpClient] environment
-    {
-      getIssues := fun organization => zdo
-        let _ <- http.get s!"/orgs/{organization}/issues"
-        pure [
-          { id := 1, title := "Update the examples" },
-          { id := 2, title := "Document automatic layers" }
-        ]
-      postComment := fun issue comment =>
-        http.post s!"/issues/{issue.id}/comments" comment.text
-    })
+def httpClientLayer :=
+  KeyedLayer.derive makeHttpClient
 
-def businessLogicLayer :
-    KeyedLayer
-      (Services[Github])
-      Empty
-      (ServiceRow[BusinessLogic]) :=
-  KeyedLayer.fromLayer (Layer.fromFunction fun environment =>
-    let github := Services.get[Github] environment
-    {
-      run := zdo
-        let issues <- github.getIssues "leanprover"
-        for issue in issues do
-          github.postComment issue {
-            text := s!"Working on: {issue.title}"
-          }
-    })
+def makeGithub (http : HttpClient) : Github := {
+  getIssues := fun organization => zdo
+    let _ <- http.get s!"/orgs/{organization}/issues"
+    pure [
+      { id := 1, title := "Update the examples" },
+      { id := 2, title := "Document automatic layers" }
+    ]
+  postComment := fun issue comment =>
+    http.post s!"/issues/{issue.id}/comments" comment.text
+}
+
+def githubLayer :=
+  KeyedLayer.derive makeGithub
+
+def makeBusinessLogic (github : Github) : BusinessLogic := {
+  run := zdo
+    let issues <- github.getIssues "leanprover"
+    for issue in issues do
+      github.postComment issue {
+        text := s!"Working on: {issue.title}"
+      }
+}
+
+def businessLogicLayer :=
+  KeyedLayer.derive makeBusinessLogic
 
 def program : Z (Services[BusinessLogic]) HttpError Unit :=
   Z.serviceWithZ[BusinessLogic] fun businessLogic =>

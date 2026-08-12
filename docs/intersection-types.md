@@ -606,6 +606,14 @@ normalizes their order. `ServiceRow[...]` gives the normalized entry list when
 a low-level keyed-layer signature needs a row instead of an environment.
 `KeyedLayer.succeed` builds a closed layer. `KeyedLayer.fromLayer` converts an
 existing layer. Both forms infer the output service type from their value.
+`KeyedLayer.derive constructor` turns each explicit constructor parameter into
+a required service and turns its result into the provided service. Repeated
+parameters use one normalized service-row entry. For a structure whose fields
+are its dependencies, `KeyedLayer.derive[Service]` selects `Service.mk`
+automatically. Record-based service interfaces normally use the explicit
+constructor form because their fields are operations rather than dependencies.
+Derivation is pure. Effectful and resourceful construction continues to use
+`KeyedLayer.fromLayer`, `Layer.fromZ`, or `Layer.acquireReleaseZ`.
 `Z.serviceWith[Service]` selects a value from a service.
 `Z.serviceWithZ[Service]` runs an effect that uses a service. The callback
 forms are necessary because a fiber result cannot contain a `Type 1` service.
@@ -742,6 +750,9 @@ The public implementation provides these checked properties:
   Recursive projection finds the keyed row in that product.
 - `KeyedLayer.succeed` and `KeyedLayer.fromLayer` infer the output entry from
   a concrete service type.
+- `KeyedLayer.derive constructor` infers one pure layer from the constructor's
+  explicit service parameters and result. `KeyedLayer.derive[Service]` uses a
+  structure constructor directly, including parameterized structure types.
 - `KeyedLayer.singleton` converts one ordinary layer to a one-service keyed
   layer.
 - `KeyedLayer.zipFresh` combines disjoint service rows in canonical key order.

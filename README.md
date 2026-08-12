@@ -22,6 +22,27 @@ The main goals are pedagogical:
 * Fibers ✅
 * Environment ✅
 * Layers and automatic keyed composition ✅
+* Constructor-derived layers ✅
+
+Pure service constructors can become layers without manual environment
+projection:
+
+```lean
+structure Repository where
+  database : Database
+  config : AppConfig
+
+def makeRepository (database : Database) (config : AppConfig) : Repository :=
+  { database, config }
+
+def repositoryLayer :=
+  KeyedLayer.derive makeRepository
+```
+
+The result requires `Database` and `AppConfig` and provides `Repository`.
+`KeyedLayer.derive[Service]` is a shorthand that uses a structure constructor.
+Use `Layer.fromZ` or `Layer.acquireReleaseZ` when construction is effectful or
+owns a resource.
 
 ## Building and running examples
 

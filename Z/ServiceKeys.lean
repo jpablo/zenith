@@ -877,6 +877,9 @@ syntax (name := keyedLayerFromLayerType)
 syntax (name := keyedLayerSucceedType)
   "KeyedLayer.succeed" term:arg : term
 
+syntax (name := keyedLayerDeriveConstructor)
+  "KeyedLayer.derive" term:arg : term
+
 syntax (name := keyedServiceWithType)
   "Z.serviceWithType" "(" term ")" term:arg : term
 
@@ -1068,6 +1071,92 @@ private def ensureExpectedType
   | some expectedType => Term.ensureHasType expectedType expression
   | none => pure expression
 
+private structure DerivedConstructor where
+  constructor : Term
+  dependencies : Array Term
+  output : Term
+
+private def analyzeDerivedConstructor
+    (reference : Syntax)
+    (constructor : Expr) : TermElabM DerivedConstructor := do
+  let constructorType ← inferType constructor
+  let (arguments, binderInfos, result) ←
+    forallMetaTelescopeReducing constructorType
+  let mut dependencies : Array Term := #[]
+  for index in [0:arguments.size] do
+    unless binderInfos[index]!.isExplicit do continue
+    let dependency ← instantiateMVars (← inferType arguments[index]!)
+    unless ← isType dependency do
+      throwErrorAt reference m!
+        "constructor parameter {dependency} is not a service type"
+    if dependency.hasExprMVar then
+      throwErrorAt reference
+        "could not infer a constructor parameter type; apply all type parameters before `KeyedLayer.derive`"
+    dependencies := dependencies.push
+      (← Term.exprToSyntax dependency)
+  let output ← instantiateMVars result
+  unless ← isType output do
+    throwErrorAt reference m!
+      "the constructor result {output} is not a service type"
+  if output.hasExprMVar then
+    throwErrorAt reference
+      "could not infer the constructed service type; apply all type parameters before `KeyedLayer.derive`"
+  return {
+    constructor := ← Term.exprToSyntax constructor
+    dependencies
+    output := ← Term.exprToSyntax output
+  }
+
+private def elaborateAnalyzedConstructor
+    (reference : Syntax)
+    (analyzed : DerivedConstructor)
+    (expectedType? : Option Expr) : TermElabM Expr := do
+  let environment :=
+    mkIdentFrom reference `_keyedLayerDeriveEnvironment
+  let mut constructed := analyzed.constructor
+  for dependency in analyzed.dependencies do
+    let argument ← `(Services.get[$dependency] $environment)
+    constructed ← `($constructed $argument)
+  let generated ←
+    `(KeyedLayer.fromLayer
+      (show Layer
+          (Services[$(analyzed.dependencies),*])
+          Empty
+          $(analyzed.output) from
+        Layer.fromFunction fun $environment => $constructed))
+  Term.elabTerm generated expectedType?
+
+private def elaborateDerivedConstructor
+    (reference : Syntax)
+    (constructor : Expr)
+    (expectedType? : Option Expr) : TermElabM Expr := do
+  elaborateAnalyzedConstructor reference
+    (← analyzeDerivedConstructor reference constructor)
+    expectedType?
+
+private def elaborateDerivedStructure
+    (reference : Syntax)
+    (serviceTypeSyntax : Term)
+    (expectedType? : Option Expr) : TermElabM Expr := do
+  let serviceType ← whnf (← Term.elabType serviceTypeSyntax)
+  let .const serviceName levels := serviceType.getAppFn |
+    throwErrorAt reference
+      "`KeyedLayer.derive[Service]` requires a structure type"
+  unless isStructure (← getEnv) serviceName do
+    throwErrorAt reference m!
+      "{serviceType} is not a structure type"
+  let inductiveValue ← getConstInfoInduct serviceName
+  let constructorName := inductiveValue.ctors[0]!
+  let parameters :=
+    serviceType.getAppArgs.extract 0 inductiveValue.numParams
+  let constructor := mkAppN (mkConst constructorName levels) parameters
+  let constructorResult ← analyzeDerivedConstructor reference constructor
+  let resultType ← Term.elabType constructorResult.output
+  unless ← isDefEq resultType serviceType do
+    throwErrorAt reference m!
+      "the structure constructor produces {resultType}, not {serviceType}"
+  elaborateAnalyzedConstructor reference constructorResult expectedType?
+
 private structure ExpectedSingleServiceLayer where
   input : Expr
   errorType : Expr
@@ -1137,6 +1226,20 @@ def elabKeyedLayerSucceedType : TermElab := fun stx expectedType? => do
   let entry ← Term.elabTerm entrySyntax none
   let result ← mkAppM ``KeyedLayer.succeedEntry #[entry, value]
   ensureExpectedType expectedType? result
+
+@[term_elab keyedLayerDeriveConstructor]
+def elabKeyedLayerDeriveConstructor : TermElab := fun stx expectedType? => do
+  let `(KeyedLayer.derive $constructorSyntax) := stx |
+    throwUnsupportedSyntax
+  -- The argument parser represents `[Service]` as a singleton bracketed term.
+  -- Handle this form before it can elaborate as a list value.
+  match constructorSyntax with
+  | `([$serviceType]) =>
+      elaborateDerivedStructure stx serviceType expectedType?
+  | _ =>
+      let constructor ← Term.elabTerm constructorSyntax none
+      Term.synthesizeSyntheticMVarsNoPostponing
+      elaborateDerivedConstructor stx constructor expectedType?
 
 @[term_elab keyedServiceWithType]
 def elabKeyedServiceWithType : TermElab := fun stx expectedType? => do

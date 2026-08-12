@@ -83,6 +83,122 @@ def runGraph
 
 end KeyedGraphPlan
 
+namespace LayerDerive
+
+open Z
+
+structure Config : Type 1 where
+  base : String
+  deriving ServiceKey
+
+structure Clock : Type 1 where
+  suffix : String
+  deriving ServiceKey
+
+structure Repository : Type 1 where
+  label : String
+  deriving ServiceKey
+
+structure Application : Type 1 where
+  run : Z Unit Empty String
+  deriving ServiceKey
+
+def makeRepository (config : Config) (clock : Clock) : Repository :=
+  { label := config.base ++ clock.suffix }
+
+def makeApplication
+    (repository : Repository)
+    (config : Config) : Application :=
+  { run := Z.succeedNow s!"{config.base}:{repository.label}" }
+
+def makeDefaultConfig : Config :=
+  { base := "default" }
+
+def compareConfig (left right : Config) : Repository :=
+  { label := s!"{left.base}:{right.base}" }
+
+def repositoryLayer :=
+  KeyedLayer.derive makeRepository
+
+example :
+    KeyedLayer
+      (Services[Config, Clock])
+      Empty
+      (ServiceRow[Repository]) :=
+  repositoryLayer
+
+def applicationLayer :=
+  KeyedLayer.derive makeApplication
+
+example :
+    KeyedLayer
+      (Services[Repository, Config])
+      Empty
+      (ServiceRow[Application]) :=
+  applicationLayer
+
+def defaultConfigLayer :=
+  KeyedLayer.derive makeDefaultConfig
+
+example :
+    KeyedLayer
+      (Services[])
+      Empty
+      (ServiceRow[Config]) :=
+  defaultConfigLayer
+
+def repeatedDependencyLayer :=
+  KeyedLayer.derive compareConfig
+
+example :
+    KeyedLayer
+      (Services[Config])
+      Empty
+      (ServiceRow[Repository]) :=
+  repeatedDependencyLayer
+
+structure Composite : Type 1 where
+  config : Config
+  clock : Clock
+  deriving ServiceKey
+
+def compositeLayer :=
+  KeyedLayer.derive[Composite]
+
+example :
+    KeyedLayer
+      (Services[Config, Clock])
+      Empty
+      (ServiceRow[Composite]) :=
+  compositeLayer
+
+structure Box (Value : Type 1) : Type 1 where
+  value : Value
+  deriving ServiceKey
+
+def boxedConfigLayer :=
+  KeyedLayer.derive[Box Config]
+
+example :
+    KeyedLayer
+      (Services[Config])
+      Empty
+      (ServiceRow[Box Config]) :=
+  boxedConfigLayer
+
+def program : Z (Services[Application]) Empty String :=
+  Z.serviceWithZ[Application] fun application => application.run
+
+def provided : Z (Services[]) Empty String :=
+  Z.provide program [
+    applicationLayer,
+    repositoryLayer,
+    KeyedLayer.succeed ({ base := "left" } : Config),
+    KeyedLayer.succeed ({ suffix := "-right" } : Clock)
+  ]
+
+end LayerDerive
+
 open KeyedGraphPlan in
 /--
 The automatic graph must bind a candidate input the same way the generated
@@ -102,7 +218,17 @@ def testKeyedGraphPlanMatchesRuntimeInputBinding : IO Unit := do
       failTest s!"the shared provider graph produced {other}"
   | .failure cause => failTest s!"the shared provider graph failed: {cause}"
 
+def testConstructorLayerDerivation : IO Unit := do
+  let closed := LayerDerive.provided.provideEnvironment Z.Services.empty
+  match ← runProgram "constructor-layer-derivation" closed with
+  | .success "left:left-right" => pure ()
+  | .success value =>
+      failTest s!"the derived constructor graph returned {value}"
+  | .failure cause =>
+      failTest s!"the derived constructor graph failed: {cause}"
+
 def keyedRegressionTests : List (String × IO Unit) := [
   ("testKeyedGraphPlanMatchesRuntimeInputBinding",
-    testKeyedGraphPlanMatchesRuntimeInputBinding)
+    testKeyedGraphPlanMatchesRuntimeInputBinding),
+  ("testConstructorLayerDerivation", testConstructorLayerDerivation)
 ]
