@@ -374,6 +374,10 @@ def liftIO.{u}
 Register a low-universe asynchronous action and its cancellation action. The
 result is lifted into the selected universe. Interruption wins only after the
 cancellation action completes.
+
+The cancellation action runs from the interruption handler or from the
+registering action once it has returned, never from the callback, so a
+registration that resumes its callback synchronously cannot block.
 -/
 def asyncInterrupt.{u}
     {E A : Type}
@@ -410,12 +414,11 @@ def asyncInterrupt.{u}
                   complete (.error (mapError error))
             | none => complete .interrupted
       let callback (result : Except E A) : IO Unit := do
-        if ← interruption.isRequested then
-          cancel
-        else if ← claim then
-          complete <| match result with
-            | .ok value => .ok value
-            | .error error => .error error
+        unless ← interruption.isRequested do
+          if ← claim then
+            complete <| match result with
+              | .ok value => .ok value
+              | .error error => .error error
       interruption.addHandler handlerId cancel
       if ← interruption.isRequested then
         cancelReady.resolve (return ())
