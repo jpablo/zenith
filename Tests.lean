@@ -5,6 +5,7 @@ import Tests.RegressionsProvide
 import Tests.RegressionsKeyed
 import Tests.HEIO
 import Tests.Primitives
+import Tests.Scope
 import Examples.GithubIssueSync
 import Examples.StableServiceKeysDemo
 import Examples.TodoReport
@@ -1436,6 +1437,7 @@ def suite : List (String × IO Unit) := [
     |>.append keyedRegressionTests
     |>.append heioPrimitiveTests
     |>.append primitiveTests
+    |>.append scopeTests
 
 /--
 Run the whole suite, or only the tests named on the command line:

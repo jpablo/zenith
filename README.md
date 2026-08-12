@@ -23,6 +23,7 @@ The main goals are pedagogical:
 * Environment ✅
 * Layers and automatic keyed composition ✅
 * Constructor-derived layers ✅
+* Dynamic resource scopes ✅
 
 Pure service constructors can become layers without manual environment
 projection:
@@ -81,6 +82,12 @@ Run the standalone GitHub issue-sync demo:
 lake exe githubIssueSync
 ```
 
+Run the dynamic resource scope demo:
+
+```bash
+lake exe scopedResource
+```
+
 Generate a Markdown TODO report for a workspace:
 
 ```bash
@@ -106,3 +113,4 @@ This will (re)create a bunch of svg files under `diagrams/*`.
 * [Module dependencies](docs/module-dependencies.md)
 * [Variance](docs/variance.md)
 * [Problems](docs/Problems.md)
+* [Dynamic resource scopes](docs/scopes.md)

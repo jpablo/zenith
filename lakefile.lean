@@ -30,6 +30,10 @@ lean_exe todoReport {
   root := `Examples.TodoReportMain
 }
 
+lean_exe scopedResource {
+  root := `Examples.ScopedResourceDemo
+}
+
 lean_exe interpreterBench {
   root := `Benchmarks.Interpreter
 }
@@ -48,6 +52,7 @@ lean_lib TestsLib where
     `Tests.RegressionsKeyed,
     `Tests.HEIO,
     `Tests.Primitives,
+    `Tests.Scope,
     `Tests.NotationScope,
     `Tests.CoercionScope,
     `Examples.KeyedLayerMakeDiagnostics
