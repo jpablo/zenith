@@ -39,6 +39,14 @@ def raceExample : Z Unit Empty String :=
 def timeoutExample : Z Unit Empty (Option String) :=
   (Z.sleep 20 *> Z.succeedNow "too slow").timeout 10
 
+/-- Run once, then repeat three more times and return the recurrence count. -/
+def repeatExample : Z Unit Empty Nat :=
+  (Z.succeedNow "tick").repeat (Schedule.recurs 3)
+
+/-- Retry a typed failure at most three times. -/
+def retryExample : Z Unit String Nat :=
+  (Z.fail "not ready" : Z Unit String Nat).retry (Schedule.recurs 3)
+
 /-- The same operation as `zipExample`, written with `do`. -/
 def zipExample2 : Z Unit Empty (Nat × String) := do
   let number <- Z.succeedNow 8

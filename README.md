@@ -26,6 +26,7 @@ The main goals are pedagogical:
 * Dynamic resource scopes ✅
 * Structured sequential and parallel causes ✅
 * Parallel effect composition ✅
+* Retry and repeat schedules ✅
 
 Pure service constructors can become layers without manual environment
 projection:
@@ -118,3 +119,4 @@ This will (re)create a bunch of svg files under `diagrams/*`.
 * [Dynamic resource scopes](docs/scopes.md)
 * [Structured failure causes](docs/causes.md)
 * [Parallel effect composition](docs/parallelism.md)
+* [Retry and repeat schedules](docs/schedules.md)

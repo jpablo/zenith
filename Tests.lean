@@ -354,6 +354,123 @@ def testTimeoutPreservesEnvironmentAndError : IO Unit := do
   | .success (some 7) => pure ()
   | _ => failTest "timeout changed the environment or error type"
 
+def testRetryRecursUntilSuccess : IO Unit := do
+  let attempts ← IO.mkRef 0
+  let effect : Z Unit String Nat := zdo
+    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+      let next := count + 1
+      (next, next)
+    if attempt < 3 then
+      Z.fail s!"attempt {attempt}"
+    else
+      Z.succeedNow attempt
+  match ← runProgram "retry-success" <|
+      effect.retry (Schedule.recurs 2) with
+  | .success 3 => pure ()
+  | _ => failTest "retry did not run the permitted retries"
+  assertTrue "retry ran the wrong number of attempts" ((← attempts.get) == 3)
+
+def testRetryPreservesLastFailure : IO Unit := do
+  let attempts ← IO.mkRef 0
+  let effect : Z Unit String Nat := zdo
+    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+      let next := count + 1
+      (next, next)
+    Z.fail s!"attempt {attempt}"
+  match ← runProgram "retry-exhausted" <|
+      effect.retry (Schedule.recurs 2) with
+  | .failure (.fail "attempt 3") => pure ()
+  | _ => failTest "retry did not preserve the last failure"
+  assertTrue "retry exceeded its recurrence limit" ((← attempts.get) == 3)
+
+def testRetryDoesNotRetryDefects : IO Unit := do
+  let attempts ← IO.mkRef 0
+  let defect := IO.userError "retry defect"
+  let effect : Z Unit String Nat := zdo
+    Z.succeed (attempts.modify (fun count => count + 1))
+    (Z.die defect).map impossible
+  match ← runProgram "retry-defect" <|
+      effect.retry (Schedule.recurs 5) with
+  | .failure (.die error) =>
+      assertTrue "retry changed the defect" (error == defect)
+  | _ => failTest "retry did not preserve a defect"
+  assertTrue "retry reran an effect after a defect" ((← attempts.get) == 1)
+
+def testRetrySpacedDelayIsInterruptible : IO Unit := do
+  let attempts ← IO.mkRef 0
+  let started ← IO.mkRef false
+  let effect : Z Unit String Unit := zdo
+    Z.succeed do
+      attempts.modify (fun count => count + 1)
+      started.set true
+    Z.fail "retry"
+  let fiber ← Z.unsafeFork
+    (effect.retry (Schedule.spaced 1000)) "retry-spaced"
+  waitForFlag "first retry attempt" started
+  IO.sleep 20
+  assertTrue "a spaced retry ran before its delay elapsed"
+    ((← attempts.get) == 1)
+  fiber.requestInterrupt
+  match ← fiber.await with
+  | .failure .interrupt => pure ()
+  | _ => failTest "retry did not preserve interruption during a delay"
+
+def testRepeatReturnsScheduleOutput : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit String Unit :=
+    Z.succeed (runs.modify (fun count => count + 1))
+  match ← runProgram "repeat-output" <|
+      effect.repeat (Schedule.recurs 3) with
+  | .success 3 => pure ()
+  | _ => failTest "repeat did not return the final schedule output"
+  assertTrue "repeat ran the wrong number of times" ((← runs.get) == 4)
+
+def testRepeatPreservesFailure : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit String Unit := zdo
+    let run ← Z.succeed <| runs.modifyGet fun count =>
+      let next := count + 1
+      (next, next)
+    if run == 2 then
+      Z.fail "repeat failed"
+    else
+      Z.succeedNow ()
+  match ← runProgram "repeat-failure" <|
+      effect.repeat (Schedule.recurs 5) with
+  | .failure (.fail "repeat failed") => pure ()
+  | _ => failTest "repeat did not preserve an effect failure"
+  assertTrue "repeat continued after an effect failure" ((← runs.get) == 2)
+
+def testScheduleMapsOutput : IO Unit := do
+  let policy := (Schedule.recurs 2).map fun count => s!"step {count}"
+  match ← runProgram "schedule-map" <|
+      (Z.succeedNow () : Z Unit String Unit).repeat policy with
+  | .success "step 2" => pure ()
+  | _ => failTest "Schedule.map did not transform the final output"
+
+def testScheduleCombinesEnvironment : IO Unit := do
+  let attempts ← IO.mkRef 0
+  let effect : Z Nat String Nat := zdo
+    let value ← Z.service Nat
+    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+      let next := count + 1
+      (next, next)
+    if attempt == 1 then Z.fail "retry" else Z.succeedNow value
+  let policy : Schedule Bool String Nat :=
+    Schedule.make 0 fun _ state =>
+      Z.serviceWith fun enabled =>
+        let decision :=
+          if enabled && state == 0 then
+            Schedule.Decision.continue 0
+          else
+            Schedule.Decision.done
+        (state + 1, state, decision)
+  let program : Z (Nat × Bool) String Nat := effect.retry policy
+  match ← runProgram "schedule-environment" <|
+      program.provideEnvironment (7, true) with
+  | .success 7 => pure ()
+  | _ => failTest "retry did not combine the schedule environment"
+
 def testIOErrorCatch : IO Unit := do
   let program : Z Unit Empty String := do
     try
@@ -841,6 +958,16 @@ def testHighUniverseTimeout : IO Unit := do
   match ← runProgram "high-universe-timeout" program with
   | .success (some 2) => pure ()
   | _ => failTest "timeout did not preserve a high-universe environment"
+
+def testHighUniverseRetry : IO Unit := do
+  let service : HighGithub := {
+    getIssues := fun _ => Z.succeedNow [1, 2]
+  }
+  let program :=
+    (highGithubProgram.retry (Schedule.recurs 1)).provideEnvironment service
+  match ← runProgram "high-universe-retry" program with
+  | .success 2 => pure ()
+  | _ => failTest "retry did not preserve a high-universe environment"
 
 def failingHighGithubLayer : Layer Unit IO.Error HighGithub :=
   Layer.failCause (.fail (IO.userError "layer build failed"))
@@ -1796,6 +1923,15 @@ def suite : List (String × IO Unit) := [
   ("testTimeoutExternalInterruption", testTimeoutExternalInterruption),
   ("testTimeoutPreservesEnvironmentAndError",
     testTimeoutPreservesEnvironmentAndError),
+  ("testRetryRecursUntilSuccess", testRetryRecursUntilSuccess),
+  ("testRetryPreservesLastFailure", testRetryPreservesLastFailure),
+  ("testRetryDoesNotRetryDefects", testRetryDoesNotRetryDefects),
+  ("testRetrySpacedDelayIsInterruptible",
+    testRetrySpacedDelayIsInterruptible),
+  ("testRepeatReturnsScheduleOutput", testRepeatReturnsScheduleOutput),
+  ("testRepeatPreservesFailure", testRepeatPreservesFailure),
+  ("testScheduleMapsOutput", testScheduleMapsOutput),
+  ("testScheduleCombinesEnvironment", testScheduleCombinesEnvironment),
   ("testIOErrorCatch", testIOErrorCatch),
   ("testExitEquality", testExitEquality),
   ("testCompleteBeforeTask", testCompleteBeforeTask),
@@ -1827,6 +1963,7 @@ def suite : List (String × IO Unit) := [
   ("testHighUniverseZipPar", testHighUniverseZipPar),
   ("testHighUniverseRace", testHighUniverseRace),
   ("testHighUniverseTimeout", testHighUniverseTimeout),
+  ("testHighUniverseRetry", testHighUniverseRetry),
   ("testHighUniverseLayerFailure", testHighUniverseLayerFailure),
   ("testLayerFromZ", testLayerFromZ),
   ("testLayerReleaseOrder", testLayerReleaseOrder),
