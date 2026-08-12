@@ -3,6 +3,8 @@ import Tests.Support
 import Tests.Regressions
 import Tests.RegressionsProvide
 import Tests.RegressionsKeyed
+import Tests.HEIO
+import Tests.Primitives
 import Examples.GithubIssueSync
 import Examples.StableServiceKeysDemo
 import Examples.TodoReport
@@ -394,12 +396,66 @@ def testGraphVizEscaping : IO Unit := do
   let escaped := GraphViz.escapeHtml "<unsafe&label>\"'"
   assertTrue "Graphviz HTML text was not escaped"
     (escaped == "&lt;unsafe&amp;label&gt;&quot;&#39;")
-  let dotFile := "/tmp/zenith-regression.dot"
-  let handle <- IO.FS.Handle.mk dotFile IO.FS.Mode.write
-  handle.putStrLn "digraph D {"
-  handle.putStrLn (GraphViz.formatNode "id\"with-quote" "effect<&" [("label", "<unsafe&label>")])
-  handle.putStrLn "}"
-  handle.flush
+  assertTrue "Graphviz did not quote an identifier"
+    (GraphViz.quoteId "id\"with-quote" == "\"id\\\"with-quote\"")
+  let node := GraphViz.formatNode
+    "id\"with-quote"
+    "effect<&"
+    [("label", "<unsafe&label>")]
+    "red&white"
+  assertTrue "Graphviz did not quote the node identifier"
+    (node.startsWith "\"id\\\"with-quote\" [shape=none")
+  assertTrue "Graphviz did not escape the node text"
+    (node.contains "effect&lt;&amp;")
+  assertTrue "Graphviz did not escape an extra field"
+    (node.contains "&lt;unsafe&amp;label&gt;")
+  assertTrue "Graphviz did not escape the color attribute"
+    (node.contains "BGCOLOR=\"red&amp;white\"")
+
+def testGraphVizDiagramEvents : IO Unit :=
+  IO.FS.withTempFile fun handle path => do
+    let diagram := GraphViz.graphvizIO handle
+    let interruption : Interruption := {
+      interrupted := ← IO.mkRef true
+      isInterruptible := ← IO.mkRef true
+      isInterrupting := false
+      interruptDelivered := ← IO.mkRef false
+      interruptHandler := ← IO.mkRef IO.unit
+    }
+    diagram.header
+    diagram.currentNode
+      "label<&" "effect<&" "node\"id" interruption 10 15 3 "blue"
+    diagram.errorHandler (some "node\"id") "handler"
+    diagram.continue_ (some "handler") "continue"
+    diagram.interruption "interrupt" "next" 20 10
+    diagram.done "fiber" "next" "green" "done<&"
+    diagram.syncTry "fiber" "sync" 0
+    diagram.onSuccess "sync" "success"
+    diagram.async "fiber" "async" 0
+    diagram.fork "fiber" "success" "child" 20 10 "child-box"
+    diagram.onSuccessAndFailure "success" "both"
+    diagram.setInterruptStatus "both" "original" "generated"
+    diagram.widenEnv "generated" "wide"
+    diagram.provideEnvironment "fiber" "wide" "provided" "orange"
+    diagram.footer
+    handle.flush
+    let contents ← IO.FS.readFile path
+    assertTrue "Graphviz output did not contain its header"
+      (contents.startsWith "digraph D {")
+    assertTrue "Graphviz output did not contain its footer"
+      (contents.endsWith "}\n")
+    assertTrue "Graphviz output did not escape a runtime label"
+      (contents.contains "label&lt;&amp;")
+    assertTrue "Graphviz output did not quote an arrow endpoint"
+      (contents.contains "\"node\\\"id\" -> \"handler\"")
+    assertTrue "Graphviz output did not contain the recovery edge"
+      (contents.contains "λ (recover)")
+    assertTrue "Graphviz output did not contain the interruption node"
+      (contents.contains "interrupted!")
+    assertTrue "Graphviz output did not contain the child fiber node"
+      (contents.contains "new fiber")
+    assertTrue "Graphviz output did not contain the environment node"
+      (contents.contains "Environment")
 
 def testChildDiagramLifetime : IO Unit := do
   let program : Z Unit Empty Unit := do
@@ -1344,6 +1400,7 @@ def suite : List (String × IO Unit) := [
   ("testParallelLayerInterruption", testParallelLayerInterruption),
   ("testObserverRace", testObserverRace),
   ("testGraphVizEscaping", testGraphVizEscaping),
+  ("testGraphVizDiagramEvents", testGraphVizDiagramEvents),
   ("testChildDiagramLifetime", testChildDiagramLifetime),
   ("testHighUniverseEnvironment", testHighUniverseEnvironment),
   ("testHighUniverseLayerFailure", testHighUniverseLayerFailure),
@@ -1377,6 +1434,8 @@ def suite : List (String × IO Unit) := [
     |>.append regressionTests
     |>.append provideRegressionTests
     |>.append keyedRegressionTests
+    |>.append heioPrimitiveTests
+    |>.append primitiveTests
 
 /--
 Run the whole suite, or only the tests named on the command line:

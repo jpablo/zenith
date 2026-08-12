@@ -13,6 +13,9 @@ lean_exe z {
 @[test_driver]
 lean_exe tests {
   root := `Tests
+  -- Compile the negative elaboration checks without linking their generated
+  -- initializers into the runtime executable.
+  needs := #[`@/TestsLib]
 }
 
 lean_exe githubIssueSync {
@@ -43,8 +46,11 @@ lean_lib TestsLib where
     `Tests.Regressions,
     `Tests.RegressionsProvide,
     `Tests.RegressionsKeyed,
+    `Tests.HEIO,
+    `Tests.Primitives,
     `Tests.NotationScope,
-    `Tests.CoercionScope
+    `Tests.CoercionScope,
+    `Examples.KeyedLayerMakeDiagnostics
   ]
 
 

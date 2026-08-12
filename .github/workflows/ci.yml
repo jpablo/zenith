@@ -13,3 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: leanprover/lean-action@v1
+        with:
+          build: true
+          build-args: >-
+            z githubIssueSync stableServiceKeys todoReport interpreterBench
+          test: true
