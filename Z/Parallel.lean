@@ -29,10 +29,9 @@ private def cancelParallel
   let _ ← awaitFiberExit right
   pure ()
 
-private def awaitParallel
+private def firstParallelExit
     (left : Fiber E A)
-    (right : Fiber E B)
-    (combine : A -> B -> C) : IO (Exit E C) := do
+    (right : Fiber E B) : IO (Option (ParallelExit E A B)) := do
   let _ : Nonempty (ParallelExit E A B) :=
     ⟨.left (.failure .interrupt)⟩
   let first ← IO.Promise.new (α := ParallelExit E A B)
@@ -40,7 +39,17 @@ private def awaitParallel
     first.resolve (.left (← awaitFiberExit left))
   let _ ← IO.asTask do
     first.resolve (.right (← awaitFiberExit right))
-  match ← IO.wait first.result? with
+  IO.wait first.result?
+
+private def mapExit (success : A -> B) : Exit E A -> Exit E B
+  | .success value => .success (success value)
+  | .failure cause => .failure cause
+
+private def awaitParallel
+    (left : Fiber E A)
+    (right : Fiber E B)
+    (combine : A -> B -> C) : IO (Exit E C) := do
+  match ← firstParallelExit left right with
   | none =>
       pure (.failure (.die <| IO.userError
         "the parallel effects did not report completion"))
@@ -70,14 +79,7 @@ private def awaitRace
     (right : Fiber E B)
     (leftResult : A -> C)
     (rightResult : B -> C) : IO (Exit E C) := do
-  let _ : Nonempty (ParallelExit E A B) :=
-    ⟨.left (.failure .interrupt)⟩
-  let first ← IO.Promise.new (α := ParallelExit E A B)
-  let _ ← IO.asTask do
-    first.resolve (.left (← awaitFiberExit left))
-  let _ ← IO.asTask do
-    first.resolve (.right (← awaitFiberExit right))
-  match ← IO.wait first.result? with
+  match ← firstParallelExit left right with
   | none =>
       pure (.failure (.die <| IO.userError
         "the raced effects did not report completion"))
@@ -97,6 +99,22 @@ private def awaitRace
       | .success value => pure (.success (leftResult value))
       | .failure leftCause =>
           pure (.failure (.parallel leftCause rightCause))
+
+private def awaitFirst
+    (left : Fiber E A)
+    (right : Fiber E B)
+    (leftResult : A -> C)
+    (rightResult : B -> C) : IO (Exit E C) := do
+  match ← firstParallelExit left right with
+  | none =>
+      pure (.failure (.die <| IO.userError
+        "the raced effects did not report completion"))
+  | some (.left exit) =>
+      let _ ← interruptAndAwait right
+      pure (mapExit leftResult exit)
+  | some (.right exit) =>
+      let _ ← interruptAndAwait left
+      pure (mapExit rightResult exit)
 
 /-- Run two effects with one complete environment and error channel. -/
 private def zipWithParSame
@@ -127,6 +145,22 @@ private def raceMapSame
       Z.asyncInterrupt fun callback => do
         let _ ← IO.asTask do
           callback (← awaitRace left right leftResult rightResult)
+        pure (cancelParallel left right)
+
+/-- Return the first completion from two effects with complete shared types. -/
+private def raceFirstMapSame
+    (self : Z R E A)
+    (other : Z R E B)
+    (leftResult : A -> C)
+    (rightResult : B -> C) : Z R E C :=
+  let forkWithError {X : Type} (effect : Z R E X) (name : String) :
+      Z R E (Fiber E X) :=
+    (effect.fork name).mapFailure Empty.elim
+  (forkWithError self "raceFirst-left").flatMap fun left =>
+    (forkWithError other "raceFirst-right").flatMap fun right =>
+      Z.asyncInterrupt fun callback => do
+        let _ ← IO.asTask do
+          callback (← awaitFirst left right leftResult rightResult)
         pure (cancelParallel left right)
 
 /--
@@ -183,5 +217,18 @@ def raceEither
   let right : Z R E B :=
     (other.contramap meet.right).mapFailure join.right
   raceMapSame left right Sum.inl Sum.inr
+
+/--
+Limit an effect to a number of milliseconds. Return `some value` when the
+effect succeeds before the deadline and `none` when the deadline expires.
+Preserve an effect failure. An expired effect is interrupted and fully
+terminated before this operation returns.
+-/
+def timeout (self : Z R E A) (milliseconds : UInt32) : Z R E (Option A) :=
+  let effect := self.map some
+  let timer : Z R E (Option A) :=
+    Z.adapt (fun _ : R => ()) Empty.elim (fun _ => none)
+      (Z.sleep milliseconds)
+  raceFirstMapSame effect timer id id
 
 end Z

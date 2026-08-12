@@ -35,6 +35,10 @@ def raceExample : Z Unit Empty String :=
   (Z.sleep 20 *> Z.succeedNow "slow").race
     (Z.sleep 10 *> Z.succeedNow "fast")
 
+/-- Return `none` if the effect does not finish within 10 milliseconds. -/
+def timeoutExample : Z Unit Empty (Option String) :=
+  (Z.sleep 20 *> Z.succeedNow "too slow").timeout 10
+
 /-- The same operation as `zipExample`, written with `do`. -/
 def zipExample2 : Z Unit Empty (Nat × String) := do
   let number <- Z.succeedNow 8

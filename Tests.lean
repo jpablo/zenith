@@ -288,6 +288,72 @@ def testRaceEitherPreservesWinnerSide : IO Unit := do
   assertTrue "raceEither did not cancel the losing branch"
     (← leftCancelled.get)
 
+def testTimeoutKeepsFastSuccess : IO Unit := do
+  let program : Z Unit String (Option Nat) :=
+    (Z.succeedNow 7).timeout 100
+  match ← runProgram "timeout-fast-success" program with
+  | .success (some 7) => pure ()
+  | _ => failTest "timeout did not keep a fast successful value"
+
+def testTimeoutExpiresAndCancelsEffect : IO Unit := do
+  let started ← IO.mkRef false
+  let cancelled ← IO.mkRef false
+  let pending : Z Unit String Nat :=
+    Z.asyncInterrupt fun _ => do
+      started.set true
+      pure (cancelled.set true)
+  match ← runProgram "timeout-expiry" (pending.timeout 5) with
+  | .success none => pure ()
+  | _ => failTest "timeout did not return none after its deadline"
+  assertTrue "timeout did not start its effect" (← started.get)
+  assertTrue "timeout did not cancel its expired effect" (← cancelled.get)
+
+def testTimeoutPreservesFailure : IO Unit := do
+  let failed : Z Unit String Nat := Z.fail "failed before timeout"
+  match ← runProgram "timeout-failure" (failed.timeout 100) with
+  | .failure (.fail "failed before timeout") => pure ()
+  | _ => failTest "timeout did not preserve an effect failure"
+
+def testTimeoutWaitsForFinalizer : IO Unit := do
+  let finalized ← IO.mkRef false
+  let pending : Z Unit Empty Unit :=
+    Z.asyncInterrupt fun _ => pure IO.unit
+  let finalizer : Z Unit Empty Unit := Z.succeed do
+    IO.sleep 5
+    finalized.set true
+  let program := (pending.ensuring finalizer).timeout 5
+  match ← runProgram "timeout-finalizer" program with
+  | .success none => pure ()
+  | _ => failTest "timeout did not expire while the effect was pending"
+  assertTrue "timeout returned before the effect finalizer completed"
+    (← finalized.get)
+
+def testTimeoutExternalInterruption : IO Unit := do
+  let started ← IO.mkRef false
+  let cancelled ← IO.mkRef false
+  let pending : Z Unit Empty Unit :=
+    Z.asyncInterrupt fun _ => do
+      started.set true
+      pure (cancelled.set true)
+  let fiber ← Z.unsafeFork (pending.timeout 1000)
+    "timeout-external-interruption"
+  waitForFlag "timeout effect" started
+  fiber.requestInterrupt
+  match ← fiber.await with
+  | .failure .interrupt => pure ()
+  | _ => failTest "timeout did not preserve external interruption"
+  fiber.awaitTask
+  assertTrue "timeout did not cancel its effect after interruption"
+    (← cancelled.get)
+
+def testTimeoutPreservesEnvironmentAndError : IO Unit := do
+  let effect : Z Nat String Nat := Z.serviceWith id
+  let program : Z Nat String (Option Nat) := effect.timeout 100
+  match ← runProgram "timeout-environment" <|
+      program.provideEnvironment 7 with
+  | .success (some 7) => pure ()
+  | _ => failTest "timeout changed the environment or error type"
+
 def testIOErrorCatch : IO Unit := do
   let program : Z Unit Empty String := do
     try
@@ -765,6 +831,16 @@ def testHighUniverseRace : IO Unit := do
   match ← runProgram "high-universe-race" program with
   | .success 2 => pure ()
   | _ => failTest "race did not preserve a high-universe environment"
+
+def testHighUniverseTimeout : IO Unit := do
+  let service : HighGithub := {
+    getIssues := fun _ => Z.succeedNow [1, 2]
+  }
+  let program :=
+    (highGithubProgram.timeout 100).provideEnvironment service
+  match ← runProgram "high-universe-timeout" program with
+  | .success (some 2) => pure ()
+  | _ => failTest "timeout did not preserve a high-universe environment"
 
 def failingHighGithubLayer : Layer Unit IO.Error HighGithub :=
   Layer.failCause (.fail (IO.userError "layer build failed"))
@@ -1713,6 +1789,13 @@ def suite : List (String × IO Unit) := [
     testRaceCombinesRequirementsAndErrors),
   ("testRaceEitherPreservesWinnerSide",
     testRaceEitherPreservesWinnerSide),
+  ("testTimeoutKeepsFastSuccess", testTimeoutKeepsFastSuccess),
+  ("testTimeoutExpiresAndCancelsEffect", testTimeoutExpiresAndCancelsEffect),
+  ("testTimeoutPreservesFailure", testTimeoutPreservesFailure),
+  ("testTimeoutWaitsForFinalizer", testTimeoutWaitsForFinalizer),
+  ("testTimeoutExternalInterruption", testTimeoutExternalInterruption),
+  ("testTimeoutPreservesEnvironmentAndError",
+    testTimeoutPreservesEnvironmentAndError),
   ("testIOErrorCatch", testIOErrorCatch),
   ("testExitEquality", testExitEquality),
   ("testCompleteBeforeTask", testCompleteBeforeTask),
@@ -1743,6 +1826,7 @@ def suite : List (String × IO Unit) := [
   ("testHighUniverseEnvironment", testHighUniverseEnvironment),
   ("testHighUniverseZipPar", testHighUniverseZipPar),
   ("testHighUniverseRace", testHighUniverseRace),
+  ("testHighUniverseTimeout", testHighUniverseTimeout),
   ("testHighUniverseLayerFailure", testHighUniverseLayerFailure),
   ("testLayerFromZ", testLayerFromZ),
   ("testLayerReleaseOrder", testLayerReleaseOrder),

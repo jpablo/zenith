@@ -36,6 +36,17 @@ def firstResult :=
 
 The `Sum` tag identifies the successful branch.
 
+`Z.timeout` limits an effect to a number of milliseconds:
+
+```lean
+def maybeResponse : Z RequestClient RequestError (Option Response) :=
+  request.timeout 500
+```
+
+It returns `some value` when the effect succeeds before the deadline. It
+returns `none` when the deadline expires. A failure from the effect stays a
+failure; it does not become `none`.
+
 Both operations infer the combined environment and error types. They use the
 same `Environment.Meet` and `ErrorChannel.Join` rules as other heterogeneous
 Zenith combinators.
@@ -57,6 +68,11 @@ Racing has these additional rules:
 - `race` waits for the loser and its finalizers before it returns.
 - A failure does not win while the other effect can still succeed.
 - Two failures are combined as `Cause.parallel left right`.
+
+Timeouts are also resource-safe. When a deadline expires, Zenith interrupts
+the effect and waits for its finalizers before it returns `none`. External
+interruption stops both the effect and its timer. The operation keeps the
+effect's environment and error types unchanged.
 
 The child fibers use the complete inferred environment. This also works when
 an environment service is in a universe above `Type`.
