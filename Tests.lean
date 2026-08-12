@@ -124,6 +124,84 @@ def testAsyncInterruptCancelerFailure : IO Unit := do
   | _ => failTest "a cancellable async canceler defect did not complete the fiber"
   fiber.awaitTask
 
+def testFromAsyncResult : IO Unit := do
+  let success : Std.Async.Async Nat := pure 42
+  match ← runProgram "from-async-success" (Z.fromAsync success) with
+  | .success 42 => pure ()
+  | _ => failTest "fromAsync did not preserve a successful result"
+
+  let failure : Std.Async.Async Nat :=
+    throw (IO.userError "expected asynchronous failure")
+  match ← runProgram "from-async-failure" (Z.fromAsync failure) with
+  | .failure (.fail _) => pure ()
+  | _ => failTest "fromAsync did not put IO.Error in the typed error channel"
+
+  let registrationFailure : Z Unit IO.Error Nat :=
+    Z.fromAsyncInterrupt do
+      throw (IO.userError "expected registration failure")
+  match ← runProgram "from-async-registration-failure"
+      registrationFailure with
+  | .failure (.fail _) => pure ()
+  | _ => failTest "fromAsyncInterrupt did not preserve a registration error"
+
+def testFromAsyncInterruption : IO Unit := do
+  let registered ← IO.mkRef false
+  let cancelled ← IO.mkRef false
+  let completion ← IO.Promise.new (α := Except IO.Error Unit)
+  let pending : Z Unit IO.Error Unit :=
+    Z.fromAsyncInterrupt do
+      registered.set true
+      let task := Std.Async.AsyncTask.ofPromise completion
+      let cancel := do
+        cancelled.set true
+        completion.resolve (.error (IO.userError "cancelled"))
+      pure (task, cancel)
+  let fiber ← Z.unsafeFork pending "from-async-interruption"
+  waitForFlag "Std.Async adapter registration" registered
+  fiber.requestInterrupt
+  match ← fiber.await with
+  | .failure .interrupt => pure ()
+  | _ => failTest "interrupting fromAsyncInterrupt returned the wrong exit"
+  fiber.awaitTask
+  assertTrue "fromAsyncInterrupt did not run its cancellation action"
+    (← cancelled.get)
+
+def testAsyncSleepCompletion : IO Unit := do
+  let program : Z Unit Empty Nat := Z.sleep 5 *> Z.succeedNow 42
+  match ← runProgram "asynchronous-sleep-completion" program with
+  | .success 42 => pure ()
+  | _ => failTest "the asynchronous timer did not resume its Zenith fiber"
+
+def testAsyncSleepInterruption : IO Unit := do
+  let fiber ← Z.unsafeFork (Z.sleep 2000) "asynchronous-sleep-interruption"
+  IO.sleep 25
+  let before ← IO.monoMsNow.toIO
+  fiber.requestInterrupt
+  match ← fiber.await with
+  | .failure .interrupt => pure ()
+  | _ => failTest "interrupting the asynchronous timer returned the wrong exit"
+  fiber.awaitTask
+  let elapsed := (← IO.monoMsNow.toIO) - before
+  assertTrue s!"interrupting Z.sleep took {elapsed} ms" (elapsed < 1000)
+
+private def concurrentSleeps
+    (count : Nat)
+    (duration : UInt32) : Z Unit Empty Unit := do
+  let fibers ← (List.range count).mapM fun index =>
+    (Z.sleep duration).fork s!"concurrent-sleep-{index}"
+  for fiber in fibers do
+    fiber.join
+
+def testAsyncSleepConcurrency : IO Unit := do
+  let before ← IO.monoMsNow.toIO
+  match ← runProgram "asynchronous-sleep-concurrency"
+      (concurrentSleeps 100 100) with
+  | .success () => pure ()
+  | _ => failTest "concurrent asynchronous timers did not complete"
+  let elapsed := (← IO.monoMsNow.toIO) - before
+  assertTrue s!"100 concurrent 100 ms sleeps took {elapsed} ms"
+    (elapsed < 750)
+
 private def failingAsyncDiagram : ExecutionDiagram (IO Unit) :=
   { ExecutionDiagram.empty with
     enabled := true
@@ -1250,6 +1328,11 @@ def suite : List (String × IO Unit) := [
   ("testAsyncInterruption", testAsyncInterruption),
   ("testAsyncInterruptCanceler", testAsyncInterruptCanceler),
   ("testAsyncInterruptCancelerFailure", testAsyncInterruptCancelerFailure),
+  ("testFromAsyncResult", testFromAsyncResult),
+  ("testFromAsyncInterruption", testFromAsyncInterruption),
+  ("testAsyncSleepCompletion", testAsyncSleepCompletion),
+  ("testAsyncSleepInterruption", testAsyncSleepInterruption),
+  ("testAsyncSleepConcurrency", testAsyncSleepConcurrency),
   ("testAsyncResumeDefect", testAsyncResumeDefect),
   ("testAsyncInterruptResumeDefect", testAsyncInterruptResumeDefect),
   ("testUnsafeRunSyncHasNoPollingDelay", testUnsafeRunSyncHasNoPollingDelay),

@@ -1,4 +1,5 @@
 import Z.Core
+import Std.Async.Timer
 
 namespace ZCore
 
@@ -211,8 +212,56 @@ namespace Z
   def attempt (io : IO A) (md := mempty): Z Unit IO.Error A :=
     internal.attempt io md
 
+  /--
+  Start a `Std.Async` task with an interruption action and expose its
+  `IO.Error` in the typed error channel.
+
+  The interruption action must stop or detach the underlying operation. It is
+  also used when an enclosing Zenith fiber is interrupted.
+  -/
+  def fromAsyncInterrupt
+      (start : IO (Std.Async.AsyncTask A × IO Unit))
+      (md := Metadata.withLabel "fromAsyncInterrupt") :
+      Z Unit IO.Error A :=
+    Z.asyncInterrupt (md := md) fun observer => do
+      let started : Except IO.Error (Std.Async.AsyncTask A × IO Unit) ←
+        try
+          pure (.ok (← start))
+        catch error =>
+          pure (.error error)
+      match started with
+      | .error error =>
+          observer (.failure (.fail error))
+          pure IO.unit
+      | .ok (task, cancel) =>
+          IO.chainTask task fun
+            | .ok value => observer (.success value)
+            | .error error => observer (.failure (.fail error))
+          pure cancel
+
+  /--
+  Run a `Std.Async` computation as a Zenith effect.
+
+  The `Std.Async` computation continues after Zenith interruption because a
+  general `Std.Async` value has no cancellation action. Use
+  `fromAsyncInterrupt` when the operation provides one.
+  -/
+  def fromAsync
+      (action : Std.Async.Async A)
+      (md := Metadata.withLabel "fromAsync") : Z Unit IO.Error A :=
+    fromAsyncInterrupt (md := md) do
+      let task ← action.toIO
+      pure (task, IO.unit)
+
+  /-- Pause without occupying a task worker. Interruption stops the timer. -/
   def sleep (ms : UInt32) : Z Unit Empty Unit :=
-    Z.succeed (IO.sleep ms) {label := s!"😴 sleep : {toString ms}ms"}
+    (fromAsyncInterrupt do
+      let duration := Std.Time.Millisecond.Offset.ofNat ms.toNat
+      let sleeperTask ← (Std.Async.Sleep.mk duration).toIO
+      let sleeper ← sleeperTask.block
+      let task ← sleeper.wait.toIO
+      pure (task, sleeper.stop)).orDie
+      |>.withLabel s!"😴 sleep : {toString ms}ms"
 
   def serviceWithZ (operation : S -> Z Unit E A) : Z S E A :=
     Z.fromCore fun service => (operation service).close ()
