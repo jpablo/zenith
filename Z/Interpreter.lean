@@ -428,7 +428,8 @@ mutual
           let effect := prepareDiagramNode diagram effect effectNodeId
           if diagram.enabled then
             diagram.provideEnvironment state.fiberId self.nodeId effect.nodeId color
-          effect.runLoop { state with environment := state.environment ++ env })
+          effect.runLoop { state with
+            environment := Environment.concat state.environment env })
 
 
   private partial def completeAsyncExit

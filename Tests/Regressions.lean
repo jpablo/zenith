@@ -234,12 +234,21 @@ otherwise the coercion has to be rejected.
 -/
 def testCoercedIOFailureIsCatchable : IO Unit := do
   let failing : IO Nat := throw (IO.userError "boom")
-  let coerced : Z Unit IO.Error Nat := failing
-  let program : Z Unit Empty Nat := coerced.catchAll fun _ => Z.succeedNow 0
+  -- Lifting into the typed channel goes through `Z.attempt`, whose failure is
+  -- a typed error the handler sees. The coercion itself only reaches the
+  -- defect-only channel; `Tests/CoercionScope.lean` pins that rejection.
+  let attempted : Z Unit IO.Error Nat := Z.attempt failing
+  let program : Z Unit Empty Nat := attempted.catchAll fun _ => Z.succeedNow 0
   match ← runProgram "coerced-io-failure" program with
   | .success 0 => pure ()
   | exit =>
-      failTest s!"a coerced IO failure bypassed catchAll and returned {exit}"
+      failTest s!"an attempted IO failure bypassed catchAll and returned {exit}"
+
+  -- A coerced action still reports its throw as a defect.
+  let coerced : Z Unit Empty Nat := failing
+  match ← runProgram "coerced-io-defect" coerced with
+  | .failure (.die _) => pure ()
+  | exit => failTest s!"a coerced IO failure returned {exit}"
 
 private def dieBody : Z Unit Empty Nat :=
   (Z.die (IO.userError "boom")).map impossible

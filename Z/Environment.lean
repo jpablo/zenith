@@ -209,7 +209,11 @@ namespace Environment
 
   def map (f: A -> B): Environment A -> Environment B := f
 
-  infixr:67 " ++ " => concat
+  /--
+  `Environment T` is definitionally `T`, so this competes with `HAppend` for
+  every value. It stays scoped to keep `++` unambiguous for importers.
+  -/
+  scoped infixr:67 " ++ " => concat
 
 end Environment 
 

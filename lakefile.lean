@@ -35,14 +35,16 @@ lean_lib Z
 lean_lib Examples
 
 -- Helpers and regression cases for the `tests` executable.
--- `Tests.NotationScope` is deliberately excluded: it is a compile-only guard
--- checked with `lake env lean Tests/NotationScope.lean`.
+-- `Tests.NotationScope` and `Tests.CoercionScope` carry no runtime tests: they
+-- assert what must and must not elaborate, so building them is the check.
 lean_lib TestsLib where
   roots := #[
     `Tests.Support,
     `Tests.Regressions,
     `Tests.RegressionsProvide,
-    `Tests.RegressionsKeyed
+    `Tests.RegressionsKeyed,
+    `Tests.NotationScope,
+    `Tests.CoercionScope
   ]
 
 

@@ -49,8 +49,13 @@ def succeedExample : Z Unit Empty Unit :=
 def attemptExample : Z Unit IO.Error Unit :=
   Z.attempt <| IO.println "hello from IO"
 
-/-- `IO` coerces to a `Z` effect when the expected type is known. -/
-def coercionExample : Z Unit IO.Error Unit :=
+/--
+`IO` coerces to a `Z` effect when the expected type is known.
+
+The coercion targets the defect-only channel: a thrown `IO.Error` becomes a
+defect, not a typed failure. Use `Z.attempt` to catch it as a typed error.
+-/
+def coercionExample : Z Unit Empty Unit :=
   IO.println "hello from IO"
 
 /-! Asynchronous effects and fibers. -/

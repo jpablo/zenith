@@ -452,7 +452,12 @@ instance (priority := low)
 def widenError (self : Z R Empty A) : Z R E A :=
   self.mapFailure impossible
 
-instance : CoeTC (IO A) (Z R E A) :=
+/--
+A raw `IO` action has no typed errors: a throw becomes a defect that the
+`foldZ` family never observes. It therefore only satisfies the defect-only
+channel, and `Z.attempt` exposes an `IO.Error` as a typed failure.
+-/
+instance : CoeTC (IO A) (Z R Empty A) :=
   ⟨Z.internal.succeed⟩
 
 end Z
