@@ -36,18 +36,49 @@ namespace IsComponent
     ⟨get ∘> f⟩
 
 
-  /-- 
+  /--
+  `Extract A B R` finds one occurrence of `A` inside `B` and reports the
+  components `R` that are still unclaimed once that occurrence is consumed.
+
+  The first occurrence wins, so `Extract Char (Char × String × Char)` leaves
+  `String × Char`.
+  -/
+  class Extract (A : Type u) (B : Type v) (R : outParam (Type w)) where
+    extract : B -> A × R
+
+  namespace Extract
+
+    /-- `A` is the head, so the whole tail stays unclaimed. -/
+    instance (priority := high) here : Extract A (A × T) T := ⟨id⟩
+
+    /-- `A` sits further down, so the head stays unclaimed. -/
+    instance skip [tail : Extract A T R] : Extract A (H × T) (H × R) where
+      extract | (h, t) => match tail.extract t with
+        | (a, r) => (a, (h, r))
+
+    /-- `A` is the last component, so nothing is left. -/
+    instance (priority := low) last : Extract A A Unit := ⟨(·, ())⟩
+
+    /-- `Unit` occupies no position, so everything stays unclaimed. -/
+    instance (priority := low) unit : Extract Unit B B := ⟨((), ·)⟩
+
+  end Extract
+
+  /--
   This will detect permutations of `A × B` in `H × T`.
 
   If we reach this case then we know that `A ≠ H` (as this is covered by `rule4`).
 
   So we need to things:
-  - `A` is in `T`
-  - `B` is in `H × T`
+  - `A` is at one position of `H × T`
+  - `B` is in whatever that position leaves behind
 
+  Resolving `B` against the remainder is what stops both halves of the
+  requirement from landing on the same element.
   -/
-  instance rule5 [A ∣ T] [B ∣ (H × T)] : (A × B) ∣ (H × T) where
-    get | (h, t) => (get t, get (h, t))
+  instance rule5 [extraction : Extract A (H × T) R] [B ∣ R] : (A × B) ∣ (H × T) where
+    get e := match extraction.extract e with
+      | (a, r) => (a, get r)
 
   /-- Same heads and different tails but one tail is a component of the other -/
   instance rule4 [B ∣ T] : (A × B) ∣ (A × T) where 
@@ -201,6 +232,13 @@ namespace EnvExamples
 
   -- Note that only the first String "a" is picked up.
   example : get ('c', "a", 1, "b") (Char × String) = ('c', "a") := rfl
+
+  -- Two requirements of the same type come from two different positions.
+  example : get ('c', "a", 1, "b") (String × String) = ("a", "b") := rfl
+  example : get ('c', "a", "b", 1) (String × String) = ("a", "b") := rfl
+
+  -- So each of them needs a position of its own.
+  #check_failure get ('c', "a", 1) (String × String)
 
   -- Make it a Type 1 on purpose to verify that an Environment can hold types on different universes
 
