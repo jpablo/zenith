@@ -34,6 +34,36 @@ def testFinalizerFailure : IO Unit := do
   | .failure (.die _) => pure ()
   | _ => failTest "ensuring did not return the finalizer defect"
 
+def testSequentialFinalizerFailure : IO Unit := do
+  let defect := IO.userError "finalizer failed"
+  let body : Z Unit String Unit := Z.fail "body failed"
+  let finalizer : Z Unit Empty Unit := (Z.die defect).map impossible
+  let program := body.ensuring finalizer
+  match ← runProgram "sequential-finalizer-failure" program with
+  | .failure (.sequential (.fail "body failed") (.die error)) =>
+      assertTrue "ensuring changed the finalizer defect" (error == defect)
+  | _ => failTest "ensuring did not preserve both sequential failures"
+
+def testCompositeCauseRecovery : IO Unit := do
+  let defect := IO.userError "defect"
+  let recoverable : Z Unit String String :=
+    (Z.failCause <| .sequential (.die defect) (.fail "typed")).map
+      impossible
+  let recovered : Z Unit Empty String :=
+    recoverable.catchAll fun error => Z.succeedNow s!"handled {error}"
+  match ← runProgram "composite-cause-recovery" recovered with
+  | .success "handled typed" => pure ()
+  | _ => failTest "catchAll did not find a typed failure in a cause tree"
+
+  let unhandled : Z Unit String String :=
+    (Z.failCause <| .parallel (.die defect) .interrupt).map impossible
+  let propagated : Z Unit Empty String :=
+    unhandled.catchAll fun _ => Z.succeedNow "unexpected recovery"
+  match ← runProgram "composite-cause-propagation" propagated with
+  | .failure (.parallel (.die error) .interrupt) =>
+      assertTrue "catchAll changed an unhandled defect" (error == defect)
+  | _ => failTest "catchAll did not preserve a defect-only cause tree"
+
 def testIOErrorCatch : IO Unit := do
   let program : Z Unit Empty String := do
     try
@@ -594,6 +624,20 @@ def testLayerReleaseFailure : IO Unit := do
   assertTrue "the failing release action did not run exactly once"
     ((<- events.get) == ["acquire", "release"])
 
+def testLayerCombinesProgramAndReleaseFailure : IO Unit := do
+  let programError := IO.userError "program failed"
+  let releaseDefect := IO.userError "release failed"
+  let layer : Layer Unit IO.Error String :=
+    Layer.acquireRelease
+      (fun _ => HEIO.pure "service")
+      (fun _ _ => HEIO.throw (.die releaseDefect))
+  let program : Z String IO.Error Unit := Z.fail programError
+  match ← layer.run () program "layer-combined-failure" with
+  | .failure (.sequential (.fail body) (.die finalizer)) =>
+      assertTrue "the layer changed a composed failure"
+        (body == programError && finalizer == releaseDefect)
+  | _ => failTest "the layer did not preserve program and release failures"
+
 def testHighUniverseLayerRelease : IO Unit := do
   let events <- IO.mkRef []
   let layer : Layer Unit IO.Error HighGithub :=
@@ -710,6 +754,32 @@ def testParallelLayerFailureCancelsSibling : IO Unit := do
   | _ => failTest "parallel layer failure did not preserve its typed error"
   assertTrue "parallel layer failure did not cancel its pending sibling"
     (← leftCancelled.get)
+
+def testParallelLayerCombinesFailures : IO Unit := do
+  let leftReady ← IO.mkRef false
+  let rightReady ← IO.mkRef false
+  let leftError := IO.userError "left failed"
+  let rightError := IO.userError "right failed"
+  let failAfter
+      (ownReady otherReady : IO.Ref Bool)
+      (name : String)
+      (error : IO.Error) : Layer Unit IO.Error String :=
+    Layer.fromHEIO fun _ =>
+      HEIO.bind
+        (HEIO.liftIO.{0} Cause.die do
+          ownReady.set true
+          waitForFlag name otherReady)
+        fun _ => HEIO.throw (.fail error)
+  let left := failAfter leftReady rightReady "right layer" leftError
+  let right := failAfter rightReady leftReady "left layer" rightError
+  let combined := left.zipWithPar right (·, ·)
+  let program : Z (String × String) IO.Error Unit :=
+    Z.serviceWith fun _ => ()
+  match ← combined.run () program "parallel-layer-combined-failures" with
+  | .failure (.parallel (.fail left) (.fail right)) =>
+      assertTrue "the parallel layer changed a branch failure"
+        (left == leftError && right == rightError)
+  | _ => failTest "the parallel layer did not preserve both failures"
 
 def testAcquireReleaseZLayer : IO Unit := do
   let events <- IO.mkRef []
@@ -1323,8 +1393,10 @@ def testZDoInferredFinally : IO Unit := do
       pure ()
   let finalizerFailure : Z Unit (Nat ⊕ String) Nat := finalizerFailure
   match ← runProgram "zdo-inferred-finalizer-failure" finalizerFailure with
-  | .failure (.fail (.inl 5)) => pure ()
-  | _ => failTest "the finalizer failure did not take precedence"
+  | .failure (.sequential
+      (.fail (.inr "body"))
+      (.fail (.inl 5))) => pure ()
+  | _ => failTest "the finalizer did not preserve both failures"
 
   let caughtThenFinalized := zdo
     try
@@ -1376,6 +1448,8 @@ def testZDoInferredFinally : IO Unit := do
 
 def suite : List (String × IO Unit) := [
   ("testFinalizerFailure", testFinalizerFailure),
+  ("testSequentialFinalizerFailure", testSequentialFinalizerFailure),
+  ("testCompositeCauseRecovery", testCompositeCauseRecovery),
   ("testIOErrorCatch", testIOErrorCatch),
   ("testExitEquality", testExitEquality),
   ("testCompleteBeforeTask", testCompleteBeforeTask),
@@ -1411,6 +1485,8 @@ def suite : List (String × IO Unit) := [
   ("testLayerCleanupAfterAcquisitionFailure",
     testLayerCleanupAfterAcquisitionFailure),
   ("testLayerReleaseFailure", testLayerReleaseFailure),
+  ("testLayerCombinesProgramAndReleaseFailure",
+    testLayerCombinesProgramAndReleaseFailure),
   ("testHighUniverseLayerRelease", testHighUniverseLayerRelease),
   ("testHighUniverseLayerSharing", testHighUniverseLayerSharing),
   ("testHighUniverseParallelLayers", testHighUniverseParallelLayers),
@@ -1418,6 +1494,8 @@ def suite : List (String × IO Unit) := [
   ("testParallelLayerFailureCleanup", testParallelLayerFailureCleanup),
   ("testParallelLayerFailureCancelsSibling",
     testParallelLayerFailureCancelsSibling),
+  ("testParallelLayerCombinesFailures",
+    testParallelLayerCombinesFailures),
   ("testAcquireReleaseZLayer", testAcquireReleaseZLayer),
   ("testGithubIssueSync", testGithubIssueSync),
   ("testZDoEnvironmentComposition", testZDoEnvironmentComposition),

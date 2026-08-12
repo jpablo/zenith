@@ -491,9 +491,10 @@ transformers.
 `Z.catchAllMeet` provides the direct compositional catch form. It combines the
 body and handler environments, removes the handled error, and exposes only the
 handler error. `Z.ensuringMeetJoin` provides the corresponding finalizer form.
-It combines environment and error requirements and gives a finalizer failure
-precedence. Plain inferred native syntax supports multiple catch clauses in
-source order. A later clause can handle an error from an earlier handler.
+It combines environment and error requirements and preserves both failures in
+a sequential `Cause`. Plain inferred native syntax supports multiple catch
+clauses in source order. A later clause can handle an error from an earlier
+handler.
 
 ## GitHub issue-sync integration case
 

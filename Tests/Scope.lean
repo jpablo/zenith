@@ -135,6 +135,32 @@ def testScopeRunsAllFinalizersAfterDefect : IO Unit := do
       "release-second", "release-first"])
 
 open ScopeTests in
+def testScopeCombinesFinalizerDefects : IO Unit := do
+  let events ← IO.mkRef ([] : List String)
+  let firstDefect := IO.userError "first release failed"
+  let secondDefect := IO.userError "second release failed"
+  let trackedResource (name : String) (defect : IO.Error) :=
+    Z.acquireRelease
+      (record events s!"acquire-{name}" *> Z.succeedNow name)
+      (fun _ =>
+        record events s!"release-{name}" *>
+          (Z.die defect : Z Unit Empty Empty))
+  let body := zdo
+    let _ ← trackedResource "first" firstDefect
+    let _ ← trackedResource "second" secondDefect
+    pure ()
+  let program : Z Unit Empty Unit := Z.scoped body
+  match ← runProgram "scope-combined-finalizer-defects" program with
+  | .failure (.sequential (.die second) (.die first)) =>
+      assertTrue "the scope changed a finalizer defect"
+        (second == secondDefect && first == firstDefect)
+  | _ => failTest "the scope did not combine its finalizer defects"
+  assertTrue "the scope did not run both failing finalizers"
+    ((← events.get) == [
+      "acquire-first", "acquire-second",
+      "release-second", "release-first"])
+
+open ScopeTests in
 def testNestedScopesCloseIndependently : IO Unit := do
   let events ← IO.mkRef ([] : List String)
   let inner : Z Unit Empty Unit := Z.scoped <| zdo
@@ -264,6 +290,8 @@ def scopeTests : List (String × IO Unit) := [
   ("testScopeAcquisitionMasking", testScopeAcquisitionMasking),
   ("testScopeRunsAllFinalizersAfterDefect",
     testScopeRunsAllFinalizersAfterDefect),
+  ("testScopeCombinesFinalizerDefects",
+    testScopeCombinesFinalizerDefects),
   ("testNestedScopesCloseIndependently", testNestedScopesCloseIndependently),
   ("testScopePreservesOtherEnvironmentRequirements",
     testScopePreservesOtherEnvironmentRequirements),

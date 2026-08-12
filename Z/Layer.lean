@@ -49,13 +49,13 @@ private def acquireAfter
     HEIO (Cause E) (Resource E B) :=
   (HEIO.bind HEIO.checkInterrupted fun _ => second).foldAll
     (fun cause =>
-      (HEIO.throw cause).ensuring first.release)
-    ((HEIO.interrupt : HEIO (Cause E) (Resource E B)).ensuring
+      (HEIO.throw cause).ensuringCause first.release)
+    ((HEIO.interrupt : HEIO (Cause E) (Resource E B)).ensuringCause
       first.release)
     (fun acquired =>
       HEIO.pure {
         value := acquired.value
-        release := acquired.release.ensuring first.release
+        release := acquired.release.ensuringCause first.release
       })
 
 private inductive MemoState.{u}
@@ -69,7 +69,7 @@ private def withMutex
     (mutex : Std.BaseMutex)
     (action : HEIO (Cause E) A) : HEIO (Cause E) A :=
   HEIO.bind (HEIO.liftBaseIO.{0} mutex.lock) fun _ =>
-    action.ensuring <|
+    action.ensuringCause <|
       HEIO.bind (HEIO.liftBaseIO.{0} mutex.unlock) fun _ =>
         HEIO.pure ()
 
@@ -281,7 +281,7 @@ private def releaseParallelResults
     (left : HEIO.Result (Cause E) (Resource E A))
     (right : HEIO.Result (Cause E) (Resource E B)) :
     HEIO (Cause E) Unit :=
-  (releaseResult right).ensuring (releaseResult left)
+  (releaseResult right).ensuringCause (releaseResult left)
 
 private def finishParallel
     (first : ParallelCompletion)
@@ -292,34 +292,36 @@ private def finishParallel
   | .ok acquiredLeft, .ok acquiredRight =>
       HEIO.pure {
         value := f acquiredLeft.value acquiredRight.value
-        release := acquiredRight.release.ensuring acquiredLeft.release
+        release := acquiredRight.release.ensuringCause acquiredLeft.release
       }
+  | .error leftCause, .error rightCause =>
+      HEIO.throw (.parallel leftCause rightCause)
   | _, _ =>
       let release := releaseParallelResults left right
       match first with
       | .leftFailure =>
           match left with
-          | .error cause => (HEIO.throw cause).ensuring release
+          | .error cause => (HEIO.throw cause).ensuringCause release
           | _ => (HEIO.interrupt :
-              HEIO (Cause E) (Resource E C)).ensuring release
+              HEIO (Cause E) (Resource E C)).ensuringCause release
       | .rightFailure =>
           match right with
-          | .error cause => (HEIO.throw cause).ensuring release
+          | .error cause => (HEIO.throw cause).ensuringCause release
           | _ => (HEIO.interrupt :
-              HEIO (Cause E) (Resource E C)).ensuring release
+              HEIO (Cause E) (Resource E C)).ensuringCause release
       | .leftInterrupted | .rightInterrupted =>
           (HEIO.interrupt :
-            HEIO (Cause E) (Resource E C)).ensuring release
+            HEIO (Cause E) (Resource E C)).ensuringCause release
       | .leftSuccess =>
           match right with
-          | .error cause => (HEIO.throw cause).ensuring release
+          | .error cause => (HEIO.throw cause).ensuringCause release
           | _ => (HEIO.interrupt :
-              HEIO (Cause E) (Resource E C)).ensuring release
+              HEIO (Cause E) (Resource E C)).ensuringCause release
       | .rightSuccess =>
           match left with
-          | .error cause => (HEIO.throw cause).ensuring release
+          | .error cause => (HEIO.throw cause).ensuringCause release
           | _ => (HEIO.interrupt :
-              HEIO (Cause E) (Resource E C)).ensuring release
+              HEIO (Cause E) (Resource E C)).ensuringCause release
 
 /--
 Build two independent layers in parallel and combine their outputs. A failure
@@ -408,11 +410,18 @@ def run.{uin, uout}
     (useDiagram : Option String := none) : IO (Exit E A) := do
   let builtAndRun : HEIO (Cause E) (ULift.{uout} (Exit E A)) :=
     HEIO.bind (self.build input) fun resource =>
-      (HEIO.liftIO.{uout} Cause.die <|
-          Z.unsafeRunSync
-            (program.provideEnvironment resource.value)
-            fiberId
-            useDiagram).ensuring resource.release
+      let runProgram :=
+        HEIO.bind
+          (HEIO.liftIO.{uout} Cause.die <|
+            Z.unsafeRunSync
+              (program.provideEnvironment resource.value)
+              fiberId
+              useDiagram)
+          fun result =>
+            match result.down with
+            | .success _ => HEIO.pure result
+            | .failure cause => HEIO.throw cause
+      runProgram.ensuringCause resource.release
   match <- HEIO.toIOResult builtAndRun with
   | .ok result => pure result
   | .error cause => pure (.failure cause)

@@ -25,11 +25,10 @@ namespace Fiber
       (fun cause => Z.withIO self.state.get fun
         | .done exit => Z.internal.succeedNow exit
         | _ =>
-          match cause with
-          | .fail _ => Z.internal.succeedNow (Exit.failure cause)
-          | .die error => (Z.die (R := Unit) error).map impossible
-          | .interrupt =>
-              (Z.failCause (R := Unit) (E := Empty) .interrupt).map impossible)
+          match cause.failureOrCause with
+          | .inl _ => Z.internal.succeedNow (Exit.failure cause)
+          | .inr unhandled =>
+              (Z.failCause (R := Unit) unhandled).map impossible)
       (Exit.success ∘> pure)
 
 end Fiber

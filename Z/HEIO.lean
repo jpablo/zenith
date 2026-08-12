@@ -311,8 +311,8 @@ def foldAll
     | .interrupted world => interrupted runtime world
 
 /--
-Run `finalizer` after either outcome. If both actions fail, the finalizer
-failure is returned. This is the same policy that `Z.ensuring` uses.
+Run `finalizer` after either outcome. If both actions fail, return the
+finalizer failure.
 -/
 def ensuring
     (self : HEIO E A)
@@ -335,6 +335,34 @@ def ensuring
         | .error finalizerError world => .error finalizerError world
         | .interrupted world => .interrupted world
 
+/--
+Run a cause-valued finalizer and preserve failures from both actions.
+The cause tree records the body outcome before the finalizer outcome.
+-/
+def ensuringCause
+    (self : HEIO (Cause E) A)
+    (finalizer : HEIO (Cause E) Unit) : HEIO (Cause E) A :=
+  fun runtime world =>
+    match self runtime world with
+    | .ok value world =>
+        match finalizer { runtime with interruptible := false } world with
+        | .ok _ world => .ok value world
+        | .error cause world => .error cause world
+        | .interrupted world => .interrupted world
+    | .error originalCause world =>
+        match finalizer { runtime with interruptible := false } world with
+        | .ok _ world => .error originalCause world
+        | .error finalizerCause world =>
+            .error (.sequential originalCause finalizerCause) world
+        | .interrupted world =>
+            .error (.sequential originalCause .interrupt) world
+    | .interrupted world =>
+        match finalizer { runtime with interruptible := false } world with
+        | .ok _ world => .interrupted world
+        | .error finalizerCause world =>
+            .error (.sequential .interrupt finalizerCause) world
+        | .interrupted world =>
+            .error (.sequential .interrupt .interrupt) world
 /--
 Run an action with a child interruption scope. Parent interruption reaches the
 child, but requesting the child does not interrupt the parent.

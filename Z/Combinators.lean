@@ -35,17 +35,18 @@ namespace ZCore
   def ensuringUnmasked
       (finalizer : _root_.ZCore R Empty A₀) : _root_.ZCore R E A :=
     let finalizer := finalizer.withLabel "🏁 finalizer"
-    let finalizerFailure (cause : Cause Empty) : _root_.ZCore R E A :=
-      ZCore.failCause (cause.map impossible)
     .withLabel (label := "👮‍♀️ ensuring") <|
       self.foldCauseZ
         (fun cause =>
           finalizer.foldCauseZ
-            finalizerFailure
+            (fun finalizerCause =>
+              ZCore.failCause <|
+                .sequential cause (finalizerCause.map impossible))
             (fun _ => .failCause cause))
         (fun value =>
           finalizer.foldCauseZ
-            finalizerFailure
+            (fun finalizerCause =>
+              ZCore.failCause (finalizerCause.map impossible))
             (fun _ => .succeedNow' value))
 
   /--
@@ -85,10 +86,12 @@ namespace Z
   def die (ioe : IO.Error) : Z R Empty Empty :=
     failCause (Cause.die ioe)
 
-  def errorHandlerCause (errorHandler : E -> Z R E₁ A₁): Cause E -> Z R E₁ A₁ := fun
-    | .fail  e   => errorHandler e
-    | .die ioe   => internal.done <| .failure <| .die ioe
-    | .interrupt => internal.done <| .failure .interrupt
+  def errorHandlerCause
+      (errorHandler : E -> Z R E₁ A₁)
+      (cause : Cause E) : Z R E₁ A₁ :=
+    match cause.failureOrCause with
+    | .inl error => errorHandler error
+    | .inr unhandled => internal.done <| .failure unhandled
 
   def foldZ (errorHandler : E -> Z R E₁ A₁) (next : A -> Z R E₁ A₁) : Z R E₁ A₁ :=
     (self.foldCauseZ (errorHandlerCause errorHandler) next).withLabel "foldZ"
@@ -114,10 +117,12 @@ namespace Z
     throw    := fun ioe => Z.die (R := R) ioe
     tryCatch := fun z errorHandler =>
       z.foldCauseZ
-        (fun
+        (fun cause =>
+          match cause with
           | .die ioe => errorHandler ioe
-          | .interrupt => Z.failCause (R := R) (E := Empty) .interrupt
-          | .fail e => nomatch e)
+          | unhandled =>
+              (Z.failCause (R := R) (unhandled.map Empty.elim)).map
+                impossible)
         pure
 
   -- instance : MonadExceptOf IO.Error (Z R (Cause E)) where
@@ -162,11 +167,12 @@ namespace Z
       [conversion : A <: A₁]
       (errorHandler : IO.Error -> Z R₁ E₁ A₁) : Z R₂ E₁ A₁ :=
     (self.contramap meet.left).foldCauseZ
-      (fun
+      (fun cause =>
+        match cause with
         | .die error => (errorHandler error).contramap meet.right
-        | .interrupt =>
-            (Z.failCause (R := R₂) (E := E₁) .interrupt).map impossible
-        | .fail error => nomatch error)
+        | unhandled =>
+            (Z.failCause (R := R₂) (unhandled.map Empty.elim)).map
+              impossible)
       (fun value => pure (conversion.coe value))
 
   def zipWith (other : Z R E A₁) (f : A -> A₁ -> A₃) : Z R E A₃ := do
@@ -282,8 +288,8 @@ namespace Z
   /--
   Run a finalizer with different environment and error requirements.
 
-  A finalizer failure takes precedence over a failure from the protected
-  effect, as required by Lean's `try/finally` semantics.
+  If the protected effect and finalizer both fail, preserve their causes in
+  execution order.
   -/
   def ensuringMeetJoin
       [meet : Environment.Meet R R₁ R₂]
@@ -295,8 +301,9 @@ namespace Z
       (fun cause =>
         finalizer.foldCauseZ
           (fun finalizerCause =>
-            (Z.failCause (R := R₂) (finalizerCause.map join.right)).map
-              impossible)
+            (Z.failCause (R := R₂) <| .sequential
+              (cause.map join.left)
+              (finalizerCause.map join.right)).map impossible)
           (fun _ =>
             (Z.failCause (R := R₂) (cause.map join.left)).map impossible))
       (fun value =>

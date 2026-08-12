@@ -143,6 +143,23 @@ def testHEIOFinalizerPrecedence : IO Unit := do
       failTest
         "a HEIO finalizer failure did not replace the interrupted result"
 
+def testHEIOCauseFinalizerComposition : IO Unit := do
+  let defect := IO.userError "finalizer defect"
+  let failedBody : HEIO (Cause String) Nat :=
+    (HEIO.throw (.fail "body") : HEIO (Cause String) Nat)
+      |>.ensuringCause (HEIO.throw (.die defect))
+  match ← runHEIO failedBody with
+  | .error (.sequential (.fail "body") (.die error)) =>
+      assertTrue "HEIO changed the finalizer defect" (error == defect)
+  | _ => failTest "HEIO did not combine the body and finalizer causes"
+
+  let interruptedBody : HEIO (Cause String) Nat :=
+    (HEIO.interrupt : HEIO (Cause String) Nat)
+      |>.ensuringCause (HEIO.throw (.fail "finalizer"))
+  match ← runHEIO interruptedBody with
+  | .error (.sequential .interrupt (.fail "finalizer")) => pure ()
+  | _ => failTest "HEIO did not combine interruption and finalizer failure"
+
 def testHEIOReferencesAndTasks : IO Unit := do
   let referenceProgram : HEIO String Nat := do
     let reference ← HEIO.mkRef 1
@@ -192,6 +209,8 @@ def heioPrimitiveTests : List (String × IO Unit) := [
   ("testHEIOFoldSemantics", testHEIOFoldSemantics),
   ("testHEIOEnsuringOutcomes", testHEIOEnsuringOutcomes),
   ("testHEIOFinalizerPrecedence", testHEIOFinalizerPrecedence),
+  ("testHEIOCauseFinalizerComposition",
+    testHEIOCauseFinalizerComposition),
   ("testHEIOReferencesAndTasks", testHEIOReferencesAndTasks),
   ("testHEIOInterruptionScopes", testHEIOInterruptionScopes)
 ]

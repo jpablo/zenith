@@ -8,8 +8,10 @@ Dynamic resource scopes.
 exit path.
 -/
 
+private abbrev ScopeFinalizer := IO (Option (Cause Empty))
+
 private inductive ScopeState where
-  | open (finalizers : List (IO Unit))
+  | open (finalizers : List ScopeFinalizer)
   | closed
 
 /-- A dynamic lifetime that owns registered resource finalizers. -/
@@ -21,18 +23,25 @@ namespace Scope
 private structure Closeable where
   scope : Scope
 
+private def runFinalizerSafely
+    (finalizer : ScopeFinalizer) : IO (Option (Cause Empty)) := do
+  try
+    finalizer
+  catch error =>
+    pure (some (.die error))
+
+private def appendSequential
+    (previous current : Option (Cause Empty)) : Option (Cause Empty) :=
+  match previous, current with
+  | none, cause | cause, none => cause
+  | some left, some right => some (.sequential left right)
+
 private def runFinalizers :
-    List (IO Unit) -> Option IO.Error -> IO Unit
-  | [], none => pure ()
-  | [], some error => throw error
-  | finalizer :: rest, previousError => do
-      let finalError ←
-        try
-          finalizer
-          pure previousError
-        catch error =>
-          pure (some error)
-      runFinalizers rest finalError
+    List ScopeFinalizer -> Option (Cause Empty) -> IO (Option (Cause Empty))
+  | [], combined => pure combined
+  | finalizer :: rest, combined => do
+      let current ← runFinalizerSafely finalizer
+      runFinalizers rest (appendSequential combined current)
 
 private def make : IO Closeable := do
   pure { scope := { state := ← IO.mkRef (.open []) } }
@@ -43,14 +52,15 @@ If closure won the race, run the finalizer immediately.
 -/
 private def addFinalizerIO
     (self : Scope)
-    (finalizer : IO Unit) : IO Unit := do
+    (finalizer : ScopeFinalizer) : IO (Option (Cause Empty)) := do
   let runNow ← self.state.modifyGet fun
     | .open finalizers => (false, .open (finalizer :: finalizers))
     | .closed => (true, .closed)
-  if runNow then finalizer
+  if runNow then runFinalizerSafely finalizer else pure none
 
 /-- Close a scope exactly once and run all its finalizers. -/
-private def Closeable.closeIO (self : Closeable) : IO Unit := do
+private def Closeable.closeIO
+    (self : Closeable) : IO (Option (Cause Empty)) := do
   let finalizers ← self.scope.state.modifyGet fun
     | .open finalizers => (finalizers, .closed)
     | .closed => ([], .closed)
@@ -84,26 +94,30 @@ instance (priority := 100) [tail : Remove Tail Rest] :
 
 end Remove
 
-private def runFinalizer (finalizer : Z Unit Empty Unit) : IO Unit := do
+private def runFinalizer
+    (finalizer : Z Unit Empty Unit) : ScopeFinalizer := do
   match ← Z.unsafeRunSync finalizer "scope-finalizer" with
-  | .success () => pure ()
-  | .failure (.fail error) => nomatch error
-  | .failure (.die error) => throw error
-  | .failure .interrupt =>
-      throw (IO.userError "a scope finalizer was interrupted")
+  | .success () => pure none
+  | .failure cause => pure (some cause)
+
+private def finalizerResult
+    (action : IO (Option (Cause Empty))) : ZCore Unit Empty Unit :=
+  ZCore.flatMap (ZCore.succeed' action) fun
+    | none => ZCore.succeedNow' ()
+    | some cause => ZCore.done' (.failure cause)
 
 /-- Register a Zenith finalizer in this scope. -/
 def addFinalizer
     (self : Scope)
     (finalizer : Z R Empty Unit) : Z R Empty Unit :=
   Z.fromCore fun environment =>
-    ZCore.succeed' <|
+    finalizerResult <|
       self.addFinalizerIO <|
         runFinalizer (finalizer.provideEnvironment environment)
 
 private def Closeable.close
     (self : Closeable) : Z R Empty Unit :=
-  Z.internal.succeed self.closeIO
+  Z.fromCore fun _ => finalizerResult self.closeIO
 
 end Scope
 
@@ -118,7 +132,7 @@ def addFinalizer
     let scope := meet.right environment
     let closedFinalizer :=
       finalizer.provideEnvironment finalizerEnvironment
-    ZCore.succeed' <|
+    Scope.finalizerResult <|
       scope.addFinalizerIO <| Scope.runFinalizer closedFinalizer
 
 /--

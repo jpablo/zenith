@@ -35,6 +35,37 @@ def testCauseUtilities : IO Unit := do
   assertTrue "Cause.show changed its stable interruption text"
     (toString (.interrupt : Cause String) == "Cause.interrupt")
 
+  let sequential : Cause String :=
+    .sequential (.fail "first") (.die defect)
+  let mappedSequential : Cause Nat := sequential.map String.length
+  assertTrue "Cause.map did not preserve sequential composition"
+    (mappedSequential == .sequential (.fail 5) (.die defect))
+  assertTrue "Cause.failureOption did not find the first sequential failure"
+    (sequential.failureOption == some "first")
+  let sequentialFailureOrCause : String ⊕ Cause Nat :=
+    sequential.failureOrCause
+  assertTrue "Cause.failureOrCause did not find a composed typed failure"
+    (sequentialFailureOrCause == .inl "first")
+  assertTrue "Cause.show did not show sequential structure"
+    (toString sequential ==
+      "Cause.sequential (Cause.fail (first), Cause.die (defect))")
+
+  let parallel : Cause String :=
+    .parallel (.die defect) .interrupt
+  let mappedParallel : Cause Nat := parallel.map String.length
+  assertTrue "Cause.map did not preserve parallel composition"
+    (mappedParallel == .parallel (.die defect) .interrupt)
+  assertTrue "Cause.failureOption returned a failure from a defect-only cause"
+    (parallel.failureOption == none)
+  let parallelFailureOrCause : String ⊕ Cause Nat :=
+    parallel.failureOrCause
+  assertTrue "Cause.failureOrCause did not preserve defect-only structure"
+    (parallelFailureOrCause ==
+      .inr (.parallel (.die defect) .interrupt))
+  assertTrue "Cause.show did not show parallel structure"
+    (toString parallel ==
+      "Cause.parallel (Cause.die (defect), Cause.interrupt)")
+
 def testExitUtilities : IO Unit := do
   let success : Exit String Nat := .success 42
   let failure : Exit String Nat := .failure (.fail "bad")

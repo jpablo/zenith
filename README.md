@@ -24,6 +24,7 @@ The main goals are pedagogical:
 * Layers and automatic keyed composition ✅
 * Constructor-derived layers ✅
 * Dynamic resource scopes ✅
+* Structured sequential and parallel causes ✅
 
 Pure service constructors can become layers without manual environment
 projection:
@@ -114,3 +115,4 @@ This will (re)create a bunch of svg files under `diagrams/*`.
 * [Variance](docs/variance.md)
 * [Problems](docs/Problems.md)
 * [Dynamic resource scopes](docs/scopes.md)
+* [Structured failure causes](docs/causes.md)

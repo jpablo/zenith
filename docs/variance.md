@@ -335,7 +335,7 @@ later clauses.
 A finalizer has its own inferred environment and error. Its requirements are
 combined with the protected effect. It runs after success or failure and
 before an early `return`, `break`, or `continue` resumes. If both the protected
-effect and finalizer fail, the finalizer failure takes precedence. `zdo[E]`
+effect and finalizer fail, a sequential `Cause` keeps both failures. `zdo[E]`
 remains available when the complete error type must be explicit.
 
 `Z.catchAllMeet` remains the direct compositional form. It combines the body

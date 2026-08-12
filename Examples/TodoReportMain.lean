@@ -19,3 +19,6 @@ def main (arguments : List String) : IO UInt32 := do
   | .failure .interrupt =>
       IO.eprintln "The TODO report was interrupted."
       pure 130
+  | .failure cause =>
+      IO.eprintln s!"The TODO report had multiple failures: {cause}"
+      pure 1

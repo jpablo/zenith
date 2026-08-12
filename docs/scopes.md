@@ -24,6 +24,7 @@ A scope has these rules:
 - It runs finalizers in reverse registration order.
 - It runs each finalizer at most once.
 - It tries all finalizers, even when one finalizer has a defect.
+- It combines multiple finalizer failures as a sequential `Cause` tree.
 - A nested scope closes independently from its parent scope.
 
 Use `Z.addFinalizer` when no resource value is needed:
