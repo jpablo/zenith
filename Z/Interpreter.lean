@@ -404,7 +404,7 @@ mutual
           let restore := isInterruptible.set oldIsInterruptible
           let effectNodeId ← freshDiagramNodeId diagram state
           let effect := prepareDiagramNode diagram effect effectNodeId
-          let nextEffect := effect.ensuring
+          let nextEffect := effect.ensuringUnmasked
             (.succeed' restore {label := s!"isInterruptible ← {oldIsInterruptible}"})
           let nextEffectNodeId ← freshDiagramNodeId diagram state
           let nextEffect :=

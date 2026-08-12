@@ -25,7 +25,13 @@ namespace ZCore
   def failCause (cause : Cause E) : _root_.ZCore R E A :=
     ZCore.done' <| .failure cause
 
-  def ensuring
+  /--
+  Run `finalizer` after `self` without masking interruption.
+
+  The interpreter uses this to restore its own interrupt-status bookkeeping.
+  Masking there would re-enter `setInterruptStatus` for every restore.
+  -/
+  def ensuringUnmasked
       (finalizer : _root_.ZCore R Empty A₀) : _root_.ZCore R E A :=
     let finalizer := finalizer.withLabel "🏁 finalizer"
     let finalizerFailure (cause : Cause Empty) : _root_.ZCore R E A :=
@@ -40,6 +46,17 @@ namespace ZCore
           finalizer.foldCauseZ
             finalizerFailure
             (fun _ => .succeedNow' value))
+
+  /--
+  Run `finalizer` after `self`, whatever its outcome.
+
+  A finalizer runs uninterruptibly, so an interrupt that arrives while it is
+  in progress cannot abandon the rest of the cleanup.
+  -/
+  def ensuring
+      (finalizer : _root_.ZCore R Empty A₀) : _root_.ZCore R E A :=
+    self.ensuringUnmasked
+      (ZCore.setInterruptStatus finalizer .uninterruptible)
 
   instance : ToString (_root_.ZCore R E A) :=
     ⟨(·.showHead)⟩
@@ -210,15 +227,8 @@ namespace Z
     self *> forever
 
   def ensuring (finalizer : Z R Empty A₀): Z R E A :=
-    let finalizer := finalizer.withLabel "🏁 finalizer"
-    let finalizerFailure (cause : Cause Empty) : Z R E A :=
-      Z.failCause (R := R) (E := E) (cause.map impossible)
-    .withLabel (label := s!"👮‍♀️ ensuring") $
-      self.foldCauseZ
-        (fun cause =>
-          finalizer.foldCauseZ finalizerFailure
-            (fun _ => .failCause (R := R) cause))
-        (fun a     => finalizer.foldCauseZ finalizerFailure (fun _ => pure a))
+    Z.fromCore fun environment =>
+      (self.close environment).ensuring (finalizer.close environment)
 
   /--
   Run a finalizer with different environment and error requirements.

@@ -101,6 +101,72 @@ def testAsyncInterruptCancelerRunsOnce : IO Unit := do
   assertTrue s!"the async cancellation action ran {count} times instead of once"
     (count == 1)
 
+/--
+`Fiber.interrupt` reports the exit of the fiber it interrupted. When the
+caller is itself interrupted while waiting, that interruption belongs to the
+caller and must not be reported as the target fiber's exit.
+-/
+def testFiberInterruptDistinguishesItsOwnInterruption : IO Unit := do
+  let childMasked ← IO.mkRef false
+  let joining ← IO.mkRef false
+  let continued ← IO.mkRef false
+  -- The child ignores interruption, so the parent stays blocked in the join.
+  -- It signals from inside the mask: a request that arrives before the child
+  -- enters its uninterruptible region would stop it at its very first step.
+  let child : Z Unit Empty Unit :=
+    (do
+      let _ ← Z.succeed (childMasked.set true)
+      Z.repeatN 300 (Z.sleep 5)).uninterruptible
+  let parent : Z Unit Empty Unit := do
+    let fiber ← child.fork "stubborn-child"
+    let _ ← Z.succeed (waitForFlag "child inside its mask" childMasked)
+    let _ ← Z.succeed (joining.set true)
+    let _ ← fiber.interrupt
+    let _ ← Z.succeed (continued.set true)
+    pure ()
+  let parentFiber ← Z.unsafeFork parent "self-interrupted-joiner"
+  waitForFlag "parent reaching the join" joining
+  IO.sleep 25
+  parentFiber.requestInterrupt
+  -- The parent still waits for its uninterruptible child before it exits.
+  match ← fiberExitWithin parentFiber 5000 with
+  | some (.failure .interrupt) => pure ()
+  | some exit =>
+      failTest s!"the interrupted joiner returned {exit}"
+  | none => failTest "the interrupted joiner never completed"
+  assertTrue
+    "Fiber.interrupt reported the caller's own interruption as the \
+     target fiber's exit and let the caller continue"
+    !(← continued.get)
+
+/--
+A finalizer already running must finish even if another interrupt arrives
+while it is in progress.
+-/
+def testEnsuringFinalizerCompletesUnderInterrupt : IO Unit := do
+  let registered ← IO.mkRef false
+  let started ← IO.mkRef false
+  let completed ← IO.mkRef false
+  let finalizer : Z Unit Empty Unit := do
+    let _ ← Z.succeed (started.set true)
+    let _ ← Z.repeatN 20 (Z.sleep 5)
+    let _ ← Z.succeed (completed.set true)
+    pure ()
+  let program : Z Unit Empty Unit :=
+    (Z.async fun _ => registered.set true).ensuring finalizer
+  let fiber ← Z.unsafeFork program "finalizer-under-interrupt"
+  waitForFlag "async registration" registered
+  fiber.requestInterrupt
+  waitForFlag "finalizer start" started
+  -- A second request lands while the finalizer is still running.
+  fiber.requestInterrupt
+  match ← fiberExitWithin fiber with
+  | some _ => pure ()
+  | none => failTest "the interrupted fiber never completed"
+  assertTrue
+    "a second interrupt abandoned a finalizer that had already started"
+    (← flagBecameTrue completed)
+
 /-! ## Defect handling -/
 
 private def failingCurrentNodeDiagram : ExecutionDiagram (IO Unit) :=
@@ -284,6 +350,10 @@ def regressionTests : List (String × IO Unit) := [
   ("testBlockingRegistrationIsInterruptible",
     testBlockingRegistrationIsInterruptible),
   ("testAsyncInterruptCancelerRunsOnce", testAsyncInterruptCancelerRunsOnce),
+  ("testFiberInterruptDistinguishesItsOwnInterruption",
+    testFiberInterruptDistinguishesItsOwnInterruption),
+  ("testEnsuringFinalizerCompletesUnderInterrupt",
+    testEnsuringFinalizerCompletesUnderInterrupt),
   ("testInterpreterDefectRunsFinalizer", testInterpreterDefectRunsFinalizer),
   ("testHEIOSynchronousCallbackDoesNotDeadlock",
     testHEIOSynchronousCallbackDoesNotDeadlock),
