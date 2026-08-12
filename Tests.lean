@@ -1,20 +1,14 @@
 import Z
+import Tests.Support
+import Tests.Regressions
+import Tests.RegressionsProvide
+import Tests.RegressionsKeyed
 import Examples.GithubIssueSync
 import Examples.StableServiceKeysDemo
 import Examples.TodoReport
 import Std.Data.HashSet
 
 open Fiber
-
-def failTest {A : Type} (message : String) : IO A :=
-  throw (IO.userError message)
-
-def assertTrue (message : String) (condition : Bool) : IO Unit :=
-  unless condition do
-    failTest message
-
-def runProgram [ToString A] (name : String) (program : Z Unit E A) : IO (Exit E A) := do
-  Z.unsafeRunSync program name
 
 def observerRaceOnce (index : Nat) : IO Bool := do
   let fiber : Fiber Empty Nat <- Fiber.empty s!"observer-race-{index}"
@@ -99,18 +93,6 @@ def testAsyncInterruption : IO Unit := do
   match <- runProgram "async-interruption" program with
   | .success (.failure .interrupt) => pure ()
   | _ => failTest "interrupting a pending async effect did not complete the fiber"
-
-partial def waitForFlag
-    (name : String)
-    (flag : IO.Ref Bool)
-    (attempts : Nat := 1000) : IO Unit := do
-  if ← flag.get then
-    pure ()
-  else if attempts == 0 then
-    failTest s!"timed out while waiting for {name}"
-  else
-    IO.sleep 1
-    waitForFlag name flag (attempts - 1)
 
 def testAsyncInterruptCanceler : IO Unit := do
   let registering ← IO.mkRef false
@@ -1257,52 +1239,77 @@ def testZDoInferredFinally : IO Unit := do
   assertTrue "zdo finally did not run before loop control resumed"
     ((← finalizerCount.get) == 3)
 
-def main : IO Unit := do
-  testFinalizerFailure
-  testIOErrorCatch
-  testExitEquality
-  testCompleteBeforeTask
-  testAsyncRegistrationFailure
-  testAsyncImmediateResumeWins
-  testAsyncDelayedResume
-  testAsyncInterruption
-  testAsyncInterruptCanceler
-  testAsyncInterruptCancelerFailure
-  testAsyncResumeDefect
-  testAsyncInterruptResumeDefect
-  testUnsafeRunSyncHasNoPollingDelay
-  testInterpreterLoggingIsDisabledByDefault
-  testFiberIdsAreUnique
-  testHEIOAsyncInterruption
-  testPreInterruptedLayerBuild
-  testParallelLayerInterruption
-  testObserverRace
-  testGraphVizEscaping
-  testChildDiagramLifetime
-  testHighUniverseEnvironment
-  testHighUniverseLayerFailure
-  testLayerFromZ
-  testLayerReleaseOrder
-  testLayerReleaseAfterProgramFailure
-  testLayerCleanupAfterAcquisitionFailure
-  testLayerReleaseFailure
-  testHighUniverseLayerRelease
-  testHighUniverseLayerSharing
-  testHighUniverseParallelLayers
-  testParallelLayerOverlap
-  testParallelLayerFailureCleanup
-  testParallelLayerFailureCancelsSibling
-  testAcquireReleaseZLayer
-  testGithubIssueSync
-  testZDoEnvironmentComposition
-  testZDoControlFlow
-  testZDoInferredEnvironment
-  testZDoInferredControlFlow
-  testErrorChannelJoin
-  testZDoInferredErrors
-  testZDoInferredCatch
-  testZDoInferredMultipleCatch
-  testZDoInferredFinally
-  StableServiceKeys.demo
-  TodoReport.test
-  IO.println "All regression tests passed."
+def suite : List (String × IO Unit) := [
+  ("testFinalizerFailure", testFinalizerFailure),
+  ("testIOErrorCatch", testIOErrorCatch),
+  ("testExitEquality", testExitEquality),
+  ("testCompleteBeforeTask", testCompleteBeforeTask),
+  ("testAsyncRegistrationFailure", testAsyncRegistrationFailure),
+  ("testAsyncImmediateResumeWins", testAsyncImmediateResumeWins),
+  ("testAsyncDelayedResume", testAsyncDelayedResume),
+  ("testAsyncInterruption", testAsyncInterruption),
+  ("testAsyncInterruptCanceler", testAsyncInterruptCanceler),
+  ("testAsyncInterruptCancelerFailure", testAsyncInterruptCancelerFailure),
+  ("testAsyncResumeDefect", testAsyncResumeDefect),
+  ("testAsyncInterruptResumeDefect", testAsyncInterruptResumeDefect),
+  ("testUnsafeRunSyncHasNoPollingDelay", testUnsafeRunSyncHasNoPollingDelay),
+  ("testInterpreterLoggingIsDisabledByDefault",
+    testInterpreterLoggingIsDisabledByDefault),
+  ("testFiberIdsAreUnique", testFiberIdsAreUnique),
+  ("testHEIOAsyncInterruption", testHEIOAsyncInterruption),
+  ("testPreInterruptedLayerBuild", testPreInterruptedLayerBuild),
+  ("testParallelLayerInterruption", testParallelLayerInterruption),
+  ("testObserverRace", testObserverRace),
+  ("testGraphVizEscaping", testGraphVizEscaping),
+  ("testChildDiagramLifetime", testChildDiagramLifetime),
+  ("testHighUniverseEnvironment", testHighUniverseEnvironment),
+  ("testHighUniverseLayerFailure", testHighUniverseLayerFailure),
+  ("testLayerFromZ", testLayerFromZ),
+  ("testLayerReleaseOrder", testLayerReleaseOrder),
+  ("testLayerReleaseAfterProgramFailure", testLayerReleaseAfterProgramFailure),
+  ("testLayerCleanupAfterAcquisitionFailure",
+    testLayerCleanupAfterAcquisitionFailure),
+  ("testLayerReleaseFailure", testLayerReleaseFailure),
+  ("testHighUniverseLayerRelease", testHighUniverseLayerRelease),
+  ("testHighUniverseLayerSharing", testHighUniverseLayerSharing),
+  ("testHighUniverseParallelLayers", testHighUniverseParallelLayers),
+  ("testParallelLayerOverlap", testParallelLayerOverlap),
+  ("testParallelLayerFailureCleanup", testParallelLayerFailureCleanup),
+  ("testParallelLayerFailureCancelsSibling",
+    testParallelLayerFailureCancelsSibling),
+  ("testAcquireReleaseZLayer", testAcquireReleaseZLayer),
+  ("testGithubIssueSync", testGithubIssueSync),
+  ("testZDoEnvironmentComposition", testZDoEnvironmentComposition),
+  ("testZDoControlFlow", testZDoControlFlow),
+  ("testZDoInferredEnvironment", testZDoInferredEnvironment),
+  ("testZDoInferredControlFlow", testZDoInferredControlFlow),
+  ("testErrorChannelJoin", testErrorChannelJoin),
+  ("testZDoInferredErrors", testZDoInferredErrors),
+  ("testZDoInferredCatch", testZDoInferredCatch),
+  ("testZDoInferredMultipleCatch", testZDoInferredMultipleCatch),
+  ("testZDoInferredFinally", testZDoInferredFinally),
+  ("stableServiceKeysDemo", StableServiceKeys.demo),
+  ("todoReport", TodoReport.test)
+]
+    |>.append regressionTests
+    |>.append provideRegressionTests
+    |>.append keyedRegressionTests
+
+/--
+Run the whole suite, or only the tests named on the command line:
+`lake exe tests testAsyncInterruptionRunsFinalizer`.
+-/
+def main (args : List String) : IO Unit := do
+  let selected :=
+    if args.isEmpty then
+      suite
+    else
+      suite.filter fun (name, _) => args.contains name
+  if selected.isEmpty then
+    throw (IO.userError s!"no test matched {args}")
+  for (name, test) in selected do
+    try
+      test
+    catch error =>
+      throw (IO.userError s!"{name}: {error}")
+  IO.println s!"All {selected.length} regression tests passed."

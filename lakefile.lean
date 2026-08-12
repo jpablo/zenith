@@ -34,6 +34,17 @@ lean_exe interpreterBench {
 lean_lib Z
 lean_lib Examples
 
+-- Helpers and regression cases for the `tests` executable.
+-- `Tests.NotationScope` is deliberately excluded: it is a compile-only guard
+-- checked with `lake env lean Tests/NotationScope.lean`.
+lean_lib TestsLib where
+  roots := #[
+    `Tests.Support,
+    `Tests.Regressions,
+    `Tests.RegressionsProvide,
+    `Tests.RegressionsKeyed
+  ]
+
 
 -- meta if get_config? env = some "dev" then -- dev is so not everyone has to build it
 -- require «doc-gen4» from git "https://github.com/leanprover/doc-gen4" @ "main"
