@@ -122,16 +122,16 @@ def acquireRelease
 
 /--
 Create a layer that shares one build of `self` inside its scope. The returned
-layer can be used more than once. Its resource is released once when the outer
-scope closes.
+layer can be used more than once, and it builds `self` from the input its first
+use supplies. Its resource is released once when the outer scope closes.
 -/
 def memoize
     (self : Layer R E A) : Layer R E (Layer R E A) :=
-  ⟨fun environment =>
+  ⟨fun _ =>
     HEIO.bind (HEIO.liftBaseIO.{0} Std.BaseMutex.new) fun mutex =>
       HEIO.bind (HEIO.mkRef (MemoState.empty : MemoState E A)) fun cache =>
         let shared : Layer R E A :=
-          ⟨fun _ => buildMemoized self environment mutex.down cache⟩
+          ⟨fun environment => buildMemoized self environment mutex.down cache⟩
         HEIO.pure <|
           Resource.make shared (releaseMemoized mutex.down cache)⟩
 

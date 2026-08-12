@@ -11,6 +11,10 @@ ordinary `KeyedLayer` compositions. `KeyedLayer.make [layers]` keeps the
 complete expected-type form for an explicitly selected input or error type.
 The dependency graph exists only while Lean elaborates the term.
 
+A candidate input reads a layer output whenever one provides its key, which is
+the priority the generated composition applies. The external input row supplies
+only the services that no selected layer produces.
+
 `Z.provide` reads the program's keyed environment, infers the graph input and
 the joined program-and-layer error channel, and scopes the generated layer
 around the program.
@@ -164,14 +168,17 @@ private partial def resolveCandidate
   let mut dependencies := #[]
   let mut resolution := resolution
   for input in candidate.inputs do
-    match ← findByKey resolution.external input with
-    | some externalEntry =>
-        unless ← sameEntry externalEntry input do
-          throwErrorAt candidate.stx m!
-            "external service {(← entryMessage externalEntry)} has the same key as {(← entryMessage input)}, but it has a different service type"
-    | none =>
-        let providers ← providersFor candidates input
-        if providers.isEmpty then
+    let providers ← providersFor candidates input
+    if providers.size > 1 then
+      throwErrorAt candidate.stx m!
+        "more than one layer provides required service {(← entryMessage input)}"
+    else if providers.isEmpty then
+      match ← findByKey resolution.external input with
+      | some externalEntry =>
+          unless ← sameEntry externalEntry input do
+            throwErrorAt candidate.stx m!
+              "external service {(← entryMessage externalEntry)} has the same key as {(← entryMessage input)}, but it has a different service type"
+      | none =>
           if fixedExternal then
             throwErrorAt candidate.stx m!
               "no layer provides required service {(← entryMessage input)}"
@@ -180,16 +187,13 @@ private partial def resolveCandidate
               resolution with
               external := resolution.external.push input
             }
-        else if providers.size > 1 then
-          throwErrorAt candidate.stx m!
-            "more than one layer provides required service {(← entryMessage input)}"
-        else
-          let (providerIndex, providedEntry) := providers[0]!
-          unless ← sameEntry providedEntry input do
-            throwErrorAt candidate.stx m!
-              "provided service {(← entryMessage providedEntry)} has the requested key, but it has a different service type from {(← entryMessage input)}"
-          unless dependencies.contains providerIndex do
-            dependencies := dependencies.push providerIndex
+    else
+      let (providerIndex, providedEntry) := providers[0]!
+      unless ← sameEntry providedEntry input do
+        throwErrorAt candidate.stx m!
+          "provided service {(← entryMessage providedEntry)} has the requested key, but it has a different service type from {(← entryMessage input)}"
+      unless dependencies.contains providerIndex do
+        dependencies := dependencies.push providerIndex
   for dependency in dependencies do
     resolution ← resolveCandidate candidates fixedExternal dependency
       (index :: path) resolution
