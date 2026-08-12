@@ -171,6 +171,123 @@ def testZipParPreservesCancelledCleanupFailure : IO Unit := do
         (defect == cleanupDefect)
   | _ => failTest "zipPar lost the cancelled sibling cleanup failure"
 
+def testRaceReturnsFirstSuccessAndCancelsLoser : IO Unit := do
+  let leftStarted ← IO.mkRef false
+  let leftCancelled ← IO.mkRef false
+  let left : Z Unit String String :=
+    Z.asyncInterrupt fun _ => do
+      leftStarted.set true
+      pure (leftCancelled.set true)
+  let right : Z Unit String String := zdo
+    Z.succeed (waitForFlag "left race branch" leftStarted)
+    Z.succeedNow "right won"
+  match ← runProgram "race-first-success" (left.race right) with
+  | .success "right won" => pure ()
+  | _ => failTest "race did not return the first successful value"
+  assertTrue "race did not cancel the losing branch"
+    (← leftCancelled.get)
+
+def testRaceWaitsForLoserFinalizer : IO Unit := do
+  let leftStarted ← IO.mkRef false
+  let leftFinalized ← IO.mkRef false
+  let pending : Z Unit Empty Unit :=
+    Z.asyncInterrupt fun _ => do
+      leftStarted.set true
+      pure IO.unit
+  let finalizer : Z Unit Empty Unit := Z.succeed do
+    IO.sleep 5
+    leftFinalized.set true
+  let left := pending.ensuring finalizer
+  let right : Z Unit Empty Unit := zdo
+    Z.succeed (waitForFlag "race loser" leftStarted)
+    Z.succeedNow ()
+  match ← runProgram "race-loser-finalizer" (left.race right) with
+  | .success () => pure ()
+  | _ => failTest "race did not return the successful branch"
+  assertTrue "race returned before the loser finalizer completed"
+    (← leftFinalized.get)
+
+def testRaceWaitsForSuccessAfterFailure : IO Unit := do
+  let failed : Z Unit String String := Z.fail "left failed"
+  let succeeded : Z Unit String String := zdo
+    Z.sleep 5
+    Z.succeedNow "right succeeded"
+  match ← runProgram "race-after-failure" (failed.race succeeded) with
+  | .success "right succeeded" => pure ()
+  | _ => failTest "race treated the first failure as the winner"
+
+def testRaceCombinesDualFailures : IO Unit := do
+  let observers ← IO.mkRef
+    ([] : List (String × Observer String Unit))
+  let branch (error : String) : Z Unit String Unit :=
+    Z.async fun observer => do
+      let ready ← observers.modifyGet fun current =>
+        let updated := (error, observer) :: current
+        (if updated.length == 2 then updated else [], updated)
+      for (branchError, callback) in ready do
+        callback (.failure (.fail branchError))
+  match ← runProgram "race-dual-failure" <|
+      (branch "left").race (branch "right") with
+  | .failure (.parallel (.fail "left") (.fail "right")) => pure ()
+  | _ => failTest "race did not preserve both branch failures"
+
+def testRaceExternalInterruption : IO Unit := do
+  let leftStarted ← IO.mkRef false
+  let rightStarted ← IO.mkRef false
+  let leftCancelled ← IO.mkRef false
+  let rightCancelled ← IO.mkRef false
+  let pending
+      (started cancelled : IO.Ref Bool) : Z Unit Empty Unit :=
+    Z.asyncInterrupt fun _ => do
+      started.set true
+      pure (cancelled.set true)
+  let program :=
+    (pending leftStarted leftCancelled).race
+      (pending rightStarted rightCancelled)
+  let fiber ← Z.unsafeFork program "race-external-interruption"
+  waitForFlag "left race start" leftStarted
+  waitForFlag "right race start" rightStarted
+  fiber.requestInterrupt
+  match ← fiber.await with
+  | .failure .interrupt => pure ()
+  | _ => failTest "race did not preserve external interruption"
+  fiber.awaitTask
+  assertTrue "race did not cancel both children after interruption"
+    ((← leftCancelled.get) && (← rightCancelled.get))
+
+def testRaceCombinesRequirementsAndErrors : IO Unit := do
+  let left : Z Nat String Nat := Z.serviceWith id
+  let right : Z Bool Nat Nat := Z.serviceWith fun value =>
+    if value then 7 else 0
+  let successProgram : Z (Nat × Bool) (String ⊕ Nat) Nat :=
+    left.race right
+  match ← runProgram "race-combined-requirements" <|
+      successProgram.provideEnvironment (7, true) with
+  | .success 7 => pure ()
+  | _ => failTest "race did not combine environment requirements"
+
+  let failedLeft : Z Unit String Unit := Z.fail "left failed"
+  let failedRight : Z Unit Nat Unit := Z.fail 9
+  let failureProgram : Z Unit (String ⊕ Nat) Unit :=
+    failedLeft.race failedRight
+  match ← runProgram "race-combined-errors" failureProgram with
+  | .failure (.parallel
+      (.fail (.inl "left failed"))
+      (.fail (.inr 9))) => pure ()
+  | _ => failTest "race did not combine branch error channels"
+
+def testRaceEitherPreservesWinnerSide : IO Unit := do
+  let leftCancelled ← IO.mkRef false
+  let left : Z Unit Empty Nat :=
+    Z.asyncInterrupt fun _ =>
+      pure (leftCancelled.set true)
+  let right : Z Unit Empty String := Z.succeedNow "right"
+  match ← runProgram "race-either" (left.raceEither right) with
+  | .success (.inr "right") => pure ()
+  | _ => failTest "raceEither did not tag the winning branch"
+  assertTrue "raceEither did not cancel the losing branch"
+    (← leftCancelled.get)
+
 def testIOErrorCatch : IO Unit := do
   let program : Z Unit Empty String := do
     try
@@ -638,6 +755,16 @@ def testHighUniverseZipPar : IO Unit := do
   match ← runProgram "high-universe-zip-par" program with
   | .success (2, 2) => pure ()
   | _ => failTest "zipPar did not preserve a high-universe environment"
+
+def testHighUniverseRace : IO Unit := do
+  let service : HighGithub := {
+    getIssues := fun _ => Z.succeedNow [1, 2]
+  }
+  let program :=
+    (highGithubProgram.race highGithubProgram).provideEnvironment service
+  match ← runProgram "high-universe-race" program with
+  | .success 2 => pure ()
+  | _ => failTest "race did not preserve a high-universe environment"
 
 def failingHighGithubLayer : Layer Unit IO.Error HighGithub :=
   Layer.failCause (.fail (IO.userError "layer build failed"))
@@ -1575,6 +1702,17 @@ def suite : List (String × IO Unit) := [
     testZipParCombinesRequirementsAndErrors),
   ("testZipParPreservesCancelledCleanupFailure",
     testZipParPreservesCancelledCleanupFailure),
+  ("testRaceReturnsFirstSuccessAndCancelsLoser",
+    testRaceReturnsFirstSuccessAndCancelsLoser),
+  ("testRaceWaitsForLoserFinalizer", testRaceWaitsForLoserFinalizer),
+  ("testRaceWaitsForSuccessAfterFailure",
+    testRaceWaitsForSuccessAfterFailure),
+  ("testRaceCombinesDualFailures", testRaceCombinesDualFailures),
+  ("testRaceExternalInterruption", testRaceExternalInterruption),
+  ("testRaceCombinesRequirementsAndErrors",
+    testRaceCombinesRequirementsAndErrors),
+  ("testRaceEitherPreservesWinnerSide",
+    testRaceEitherPreservesWinnerSide),
   ("testIOErrorCatch", testIOErrorCatch),
   ("testExitEquality", testExitEquality),
   ("testCompleteBeforeTask", testCompleteBeforeTask),
@@ -1604,6 +1742,7 @@ def suite : List (String × IO Unit) := [
   ("testChildDiagramLifetime", testChildDiagramLifetime),
   ("testHighUniverseEnvironment", testHighUniverseEnvironment),
   ("testHighUniverseZipPar", testHighUniverseZipPar),
+  ("testHighUniverseRace", testHighUniverseRace),
   ("testHighUniverseLayerFailure", testHighUniverseLayerFailure),
   ("testLayerFromZ", testLayerFromZ),
   ("testLayerReleaseOrder", testLayerReleaseOrder),

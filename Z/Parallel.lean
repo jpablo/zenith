@@ -65,6 +65,39 @@ private def awaitParallel
       | .failure leftCause =>
           pure (.failure (.parallel leftCause rightCause))
 
+private def awaitRace
+    (left : Fiber E A)
+    (right : Fiber E B)
+    (leftResult : A -> C)
+    (rightResult : B -> C) : IO (Exit E C) := do
+  let _ : Nonempty (ParallelExit E A B) :=
+    ⟨.left (.failure .interrupt)⟩
+  let first ← IO.Promise.new (α := ParallelExit E A B)
+  let _ ← IO.asTask do
+    first.resolve (.left (← awaitFiberExit left))
+  let _ ← IO.asTask do
+    first.resolve (.right (← awaitFiberExit right))
+  match ← IO.wait first.result? with
+  | none =>
+      pure (.failure (.die <| IO.userError
+        "the raced effects did not report completion"))
+  | some (.left (.success value)) =>
+      let _ ← interruptAndAwait right
+      pure (.success (leftResult value))
+  | some (.right (.success value)) =>
+      let _ ← interruptAndAwait left
+      pure (.success (rightResult value))
+  | some (.left (.failure leftCause)) =>
+      match ← awaitFiberExit right with
+      | .success value => pure (.success (rightResult value))
+      | .failure rightCause =>
+          pure (.failure (.parallel leftCause rightCause))
+  | some (.right (.failure rightCause)) =>
+      match ← awaitFiberExit left with
+      | .success value => pure (.success (leftResult value))
+      | .failure leftCause =>
+          pure (.failure (.parallel leftCause rightCause))
+
 /-- Run two effects with one complete environment and error channel. -/
 private def zipWithParSame
     (self : Z R E A)
@@ -78,6 +111,22 @@ private def zipWithParSame
       Z.asyncInterrupt fun callback => do
         let _ ← IO.asTask do
           callback (← awaitParallel left right combine)
+        pure (cancelParallel left right)
+
+/-- Race two effects with one complete environment and error channel. -/
+private def raceMapSame
+    (self : Z R E A)
+    (other : Z R E B)
+    (leftResult : A -> C)
+    (rightResult : B -> C) : Z R E C :=
+  let forkWithError {X : Type} (effect : Z R E X) (name : String) :
+      Z R E (Fiber E X) :=
+    (effect.fork name).mapFailure Empty.elim
+  (forkWithError self "race-left").flatMap fun left =>
+    (forkWithError other "race-right").flatMap fun right =>
+      Z.asyncInterrupt fun callback => do
+        let _ ← IO.asTask do
+          callback (← awaitRace left right leftResult rightResult)
         pure (cancelParallel left right)
 
 /--
@@ -103,5 +152,36 @@ def zipPar
     (self : Z R₁ E₁ A)
     (other : Z R₂ E₂ B) : Z R E (A × B) :=
   self.zipWithPar other (·, ·)
+
+/--
+Run two effects concurrently and return the first successful value. If the
+first completion is a failure, wait for the other effect. If both effects
+fail, preserve both causes in lexical order.
+-/
+def race
+    [meet : Environment.Meet R₁ R₂ R]
+    [join : ErrorChannel.Join E₁ E₂ E]
+    (self : Z R₁ E₁ A)
+    (other : Z R₂ E₂ A) : Z R E A :=
+  let left : Z R E A :=
+    (self.contramap meet.left).mapFailure join.left
+  let right : Z R E A :=
+    (other.contramap meet.right).mapFailure join.right
+  raceMapSame left right id id
+
+/--
+Run two effects concurrently and tag the first successful value with its
+branch. If both effects fail, preserve both causes in lexical order.
+-/
+def raceEither
+    [meet : Environment.Meet R₁ R₂ R]
+    [join : ErrorChannel.Join E₁ E₂ E]
+    (self : Z R₁ E₁ A)
+    (other : Z R₂ E₂ B) : Z R E (Sum A B) :=
+  let left : Z R E A :=
+    (self.contramap meet.left).mapFailure join.left
+  let right : Z R E B :=
+    (other.contramap meet.right).mapFailure join.right
+  raceMapSame left right Sum.inl Sum.inr
 
 end Z

@@ -30,6 +30,11 @@ def zipParExample : Z Unit Empty (Nat × String) :=
   (Z.sleep 10 *> Z.succeedNow 8).zipPar
     (Z.sleep 10 *> Z.succeedNow "LO")
 
+/-- Return the first successful effect and stop the losing effect. -/
+def raceExample : Z Unit Empty String :=
+  (Z.sleep 20 *> Z.succeedNow "slow").race
+    (Z.sleep 10 *> Z.succeedNow "fast")
+
 /-- The same operation as `zipExample`, written with `do`. -/
 def zipExample2 : Z Unit Empty (Nat × String) := do
   let number <- Z.succeedNow 8
