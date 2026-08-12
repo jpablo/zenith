@@ -1,4 +1,5 @@
 import Z.Interpreter
+import Z.Parallel
 import Z.Scope
 import Z.DefaultServices
 import Z.Layer

@@ -64,6 +64,113 @@ def testCompositeCauseRecovery : IO Unit := do
       assertTrue "catchAll changed an unhandled defect" (error == defect)
   | _ => failTest "catchAll did not preserve a defect-only cause tree"
 
+def testZipParSuccessAndOverlap : IO Unit := do
+  let counter ← Std.Mutex.new 0
+  let branch : Z Unit Empty Nat :=
+    Z.succeed do
+      counter.atomically do modify (· + 1)
+      IO.sleep 50
+      counter.atomically get
+  let program := branch.zipPar branch
+  match ← runProgram "zip-par-success" program with
+  | .success (2, 2) => pure ()
+  | _ => failTest "zipPar did not run both effects concurrently"
+
+def testZipParCancelsFailingSibling : IO Unit := do
+  let leftStarted ← IO.mkRef false
+  let leftCancelled ← IO.mkRef false
+  let left : Z Unit String String :=
+    Z.asyncInterrupt fun _ => do
+      leftStarted.set true
+      pure (leftCancelled.set true)
+  let right : Z Unit String String := zdo
+    Z.succeed (waitForFlag "left zipPar branch" leftStarted)
+    Z.fail "right failed"
+  match ← runProgram "zip-par-fail-fast" (left.zipPar right) with
+  | .failure (.fail "right failed") => pure ()
+  | _ => failTest "zipPar did not preserve the first branch failure"
+  assertTrue "zipPar did not cancel the pending sibling"
+    (← leftCancelled.get)
+
+def testZipParCombinesDualFailures : IO Unit := do
+  let observers ← IO.mkRef
+    ([] : List (String × Observer String Unit))
+  let branch (error : String) : Z Unit String Unit :=
+    Z.async fun observer => do
+      let ready ← observers.modifyGet fun current =>
+        let updated := (error, observer) :: current
+        (if updated.length == 2 then updated else [], updated)
+      for (branchError, callback) in ready do
+        callback (.failure (.fail branchError))
+  match ← runProgram "zip-par-dual-failure" <|
+      (branch "left").zipPar (branch "right") with
+  | .failure (.parallel (.fail "left") (.fail "right")) => pure ()
+  | _ => failTest "zipPar did not preserve both branch failures"
+
+def testZipParExternalInterruption : IO Unit := do
+  let leftStarted ← IO.mkRef false
+  let rightStarted ← IO.mkRef false
+  let leftCancelled ← IO.mkRef false
+  let rightCancelled ← IO.mkRef false
+  let pending
+      (started cancelled : IO.Ref Bool) : Z Unit Empty Unit :=
+    Z.asyncInterrupt fun _ => do
+      started.set true
+      pure (cancelled.set true)
+  let program :=
+    (pending leftStarted leftCancelled).zipPar
+      (pending rightStarted rightCancelled)
+  let fiber ← Z.unsafeFork program "zip-par-external-interruption"
+  waitForFlag "left zipPar start" leftStarted
+  waitForFlag "right zipPar start" rightStarted
+  fiber.requestInterrupt
+  match ← fiber.await with
+  | .failure .interrupt => pure ()
+  | _ => failTest "zipPar did not preserve external interruption"
+  fiber.awaitTask
+  assertTrue "zipPar did not cancel both children after interruption"
+    ((← leftCancelled.get) && (← rightCancelled.get))
+
+def testZipParCombinesRequirementsAndErrors : IO Unit := do
+  let left : Z Nat String Nat := Z.serviceWith id
+  let right : Z Bool Nat Bool := Z.serviceWith id
+  let program : Z (Nat × Bool) (String ⊕ Nat) (Nat × Bool) :=
+    left.zipPar right
+  match ← runProgram "zip-par-combined-requirements" <|
+      program.provideEnvironment (7, true) with
+  | .success (7, true) => pure ()
+  | _ => failTest "zipPar did not combine environment requirements"
+
+  let failed : Z Unit String Unit := Z.fail "left failed"
+  let succeeded : Z Unit Nat Unit :=
+    (Z.succeedNow ()).mapFailure Empty.elim
+  let failureProgram : Z Unit (String ⊕ Nat) (Unit × Unit) :=
+    failed.zipPar succeeded
+  match ← runProgram "zip-par-combined-errors" failureProgram with
+  | .failure (.fail (.inl "left failed")) => pure ()
+  | _ => failTest "zipPar did not combine branch error channels"
+
+def testZipParPreservesCancelledCleanupFailure : IO Unit := do
+  let leftStarted ← IO.mkRef false
+  let cleanupDefect := IO.userError "left cleanup failed"
+  let pending : Z Unit String Unit :=
+    Z.asyncInterrupt fun _ => do
+      leftStarted.set true
+      pure IO.unit
+  let cleanup : Z Unit Empty Unit :=
+    (Z.die cleanupDefect).map impossible
+  let left := pending.ensuring cleanup
+  let right : Z Unit String Unit := zdo
+    Z.succeed (waitForFlag "left cleanup branch" leftStarted)
+    Z.fail "right failed"
+  match ← runProgram "zip-par-cancelled-cleanup" (left.zipPar right) with
+  | .failure (.parallel
+      (.sequential .interrupt (.die defect))
+      (.fail "right failed")) =>
+      assertTrue "zipPar changed the sibling cleanup defect"
+        (defect == cleanupDefect)
+  | _ => failTest "zipPar lost the cancelled sibling cleanup failure"
+
 def testIOErrorCatch : IO Unit := do
   let program : Z Unit Empty String := do
     try
@@ -521,6 +628,16 @@ def testHighUniverseEnvironment : IO Unit := do
   match <- highGithubLayer.run () highGithubProgram "high-environment" with
   | .success 1 => pure ()
   | _ => failTest "the high-universe service did not run"
+
+def testHighUniverseZipPar : IO Unit := do
+  let service : HighGithub := {
+    getIssues := fun _ => Z.succeedNow [1, 2]
+  }
+  let program :=
+    (highGithubProgram.zipPar highGithubProgram).provideEnvironment service
+  match ← runProgram "high-universe-zip-par" program with
+  | .success (2, 2) => pure ()
+  | _ => failTest "zipPar did not preserve a high-universe environment"
 
 def failingHighGithubLayer : Layer Unit IO.Error HighGithub :=
   Layer.failCause (.fail (IO.userError "layer build failed"))
@@ -1450,6 +1567,14 @@ def suite : List (String × IO Unit) := [
   ("testFinalizerFailure", testFinalizerFailure),
   ("testSequentialFinalizerFailure", testSequentialFinalizerFailure),
   ("testCompositeCauseRecovery", testCompositeCauseRecovery),
+  ("testZipParSuccessAndOverlap", testZipParSuccessAndOverlap),
+  ("testZipParCancelsFailingSibling", testZipParCancelsFailingSibling),
+  ("testZipParCombinesDualFailures", testZipParCombinesDualFailures),
+  ("testZipParExternalInterruption", testZipParExternalInterruption),
+  ("testZipParCombinesRequirementsAndErrors",
+    testZipParCombinesRequirementsAndErrors),
+  ("testZipParPreservesCancelledCleanupFailure",
+    testZipParPreservesCancelledCleanupFailure),
   ("testIOErrorCatch", testIOErrorCatch),
   ("testExitEquality", testExitEquality),
   ("testCompleteBeforeTask", testCompleteBeforeTask),
@@ -1478,6 +1603,7 @@ def suite : List (String × IO Unit) := [
   ("testGraphVizDiagramEvents", testGraphVizDiagramEvents),
   ("testChildDiagramLifetime", testChildDiagramLifetime),
   ("testHighUniverseEnvironment", testHighUniverseEnvironment),
+  ("testHighUniverseZipPar", testHighUniverseZipPar),
   ("testHighUniverseLayerFailure", testHighUniverseLayerFailure),
   ("testLayerFromZ", testLayerFromZ),
   ("testLayerReleaseOrder", testLayerReleaseOrder),

@@ -25,6 +25,11 @@ def succeedNowExample : Z Unit Empty String :=
 def zipExample : Z Unit Empty (Nat × String) :=
   (Z.succeedNow 8).zip (Z.succeedNow "LO")
 
+/-- Run both effects in child fibers and keep left-to-right result order. -/
+def zipParExample : Z Unit Empty (Nat × String) :=
+  (Z.sleep 10 *> Z.succeedNow 8).zipPar
+    (Z.sleep 10 *> Z.succeedNow "LO")
+
 /-- The same operation as `zipExample`, written with `do`. -/
 def zipExample2 : Z Unit Empty (Nat × String) := do
   let number <- Z.succeedNow 8
