@@ -137,6 +137,20 @@ def acquireRelease
   masked.uninterruptible
 
 /--
+Fork `self` and attach the child lifetime to the current scope.
+Scope closure interrupts the child and waits for its final exit.
+-/
+def forkScoped
+    [meet : Environment.Meet R Scope Scoped]
+    (self : Z R E A)
+    (name : String := "scoped") : Z Scoped Empty (Fiber E A) :=
+  Z.acquireRelease (meet := meet) (self.fork name) fun fiber =>
+    Z.internal.succeed do
+      fiber.requestInterrupt
+      let _ ← fiber.await
+      pure ()
+
+/--
 Create a fresh scope, supply it to `effect`, and close it on every exit path.
 -/
 def «scoped»

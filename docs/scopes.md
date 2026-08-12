@@ -33,6 +33,19 @@ def registeredCleanup : Z Scope Empty Unit :=
   Z.addFinalizer cleanup
 ```
 
+## Scoped fibers
+
+`Z.forkScoped` attaches a child fiber to the current scope:
+
+```lean
+def runWorker : Z Scope Empty (Fiber Empty Unit) :=
+  worker.forkScoped "worker"
+```
+
+Forking and finalizer registration form one uninterruptible operation. When
+the scope closes, it interrupts the child and waits for the child exit. A
+child that completed before scope closure keeps its original exit value.
+
 The public `Scope` value can register a finalizer through
 `Scope.addFinalizer`. Only the private owner capability created by `Z.scoped`
 can close the scope.

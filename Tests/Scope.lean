@@ -199,6 +199,62 @@ def testScopePreservesHighUniverseRequirements : IO Unit := do
   assertTrue "the high-universe resource did not release"
     ((← events.get) == ["release-high"])
 
+open ScopeTests in
+def testScopedFiberInterruptedAtClosure : IO Unit := do
+  let events ← IO.mkRef ([] : List String)
+  let started ← IO.mkRef false
+  let child : Z Unit Empty Unit :=
+    (Z.succeed (started.set true) *> Z.sleep 2000)
+      |>.ensuring (record events "child-finalizer")
+  let body : Z Scope Empty (Fiber Empty Unit) := do
+    let fiber ← child.forkScoped "scope-child"
+    Z.succeed (waitForFlag "scoped child" started)
+    pure fiber
+  let program : Z Unit Empty (Fiber Empty Unit) := Z.scoped body
+  let fiber ← match ← Z.unsafeRunSync program "scoped-fiber-closure" with
+    | .success fiber => pure fiber
+    | _ => failTest "the scoped fiber program failed"
+  match ← fiber.await with
+  | .failure .interrupt => pure ()
+  | _ => failTest "scope closure did not interrupt its child fiber"
+  fiber.awaitTask
+  assertTrue "scope closure did not wait for the child finalizer"
+    ((← events.get) == ["child-finalizer"])
+
+def testScopedFiberPreservesCompletedExit : IO Unit := do
+  let child : Z Unit String Unit := Z.fail "expected child failure"
+  let body : Z Scope Empty (Fiber String Unit) := do
+    let fiber ← child.forkScoped "completed-scope-child"
+    Z.succeed do
+      let _ ← fiber.await
+      pure ()
+    pure fiber
+  let program : Z Unit Empty (Fiber String Unit) := Z.scoped body
+  let fiber ← match ← Z.unsafeRunSync program "completed-scoped-fiber" with
+    | .success fiber => pure fiber
+    | _ => failTest "a completed scoped child failed its parent scope"
+  match ← fiber.await with
+  | .failure (.fail "expected child failure") => pure ()
+  | _ => failTest "scope closure changed the completed child exit"
+
+open ScopeTests in
+def testScopedFiberInterruptedAfterBodyFailure : IO Unit := do
+  let events ← IO.mkRef ([] : List String)
+  let started ← IO.mkRef false
+  let child : Z Unit Empty Unit :=
+    (Z.succeed (started.set true) *> Z.sleep 2000)
+      |>.ensuring (record events "failed-body-child-finalizer")
+  let body : Z Scope String Unit := zdo
+    let _ ← child.forkScoped "failed-body-scope-child"
+    Z.succeed (waitForFlag "failed-body scoped child" started)
+    Z.fail "expected body failure"
+  let program : Z Unit String Unit := Z.scoped body
+  match ← runProgram "scoped-fiber-body-failure" program with
+  | .failure (.fail "expected body failure") => pure ()
+  | _ => failTest "scope closure did not preserve the body failure"
+  assertTrue "body failure abandoned its scoped child"
+    ((← events.get) == ["failed-body-child-finalizer"])
+
 def scopeTests : List (String × IO Unit) := [
   ("testScopeReleaseOrder", testScopeReleaseOrder),
   ("testScopeReleasesAfterFailureAndDefect",
@@ -213,5 +269,11 @@ def scopeTests : List (String × IO Unit) := [
     testScopePreservesOtherEnvironmentRequirements),
   ("testScopeSupportsDirectFinalizers", testScopeSupportsDirectFinalizers),
   ("testScopePreservesHighUniverseRequirements",
-    testScopePreservesHighUniverseRequirements)
+    testScopePreservesHighUniverseRequirements),
+  ("testScopedFiberInterruptedAtClosure",
+    testScopedFiberInterruptedAtClosure),
+  ("testScopedFiberPreservesCompletedExit",
+    testScopedFiberPreservesCompletedExit),
+  ("testScopedFiberInterruptedAfterBodyFailure",
+    testScopedFiberInterruptedAfterBodyFailure)
 ]
