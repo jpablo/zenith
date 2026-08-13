@@ -127,6 +127,25 @@ typed failure. Zenith combines the schedule and predicate environments with
 `Environment.Meet`. It does not run the predicate after the underlying
 schedule has stopped.
 
+## Output folds
+
+`Schedule.fold` replaces each schedule output with an accumulator:
+
+```lean
+def retryHistory : Schedule Unit RequestError (List Nat) :=
+  (Schedule.recurs 3).fold [] fun history retry =>
+    history ++ [retry]
+```
+
+The fold adds outputs only when the underlying schedule decides to continue.
+It does not add the terminal output. For example, the policy above returns
+`[0, 1, 2]` after its three permitted retries.
+
+`Schedule.foldZIO` accepts an effectful accumulator of type
+`Accumulator -> Output -> Z R Empty Accumulator`. It can use services and run
+effects, but it cannot produce a typed failure. Zenith combines its environment
+with the underlying schedule environment.
+
 ## Retry fallback
 
 `Z.retryOrElse` runs a fallback after the schedule stops. The fallback receives
@@ -167,5 +186,4 @@ def policy : Schedule RetryConfig FileError Nat :=
 Delays use `UInt32` milliseconds, which matches `Z.sleep`. A delay is
 interruptible. Interruption stops the active delay and the recurrence loop.
 
-Output folds, jitter, Fibonacci backoff, and a manual driver are future
-additions.
+Jitter, Fibonacci backoff, and a manual driver are future additions.

@@ -60,6 +60,10 @@ def configuredRetry : Schedule Nat String Nat :=
   (Schedule.forever).whileOutputZIO fun retries =>
     Z.serviceWith fun limit : Nat => retries < limit
 
+/-- Collect the outputs that caused the schedule to continue. -/
+def retryHistory : Schedule Unit String (List Nat) :=
+  (Schedule.recurs 3).fold [] fun history retry => history ++ [retry]
+
 /-- Recover with the last error and final schedule output. -/
 def retryOrElseExample : Z Unit Empty Nat :=
   (Z.fail "not ready" : Z Unit String Nat).retryOrElse

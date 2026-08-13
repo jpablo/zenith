@@ -63,6 +63,59 @@ def as
     (value : Output₁) : Schedule R Input Output₁ :=
   self.map fun _ => value
 
+/--
+Fold the outputs for which the underlying schedule continues. The terminal
+output is not added to the accumulator.
+-/
+def fold
+    (self : Schedule R Input Output)
+    (initial : Accumulator)
+    (accumulate : Accumulator -> Output -> Accumulator) :
+    Schedule R Input Accumulator where
+  State := self.State × Accumulator
+  initial := (self.initial, initial)
+  step input state :=
+    let scheduleState := state.1
+    let accumulator := state.2
+    (self.step input scheduleState).map fun
+      (nextScheduleState, output, decision) =>
+        match decision with
+        | .done =>
+            ((nextScheduleState, accumulator), accumulator, .done)
+        | .continue delay =>
+            let nextAccumulator := accumulate accumulator output
+            ((nextScheduleState, nextAccumulator), accumulator,
+              .continue delay)
+
+/--
+Effectfully fold the outputs for which the underlying schedule continues.
+The schedule and accumulator environment requirements are combined.
+-/
+def foldZIO
+    [meet : Environment.Meet R₁ R₂ R]
+    (self : Schedule R₁ Input Output)
+    (initial : Accumulator)
+    (accumulate : Accumulator -> Output -> Z R₂ Empty Accumulator) :
+    Schedule R Input Accumulator where
+  State := self.State × Accumulator
+  initial := (self.initial, initial)
+  step input state :=
+    let scheduleState := state.1
+    let accumulator := state.2
+    let base : Z R Empty (self.State × Output × Decision) :=
+      (self.step input scheduleState).contramap meet.left
+    base.flatMap fun (nextScheduleState, output, decision) =>
+      match decision with
+      | .done =>
+          Z.internal.succeedNow
+            ((nextScheduleState, accumulator), accumulator, .done)
+      | .continue delay =>
+          let folded : Z R Empty Accumulator :=
+            (accumulate accumulator output).contramap meet.right
+          folded.map fun nextAccumulator =>
+            ((nextScheduleState, nextAccumulator), accumulator,
+              .continue delay)
+
 /-- Stop at the first step without requesting another effect run. -/
 def stop : Schedule Unit Input Unit :=
   make () fun _ _ => Z.succeedNow ((), (), .done)

@@ -735,6 +735,56 @@ def testScheduleUntilOutputZIOStopsRepeat : IO Unit := do
   | _ => failTest "untilOutputZIO did not preserve its terminal output"
   assertTrue "untilOutputZIO stopped at the wrong run" ((← runs.get) == 3)
 
+def testScheduleFoldAccumulatesContinues : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify fun count => count + 1)
+  let policy := (Schedule.recurs (Input := Unit) 3).fold
+    ([] : List Nat) fun outputs output => outputs ++ [output]
+  match ← runProgram "schedule-fold" (effect.repeat policy) with
+  | .success [0, 1, 2] => pure ()
+  | _ => failTest "fold did not accumulate the continued schedule outputs"
+  assertTrue "fold changed the underlying recurrence count"
+    ((← runs.get) == 4)
+
+def testScheduleFoldKeepsInitialAfterStop : IO Unit := do
+  let policy := (Schedule.stop (Input := Unit)).fold 7 fun total _ =>
+    total + 1
+  match ← runProgram "schedule-fold-stop" <|
+      (Z.succeedNow ()).repeat policy with
+  | .success 7 => pure ()
+  | _ => failTest "fold changed its accumulator after an underlying stop"
+
+def testScheduleFoldZIORunsEffect : IO Unit := do
+  let foldCalls ← IO.mkRef 0
+  let policy := (Schedule.recurs (Input := Unit) 3).foldZIO 0 fun total output =>
+    zdo
+      Z.succeed <| foldCalls.modify fun count => count + 1
+      Z.succeedNow (total + output)
+  match ← runProgram "schedule-fold-zio" <|
+      (Z.succeedNow ()).repeat policy with
+  | .success 3 => pure ()
+  | _ => failTest "foldZIO returned the wrong accumulator"
+  assertTrue "foldZIO ran after the underlying schedule stopped"
+    ((← foldCalls.get) == 3)
+
+def testScheduleFoldZIOCombinesEnvironments : IO Unit := do
+  let base : Schedule Nat Unit Nat :=
+    Schedule.make 0 fun _ count =>
+      Z.serviceWith fun value =>
+        let decision := if count == 0 then .continue 0 else .done
+        (count + 1, value, decision)
+  let policy : Schedule (Nat × Bool) Unit Nat :=
+    base.foldZIO 0 fun total output =>
+      (Z.serviceWith fun enabled : Bool =>
+        if enabled then total + output else total : Z Bool Empty Nat)
+  let program : Z (Nat × Bool) Empty Nat :=
+    (Z.succeedNow ()).repeat policy
+  match ← runProgram "schedule-fold-zio-environment" <|
+      program.provideEnvironment (3, true) with
+  | .success 3 => pure ()
+  | _ => failTest "foldZIO did not combine its environment requirements"
+
 def testRetryOrElseUsesTerminalErrorAndOutput : IO Unit := do
   let attempts ← IO.mkRef 0
   let effect : Z Unit String String := zdo
@@ -1340,6 +1390,20 @@ def testHighUniverseScheduleFilter : IO Unit := do
       program.provideEnvironment service with
   | .success 1 => pure ()
   | _ => failTest "effectful filter lost a high-universe environment"
+
+def testHighUniverseScheduleFold : IO Unit := do
+  let service : HighGithub := {
+    getIssues := fun _ => Z.succeedNow [1, 2]
+  }
+  let policy : Schedule HighGithub Unit Nat :=
+    (Schedule.recurs (Input := Unit) 1).foldZIO 0 fun total _ =>
+      Z.serviceWith fun (_ : HighGithub) => total + 1
+  let program : Z HighGithub Empty Nat :=
+    (Z.succeedNow ()).repeat policy
+  match ← runProgram "high-universe-schedule-fold" <|
+      program.provideEnvironment service with
+  | .success 1 => pure ()
+  | _ => failTest "effectful fold lost a high-universe environment"
 
 def failingHighGithubLayer : Layer Unit IO.Error HighGithub :=
   Layer.failCause (.fail (IO.userError "layer build failed"))
@@ -2338,6 +2402,13 @@ def suite : List (String × IO Unit) := [
     testScheduleWhileOutputZIOStopsRepeat),
   ("testScheduleUntilOutputZIOStopsRepeat",
     testScheduleUntilOutputZIOStopsRepeat),
+  ("testScheduleFoldAccumulatesContinues",
+    testScheduleFoldAccumulatesContinues),
+  ("testScheduleFoldKeepsInitialAfterStop",
+    testScheduleFoldKeepsInitialAfterStop),
+  ("testScheduleFoldZIORunsEffect", testScheduleFoldZIORunsEffect),
+  ("testScheduleFoldZIOCombinesEnvironments",
+    testScheduleFoldZIOCombinesEnvironments),
   ("testRetryOrElseUsesTerminalErrorAndOutput",
     testRetryOrElseUsesTerminalErrorAndOutput),
   ("testRetryOrElseCombinesFallbackError",
@@ -2383,6 +2454,7 @@ def suite : List (String × IO Unit) := [
   ("testHighUniverseRetry", testHighUniverseRetry),
   ("testHighUniverseRetryOrElse", testHighUniverseRetryOrElse),
   ("testHighUniverseScheduleFilter", testHighUniverseScheduleFilter),
+  ("testHighUniverseScheduleFold", testHighUniverseScheduleFold),
   ("testHighUniverseLayerFailure", testHighUniverseLayerFailure),
   ("testLayerFromZ", testLayerFromZ),
   ("testLayerReleaseOrder", testLayerReleaseOrder),
