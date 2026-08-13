@@ -596,6 +596,145 @@ def testScheduleNamedCompositionInfersInput : IO Unit := do
   | .success (2, 2) => pure ()
   | _ => failTest "named schedule composition did not infer its input"
 
+def testScheduleWhileInputStopsRetry : IO Unit := do
+  let attempts ← IO.mkRef 0
+  let effect : Z Unit String Unit := zdo
+    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+      let next := count + 1
+      (next, next)
+    Z.fail (if attempt == 1 then "retry" else "stop")
+  let policy := (Schedule.forever).whileInput (fun error => error == "retry")
+  match ← runProgram "schedule-while-input" (effect.retry policy) with
+  | .failure (.fail "stop") => pure ()
+  | _ => failTest "whileInput did not preserve its terminal input"
+  assertTrue "whileInput stopped at the wrong attempt" ((← attempts.get) == 2)
+
+def testScheduleUntilInputStopsRetry : IO Unit := do
+  let attempts ← IO.mkRef 0
+  let effect : Z Unit Nat Unit := zdo
+    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+      let next := count + 1
+      (next, next)
+    Z.fail attempt
+  let policy := (Schedule.forever).untilInput (fun error => error >= 3)
+  match ← runProgram "schedule-until-input" (effect.retry policy) with
+  | .failure (.fail 3) => pure ()
+  | _ => failTest "untilInput did not preserve its terminal input"
+  assertTrue "untilInput stopped at the wrong attempt" ((← attempts.get) == 3)
+
+def testScheduleWhileOutputStopsRepeat : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify (fun count => count + 1))
+  let policy := (Schedule.forever).whileOutput (fun output => output < 2)
+  match ← runProgram "schedule-while-output" (effect.repeat policy) with
+  | .success 2 => pure ()
+  | _ => failTest "whileOutput did not preserve its terminal output"
+  assertTrue "whileOutput stopped at the wrong run" ((← runs.get) == 3)
+
+def testScheduleUntilOutputStopsRepeat : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify (fun count => count + 1))
+  let policy := (Schedule.forever).untilOutput (fun output => output >= 2)
+  match ← runProgram "schedule-until-output" (effect.repeat policy) with
+  | .success 2 => pure ()
+  | _ => failTest "untilOutput did not preserve its terminal output"
+  assertTrue "untilOutput stopped at the wrong run" ((← runs.get) == 3)
+
+def testScheduleFilterKeepsUnderlyingStop : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify (fun count => count + 1))
+  let policy := (Schedule.recurs 1).whileOutput fun _ => true
+  match ← runProgram "schedule-filter-underlying-stop" <|
+      effect.repeat policy with
+  | .success 1 => pure ()
+  | _ => failTest "schedule filter changed the underlying terminal output"
+  assertTrue "schedule filter overrode an underlying stop"
+    ((← runs.get) == 2)
+
+def testRetryOrElseUsesTerminalErrorAndOutput : IO Unit := do
+  let attempts ← IO.mkRef 0
+  let effect : Z Unit String String := zdo
+    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+      let next := count + 1
+      (next, next)
+    Z.fail s!"attempt {attempt}"
+  let recovered := effect.retryOrElse (Schedule.recurs 2) fun error output =>
+    Z.succeedNow s!"{error}; retries {output}"
+  match ← runProgram "retry-or-else" recovered with
+  | .success "attempt 3; retries 2" => pure ()
+  | _ => failTest "retryOrElse did not receive the terminal error and output"
+
+def testRetryOrElseCombinesFallbackError : IO Unit := do
+  let effect : Z Unit String Nat := Z.fail "effect failed"
+  let program : Z Unit Nat Nat :=
+    effect.retryOrElse (Schedule.stop) fun _ _ =>
+      (Z.fail 9).map impossible
+  match ← runProgram "retry-or-else-failure" program with
+  | .failure (.fail 9) => pure ()
+  | _ => failTest "retryOrElse did not preserve the fallback error"
+
+def testRetryOrElseEitherTagsResult : IO Unit := do
+  let successful : Z Unit String Nat := Z.succeedNow 7
+  let successProgram := successful.retryOrElseEither
+    (Schedule.stop) fun _ _ => Z.succeedNow "fallback"
+  match ← runProgram "retry-or-else-either-success" successProgram with
+  | .success (.inr 7) => pure ()
+  | _ => failTest "retryOrElseEither did not tag the effect success"
+
+  let failed : Z Unit String Nat := Z.fail "failed"
+  let fallbackProgram := failed.retryOrElseEither
+    (Schedule.stop) fun error _ => Z.succeedNow s!"handled {error}"
+  match ← runProgram "retry-or-else-either-fallback" fallbackProgram with
+  | .success (.inl "handled failed") => pure ()
+  | _ => failTest "retryOrElseEither did not tag the fallback success"
+
+def testRetryOrElseCombinesEnvironments : IO Unit := do
+  let effect : Z Nat String Nat := zdo
+    let _ ← Z.service Nat
+    Z.fail "failed"
+  let program : Z (Nat × Bool) Empty Nat :=
+    effect.retryOrElse (Schedule.stop) fun _ _ =>
+      (Z.serviceWith fun (enabled : Bool) => if enabled then 7 else 0 :
+        Z Bool Empty Nat)
+  match ← runProgram "retry-or-else-environment" <|
+      program.provideEnvironment (1, true) with
+  | .success 7 => pure ()
+  | _ => failTest "retryOrElse did not combine fallback requirements"
+
+def testRetryOrElseDoesNotHandleDefects : IO Unit := do
+  let fallbackCalled ← IO.mkRef false
+  let defect := IO.userError "retryOrElse defect"
+  let effect : Z Unit String Nat :=
+    (Z.die (R := Unit) defect).map impossible |>.mapFailure Empty.elim
+  let program := effect.retryOrElse (Schedule.recurs 2) fun _ _ => zdo
+    Z.succeed (fallbackCalled.set true)
+    Z.succeedNow 0
+  match ← runProgram "retry-or-else-defect" program with
+  | .failure (.die error) =>
+      assertTrue "retryOrElse changed the defect" (error == defect)
+  | _ => failTest "retryOrElse did not preserve the defect"
+  assertTrue "retryOrElse invoked the fallback for a defect"
+    (!(← fallbackCalled.get))
+
+def testRetryOrElsePreservesCompositeDefect : IO Unit := do
+  let fallbackCalled ← IO.mkRef false
+  let defect := IO.userError "composite retryOrElse defect"
+  let effect : Z Unit String Nat :=
+    (Z.failCause <| .sequential (.fail "typed") (.die defect)).map
+      impossible
+  let program := effect.retryOrElse (Schedule.stop) fun _ _ => zdo
+    Z.succeed (fallbackCalled.set true)
+    Z.succeedNow 0
+  match ← runProgram "retry-or-else-composite-defect" program with
+  | .failure (.die error) =>
+      assertTrue "retryOrElse changed the composite defect" (error == defect)
+  | _ => failTest "retryOrElse did not preserve the composite defect"
+  assertTrue "retryOrElse handled a failure cause that contained a defect"
+    (!(← fallbackCalled.get))
+
 def testIOErrorCatch : IO Unit := do
   let program : Z Unit Empty String := do
     try
@@ -1093,6 +1232,19 @@ def testHighUniverseRetry : IO Unit := do
   match ← runProgram "high-universe-retry" program with
   | .success 2 => pure ()
   | _ => failTest "retry did not preserve a high-universe environment"
+
+def testHighUniverseRetryOrElse : IO Unit := do
+  let service : HighGithub := {
+    getIssues := fun _ => Z.succeedNow [1, 2]
+  }
+  let effect : Z HighGithub String Nat :=
+    Z.serviceWithZ fun _ => (Z.fail "failed").map impossible
+  let program :=
+    (effect.retryOrElse (Schedule.stop) fun _ _ => Z.succeedNow 7)
+      |>.provideEnvironment service
+  match ← runProgram "high-universe-retry-or-else" program with
+  | .success 7 => pure ()
+  | _ => failTest "retryOrElse did not preserve a high-universe environment"
 
 def failingHighGithubLayer : Layer Unit IO.Error HighGithub :=
   Layer.failCause (.fail (IO.userError "layer build failed"))
@@ -2073,6 +2225,23 @@ def suite : List (String × IO Unit) := [
     testScheduleCompositionCombinesEnvironments),
   ("testScheduleNamedCompositionInfersInput",
     testScheduleNamedCompositionInfersInput),
+  ("testScheduleWhileInputStopsRetry", testScheduleWhileInputStopsRetry),
+  ("testScheduleUntilInputStopsRetry", testScheduleUntilInputStopsRetry),
+  ("testScheduleWhileOutputStopsRepeat", testScheduleWhileOutputStopsRepeat),
+  ("testScheduleUntilOutputStopsRepeat", testScheduleUntilOutputStopsRepeat),
+  ("testScheduleFilterKeepsUnderlyingStop",
+    testScheduleFilterKeepsUnderlyingStop),
+  ("testRetryOrElseUsesTerminalErrorAndOutput",
+    testRetryOrElseUsesTerminalErrorAndOutput),
+  ("testRetryOrElseCombinesFallbackError",
+    testRetryOrElseCombinesFallbackError),
+  ("testRetryOrElseEitherTagsResult", testRetryOrElseEitherTagsResult),
+  ("testRetryOrElseCombinesEnvironments",
+    testRetryOrElseCombinesEnvironments),
+  ("testRetryOrElseDoesNotHandleDefects",
+    testRetryOrElseDoesNotHandleDefects),
+  ("testRetryOrElsePreservesCompositeDefect",
+    testRetryOrElsePreservesCompositeDefect),
   ("testIOErrorCatch", testIOErrorCatch),
   ("testExitEquality", testExitEquality),
   ("testCompleteBeforeTask", testCompleteBeforeTask),
@@ -2105,6 +2274,7 @@ def suite : List (String × IO Unit) := [
   ("testHighUniverseRace", testHighUniverseRace),
   ("testHighUniverseTimeout", testHighUniverseTimeout),
   ("testHighUniverseRetry", testHighUniverseRetry),
+  ("testHighUniverseRetryOrElse", testHighUniverseRetryOrElse),
   ("testHighUniverseLayerFailure", testHighUniverseLayerFailure),
   ("testLayerFromZ", testLayerFromZ),
   ("testLayerReleaseOrder", testLayerReleaseOrder),

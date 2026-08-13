@@ -94,6 +94,44 @@ Schedule.exponential 100 (factor := 3) -- 100, 300, 900, ...
 The output is the current delay as `UInt32`. Growth saturates at the largest
 `UInt32` value instead of wrapping to a small delay.
 
+## Filters
+
+Schedule filters can stop a policy from its current input or output:
+
+```lean
+def temporaryErrors : Schedule Unit RequestError Nat :=
+  (Schedule.forever).whileInput RequestError.isTemporary
+
+def firstFive : Schedule Unit Input Nat :=
+  (Schedule.forever).whileOutput fun count => count < 5
+```
+
+The available forms are `whileInput`, `untilInput`, `whileOutput`, and
+`untilOutput`. Each predicate is checked only when the underlying schedule
+wants to continue. A false predicate changes the decision to stop but keeps
+the current schedule output.
+
+## Retry fallback
+
+`Z.retryOrElse` runs a fallback after the schedule stops. The fallback receives
+the last typed error and the final schedule output:
+
+```lean
+def resilientLoad : Z (FileSystem × Logger) LogError Bytes :=
+  loadFile.retryOrElse (Schedule.recurs 3) fun error retries =>
+    logAndLoadDefault error retries
+```
+
+The original typed error is handled, so the result has the fallback error
+type. Effect, schedule, and fallback requirements are combined with
+`Environment.Meet`. Defects and interruptions are not sent to the fallback.
+If a cause contains both a typed failure and a defect, Zenith removes the
+handled failure and preserves the defect.
+
+Both successful paths of `retryOrElse` have the same type.
+`retryOrElseEither` supports a different fallback success type. It returns
+`Sum FallbackValue EffectValue`, with fallback success on the left.
+
 Schedules can require services. `retry` and `repeat` use
 `Environment.Meet` to infer the combined requirements of the effect and its
 schedule. `Schedule.make` creates a custom effectful step:
@@ -113,5 +151,5 @@ def policy : Schedule RetryConfig FileError Nat :=
 Delays use `UInt32` milliseconds, which matches `Z.sleep`. A delay is
 interruptible. Interruption stops the active delay and the recurrence loop.
 
-Input filters, output folds, jitter, Fibonacci backoff, and a manual driver are
-future additions.
+Effectful filters, output folds, jitter, Fibonacci backoff, and a manual driver
+are future additions.

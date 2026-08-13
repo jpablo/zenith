@@ -51,6 +51,15 @@ def retryExample : Z Unit String Nat :=
 def boundedBackoff : Schedule Unit String (UInt32 × Nat) :=
   (Schedule.exponential 10).zip (Schedule.recurs 3)
 
+/-- Retry only while the error is temporary. -/
+def temporaryRetry : Schedule Unit String Nat :=
+  (Schedule.forever).whileInput fun error => error == "temporary"
+
+/-- Recover with the last error and final schedule output. -/
+def retryOrElseExample : Z Unit Empty Nat :=
+  (Z.fail "not ready" : Z Unit String Nat).retryOrElse
+    (Schedule.recurs 3) fun _ retries => Z.succeedNow retries
+
 /-- The same operation as `zipExample`, written with `do`. -/
 def zipExample2 : Z Unit Empty (Nat × String) := do
   let number <- Z.succeedNow 8

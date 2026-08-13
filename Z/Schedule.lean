@@ -224,6 +224,48 @@ def exponential
     Z.succeedNow
       (multiplyDelay delay factor, delay, .continue delay)
 
+/--
+Keep an underlying continue decision only when `predicate` accepts its input
+and output. An underlying stop decision always stays stopped.
+-/
+def check
+    (self : Schedule R Input Output)
+    (predicate : Input -> Output -> Bool) : Schedule R Input Output where
+  State := self.State
+  initial := self.initial
+  step input state :=
+    (self.step input state).map fun (nextState, output, decision) =>
+      let checkedDecision :=
+        match decision with
+        | .done => .done
+        | .continue delay =>
+            if predicate input output then .continue delay else .done
+      (nextState, output, checkedDecision)
+
+/-- Continue while the input satisfies `predicate`. -/
+def whileInput
+    (self : Schedule R Input Output)
+    (predicate : Input -> Bool) : Schedule R Input Output :=
+  self.check fun input _ => predicate input
+
+/-- Continue until the input satisfies `predicate`. -/
+def untilInput
+    (self : Schedule R Input Output)
+    (predicate : Input -> Bool) : Schedule R Input Output :=
+  self.whileInput fun input => !(predicate input)
+
+/-- Continue while the output satisfies `predicate`. -/
+def whileOutput
+    (self : Schedule R Input Output)
+    (predicate : Output -> Bool) : Schedule R Input Output :=
+  self.check fun _ output => predicate output
+
+/-- Continue until the output satisfies `predicate`. -/
+def untilOutput
+    (self : Schedule R Input Output)
+    (predicate : Output -> Bool) : Schedule R Input Output :=
+  self.whileOutput fun output => !(predicate output)
+
 instance [Environment.Meet R₁ R₂ R] :
     HAnd
       (Schedule R₁ Input Output₁)
@@ -286,6 +328,88 @@ def retry
   let effect := self.contramap meet.left
   let policy := policy.contramapEnvironment meet.right
   retryLoop effect policy policy.initial
+
+private def combineResidual
+    (combine : Cause Empty -> Cause Empty -> Cause Empty)
+    (left right : Option (Cause Empty)) : Option (Cause Empty) :=
+  match left, right with
+  | some leftCause, some rightCause => some (combine leftCause rightCause)
+  | some cause, none | none, some cause => some cause
+  | none, none => none
+
+/-- Keep defects and interruptions after typed failures are handled. -/
+private def residualCause : Cause E -> Option (Cause Empty)
+  | .fail _ => none
+  | .die error => some (.die error)
+  | .interrupt => some .interrupt
+  | .sequential left right =>
+      combineResidual .sequential (residualCause left) (residualCause right)
+  | .parallel left right =>
+      combineResidual .parallel (residualCause left) (residualCause right)
+
+private partial def retryOrElseEitherLoop
+    (partialFallback : Z R E₁ (Sum B A))
+    (effect : Z R E A)
+    (policy : Schedule R E Output)
+    (orElse : E -> Output -> Z R E₁ B)
+    (state : policy.State) : Z R E₁ (Sum B A) :=
+  effect.foldCauseZ
+    (fun cause =>
+      match residualCause cause with
+      | some unhandled =>
+          (Z.failCause (R := R) (unhandled.map Empty.elim)).map impossible
+      | none =>
+          match cause.failureOption with
+          | none =>
+              (Z.die (R := R) <| IO.userError
+                "retryOrElse received an empty failure cause").map impossible
+          | some error =>
+              scheduleStep policy error state |>.flatMap fun
+                (nextState, output, decision) =>
+                  match decision with
+                  | .done => (orElse error output).map Sum.inl
+                  | .continue delay =>
+                      scheduleDelay delay *>
+                        retryOrElseEitherLoop partialFallback effect policy
+                          orElse nextState)
+    (fun value => Z.internal.succeedNow (Sum.inr value))
+
+/--
+Retry typed failures. If the policy stops, pass its terminal output and the
+last error to `orElse`. Tag fallback success on the left and effect success on
+the right.
+-/
+def retryOrElseEither
+    [effectPolicy : Environment.Meet R₁ R₂ EffectAndPolicy]
+    [complete : Environment.Meet EffectAndPolicy R₃ R]
+    (self : Z R₁ E A)
+    (policy : Schedule R₂ E Output)
+    (orElse : E -> Output -> Z R₃ E₁ B) :
+    Z R E₁ (Sum B A) :=
+  let effect : Z R E A :=
+    self.contramap fun environment =>
+      effectPolicy.left (complete.left environment)
+  let policy : Schedule R E Output :=
+    policy.contramapEnvironment fun environment =>
+      effectPolicy.right (complete.left environment)
+  let fallback (error : E) (output : Output) : Z R E₁ B :=
+    (orElse error output)
+      |>.contramap complete.right
+  let partialFallback : Z R E₁ (Sum B A) :=
+    Z.internal.done (.failure .interrupt)
+  retryOrElseEitherLoop partialFallback effect policy fallback policy.initial
+
+/--
+Retry typed failures and run `orElse` after the policy stops. Both successful
+paths have the same value type.
+-/
+def retryOrElse
+    [Environment.Meet R₁ R₂ EffectAndPolicy]
+    [Environment.Meet EffectAndPolicy R₃ R]
+    (self : Z R₁ E A)
+    (policy : Schedule R₂ E Output)
+    (orElse : E -> Output -> Z R₃ E₁ A) : Z R E₁ A :=
+  (self.retryOrElseEither policy orElse).map (Sum.elim id id)
 
 private partial def repeatLoop
     (fallback : Z R E Output)
