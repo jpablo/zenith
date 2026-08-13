@@ -64,6 +64,10 @@ def configuredRetry : Schedule Nat String Nat :=
 def retryHistory : Schedule Unit String (List Nat) :=
   (Schedule.recurs 3).fold [] fun history retry => history ++ [retry]
 
+/-- Collect all schedule outputs, including its terminal output. -/
+def allRetryOutputs : Schedule Unit String (List Nat) :=
+  (Schedule.recurs 3).collectAll
+
 /-- Recover with the last error and final schedule output. -/
 def retryOrElseExample : Z Unit Empty Nat :=
   (Z.fail "not ready" : Z Unit String Nat).retryOrElse

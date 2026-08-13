@@ -785,6 +785,37 @@ def testScheduleFoldZIOCombinesEnvironments : IO Unit := do
   | .success 3 => pure ()
   | _ => failTest "foldZIO did not combine its environment requirements"
 
+def testScheduleIdentityReturnsInputs : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Nat :=
+    Z.succeed <| runs.modifyGet fun count =>
+      let next := count + 1
+      (next, next)
+  let policy := Schedule.identity.zip (Schedule.recurs 1)
+  match ← runProgram "schedule-identity" (effect.repeat policy) with
+  | .success (2, 1) => pure ()
+  | _ => failTest "identity did not return the latest schedule input"
+  assertTrue "bounded identity ran the wrong number of effects"
+    ((← runs.get) == 2)
+
+def testScheduleRepetitionsCountsContinues : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify fun count => count + 1)
+  let policy := (Schedule.recurs (Input := Unit) 3).repetitions
+  match ← runProgram "schedule-repetitions" (effect.repeat policy) with
+  | .success 3 => pure ()
+  | _ => failTest "repetitions returned the wrong count"
+  assertTrue "repetitions changed the underlying recurrence count"
+    ((← runs.get) == 4)
+
+def testScheduleCollectAllIncludesTerminalOutput : IO Unit := do
+  let policy := (Schedule.recurs (Input := Unit) 3).collectAll
+  match ← runProgram "schedule-collect-all" <|
+      (Z.succeedNow ()).repeat policy with
+  | .success [0, 1, 2, 3] => pure ()
+  | _ => failTest "collectAll did not include the terminal schedule output"
+
 def testRetryOrElseUsesTerminalErrorAndOutput : IO Unit := do
   let attempts ← IO.mkRef 0
   let effect : Z Unit String String := zdo
@@ -1404,6 +1435,22 @@ def testHighUniverseScheduleFold : IO Unit := do
       program.provideEnvironment service with
   | .success 1 => pure ()
   | _ => failTest "effectful fold lost a high-universe environment"
+
+def testHighUniverseScheduleCollectAll : IO Unit := do
+  let service : HighGithub := {
+    getIssues := fun _ => Z.succeedNow [1, 2]
+  }
+  let base : Schedule HighGithub Unit Nat :=
+    Schedule.make 0 fun _ count =>
+      Z.serviceWith fun (_ : HighGithub) =>
+        let decision := if count == 0 then .continue 0 else .done
+        (count + 1, count, decision)
+  let program : Z HighGithub Empty (List Nat) :=
+    (Z.succeedNow ()).repeat base.collectAll
+  match ← runProgram "high-universe-schedule-collect-all" <|
+      program.provideEnvironment service with
+  | .success [0, 1] => pure ()
+  | _ => failTest "collectAll lost a high-universe environment"
 
 def failingHighGithubLayer : Layer Unit IO.Error HighGithub :=
   Layer.failCause (.fail (IO.userError "layer build failed"))
@@ -2409,6 +2456,11 @@ def suite : List (String × IO Unit) := [
   ("testScheduleFoldZIORunsEffect", testScheduleFoldZIORunsEffect),
   ("testScheduleFoldZIOCombinesEnvironments",
     testScheduleFoldZIOCombinesEnvironments),
+  ("testScheduleIdentityReturnsInputs", testScheduleIdentityReturnsInputs),
+  ("testScheduleRepetitionsCountsContinues",
+    testScheduleRepetitionsCountsContinues),
+  ("testScheduleCollectAllIncludesTerminalOutput",
+    testScheduleCollectAllIncludesTerminalOutput),
   ("testRetryOrElseUsesTerminalErrorAndOutput",
     testRetryOrElseUsesTerminalErrorAndOutput),
   ("testRetryOrElseCombinesFallbackError",
@@ -2455,6 +2507,8 @@ def suite : List (String × IO Unit) := [
   ("testHighUniverseRetryOrElse", testHighUniverseRetryOrElse),
   ("testHighUniverseScheduleFilter", testHighUniverseScheduleFilter),
   ("testHighUniverseScheduleFold", testHighUniverseScheduleFold),
+  ("testHighUniverseScheduleCollectAll",
+    testHighUniverseScheduleCollectAll),
   ("testHighUniverseLayerFailure", testHighUniverseLayerFailure),
   ("testLayerFromZ", testLayerFromZ),
   ("testLayerReleaseOrder", testLayerReleaseOrder),

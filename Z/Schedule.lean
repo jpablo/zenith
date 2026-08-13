@@ -116,6 +116,26 @@ def foldZIO
             ((nextScheduleState, nextAccumulator), accumulator,
               .continue delay)
 
+/-- Count the outputs for which the underlying schedule continues. -/
+def repetitions
+    (self : Schedule R Input Output) : Schedule R Input Nat :=
+  self.fold 0 fun count _ => count + 1
+
+/--
+Collect every underlying output, including the output from the terminal step.
+-/
+def collectAll
+    (self : Schedule R Input Output) : Schedule R Input (List Output) where
+  State := self.State × List Output
+  initial := (self.initial, [])
+  step input state :=
+    let scheduleState := state.1
+    let outputs := state.2
+    (self.step input scheduleState).map fun
+      (nextScheduleState, output, decision) =>
+        let nextOutputs := outputs ++ [output]
+        ((nextScheduleState, nextOutputs), nextOutputs, decision)
+
 /-- Stop at the first step without requesting another effect run. -/
 def stop : Schedule Unit Input Unit :=
   make () fun _ _ => Z.succeedNow ((), (), .done)
@@ -135,6 +155,11 @@ def once : Schedule Unit Input Unit :=
 def forever : Schedule Unit Input Nat :=
   make 0 fun _ current =>
     Z.succeedNow (current + 1, current, .continue 0)
+
+/-- Continue forever without a delay and emit each input. -/
+def identity : Schedule Unit Input Input :=
+  make () fun input state =>
+    Z.succeedNow (state, input, .continue 0)
 
 /-- Continue forever with a fixed delay between effect runs. -/
 def spaced (milliseconds : UInt32) : Schedule Unit Input Nat :=

@@ -146,6 +146,22 @@ It does not add the terminal output. For example, the policy above returns
 effects, but it cannot produce a typed failure. Zenith combines its environment
 with the underlying schedule environment.
 
+## Derived schedules
+
+Three helpers cover common output transformations:
+
+- `Schedule.identity` continues without delay and emits each input.
+- `policy.repetitions` emits the number of times `policy` continued.
+- `policy.collectAll` emits all outputs from `policy` as a list.
+
+Unlike `fold`, `collectAll` includes the terminal output. For example:
+
+```lean
+def allOutputs : Schedule Unit RequestError (List Nat) :=
+  (Schedule.recurs 3).collectAll
+-- Final output: [0, 1, 2, 3]
+```
+
 ## Retry fallback
 
 `Z.retryOrElse` runs a fallback after the schedule stops. The fallback receives
