@@ -88,6 +88,163 @@ def spaced (milliseconds : UInt32) : Schedule Unit Input Nat :=
   make 0 fun _ current =>
     Z.succeedNow (current + 1, current, .continue milliseconds)
 
+private def Decision.intersection : Decision -> Decision -> Decision
+  | .continue leftDelay, .continue rightDelay =>
+      .continue (max leftDelay rightDelay)
+  | _, _ => .done
+
+private def Decision.union : Decision -> Decision -> Decision
+  | .done, .done => .done
+  | .continue delay, .done | .done, .continue delay => .continue delay
+  | .continue leftDelay, .continue rightDelay =>
+      .continue (min leftDelay rightDelay)
+
+/--
+Continue while both schedules continue. Run both steps with the same input,
+pair their outputs, and select the longer delay.
+-/
+def intersect
+    [meet : Environment.Meet R₁ R₂ R]
+    (self : Schedule R₁ Input Output₁)
+    (other : Schedule R₂ Input Output₂) :
+    Schedule R Input (Output₁ × Output₂) where
+  State := self.State × other.State
+  initial := (self.initial, other.initial)
+  step input state :=
+    let left : Z R Empty
+        (self.State × Output₁ × Decision) :=
+      (self.step input state.1).contramap meet.left
+    let right : Z R Empty
+        (other.State × Output₂ × Decision) :=
+      (other.step input state.2).contramap meet.right
+    left.zipWith right fun
+      (leftState, leftOutput, leftDecision)
+      (rightState, rightOutput, rightDecision) =>
+        ((leftState, rightState),
+          (leftOutput, rightOutput),
+          leftDecision.intersection rightDecision)
+
+/-- A ZIO-compatible named alias for schedule intersection. -/
+def zip
+    [Environment.Meet R₁ R₂ R]
+    (self : Schedule R₁ Input Output₁)
+    (other : Schedule R₂ Input Output₂) :
+    Schedule R Input (Output₁ × Output₂) :=
+  self.intersect other
+
+/--
+Continue while either schedule continues. Run both steps with the same input,
+pair their outputs, and select the shorter active delay.
+-/
+def union
+    [meet : Environment.Meet R₁ R₂ R]
+    (self : Schedule R₁ Input Output₁)
+    (other : Schedule R₂ Input Output₂) :
+    Schedule R Input (Output₁ × Output₂) where
+  State := self.State × other.State
+  initial := (self.initial, other.initial)
+  step input state :=
+    let left : Z R Empty
+        (self.State × Output₁ × Decision) :=
+      (self.step input state.1).contramap meet.left
+    let right : Z R Empty
+        (other.State × Output₂ × Decision) :=
+      (other.step input state.2).contramap meet.right
+    left.zipWith right fun
+      (leftState, leftOutput, leftDecision)
+      (rightState, rightOutput, rightDecision) =>
+        ((leftState, rightState),
+          (leftOutput, rightOutput),
+          leftDecision.union rightDecision)
+
+/-- A ZIO-compatible named alias for schedule union. -/
+def either
+    [Environment.Meet R₁ R₂ R]
+    (self : Schedule R₁ Input Output₁)
+    (other : Schedule R₂ Input Output₂) :
+    Schedule R Input (Output₁ × Output₂) :=
+  self.union other
+
+/-- Run `self` to completion and then run `other`, tagging each output. -/
+def andThenEither
+    [meet : Environment.Meet R₁ R₂ R]
+    (self : Schedule R₁ Input Output₁)
+    (other : Schedule R₂ Input Output₂) :
+    Schedule R Input (Sum Output₁ Output₂) where
+  State := self.State × other.State × Bool
+  initial := (self.initial, other.initial, true)
+  step input
+    | (leftState, rightState, true) =>
+        let left : Z R Empty
+            (self.State × Output₁ × Decision) :=
+          (self.step input leftState).contramap meet.left
+        left.flatMap fun (nextLeftState, leftOutput, decision) =>
+          match decision with
+          | .continue delay =>
+              Z.internal.succeedNow
+                ((nextLeftState, rightState, true),
+                  Sum.inl leftOutput,
+                  .continue delay)
+          | .done =>
+              let right : Z R Empty
+                  (other.State × Output₂ × Decision) :=
+                (other.step input rightState).contramap meet.right
+              right.map fun (nextRightState, rightOutput, rightDecision) =>
+                ((nextLeftState, nextRightState, false),
+                  Sum.inr rightOutput,
+                  rightDecision)
+    | (leftState, rightState, false) =>
+        let right : Z R Empty
+            (other.State × Output₂ × Decision) :=
+          (other.step input rightState).contramap meet.right
+        right.map fun (nextRightState, rightOutput, rightDecision) =>
+          ((leftState, nextRightState, false),
+            Sum.inr rightOutput,
+            rightDecision)
+
+/-- Run `self` to completion and then run `other`. -/
+def andThen
+    [Environment.Meet R₁ R₂ R]
+    (self : Schedule R₁ Input Output)
+    (other : Schedule R₂ Input Output) : Schedule R Input Output :=
+  (self.andThenEither other).map (Sum.elim id id)
+
+private def multiplyDelay (delay : UInt32) (factor : Nat) : UInt32 :=
+  let maximum : Nat := 4294967295
+  UInt32.ofNat (min (delay.toNat * factor) maximum)
+
+/--
+Continue forever with geometric backoff. The first delay is `base`; each next
+delay is the previous delay multiplied by `factor`.
+-/
+def exponential
+    (base : UInt32)
+    (factor : Nat := 2) : Schedule Unit Input UInt32 :=
+  make base fun _ delay =>
+    Z.succeedNow
+      (multiplyDelay delay factor, delay, .continue delay)
+
+instance [Environment.Meet R₁ R₂ R] :
+    HAnd
+      (Schedule R₁ Input Output₁)
+      (Schedule R₂ Input Output₂)
+      (Schedule R Input (Output₁ × Output₂)) where
+  hAnd := intersect
+
+instance [Environment.Meet R₁ R₂ R] :
+    HOr
+      (Schedule R₁ Input Output₁)
+      (Schedule R₂ Input Output₂)
+      (Schedule R Input (Output₁ × Output₂)) where
+  hOr := union
+
+instance [Environment.Meet R₁ R₂ R] :
+    HAppend
+      (Schedule R₁ Input Output)
+      (Schedule R₂ Input Output)
+      (Schedule R Input Output) where
+  hAppend := andThen
+
 end Schedule
 
 namespace Z

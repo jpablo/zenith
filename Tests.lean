@@ -471,6 +471,131 @@ def testScheduleCombinesEnvironment : IO Unit := do
   | .success 7 => pure ()
   | _ => failTest "retry did not combine the schedule environment"
 
+def testScheduleIntersectionStopsWithFirstPolicy : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify (fun count => count + 1))
+  let policy :=
+    Schedule.recurs (Input := Unit) 2 &&&
+      Schedule.forever (Input := Unit)
+  match ← runProgram "schedule-intersection" (effect.repeat policy) with
+  | .success (2, 2) => pure ()
+  | _ => failTest "schedule intersection returned the wrong output"
+  assertTrue "schedule intersection did not stop with its finite side"
+    ((← runs.get) == 3)
+
+def testScheduleUnionStopsWithLastPolicy : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify (fun count => count + 1))
+  let policy :=
+    Schedule.recurs (Input := Unit) 1 |||
+      Schedule.recurs (Input := Unit) 3
+  match ← runProgram "schedule-union" (effect.repeat policy) with
+  | .success (3, 3) => pure ()
+  | _ => failTest "schedule union returned the wrong output"
+  assertTrue "schedule union stopped before its longer side"
+    ((← runs.get) == 4)
+
+def testScheduleAndThenChangesPolicy : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify (fun count => count + 1))
+  let policy :=
+    Schedule.recurs (Input := Unit) 1 ++
+      Schedule.recurs (Input := Unit) 2
+  match ← runProgram "schedule-and-then" (effect.repeat policy) with
+  | .success 2 => pure ()
+  | _ => failTest "schedule sequencing returned the wrong output"
+  assertTrue "schedule sequencing changed policy at the wrong step"
+    ((← runs.get) == 4)
+
+def testScheduleAndThenEitherTagsOutput : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify (fun count => count + 1))
+  let first := (Schedule.recurs (Input := Unit) 1).map fun count =>
+    s!"first {count}"
+  let policy := first.andThenEither
+    (Schedule.recurs (Input := Unit) 2)
+  match ← runProgram "schedule-and-then-either" (effect.repeat policy) with
+  | .success (.inr 2) => pure ()
+  | _ => failTest "andThenEither did not tag the second schedule output"
+  assertTrue "andThenEither ran the wrong number of effects"
+    ((← runs.get) == 4)
+
+def testScheduleExponentialBackoff : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify (fun count => count + 1))
+  let policy :=
+    Schedule.exponential (Input := Unit) 2 &&&
+      Schedule.recurs (Input := Unit) 2
+  match ← runProgram "schedule-exponential" (effect.repeat policy) with
+  | .success (8, 2) => pure ()
+  | _ => failTest "exponential schedule did not grow its delay"
+  assertTrue "bounded exponential schedule ran the wrong number of effects"
+    ((← runs.get) == 3)
+
+def testScheduleIntersectionUsesLongerDelay : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify (fun count => count + 1))
+  let policy :=
+    (Schedule.spaced (Input := Unit) 20 &&&
+      Schedule.spaced (Input := Unit) 1) &&&
+        Schedule.recurs (Input := Unit) 1
+  let fiber ← Z.unsafeFork (effect.repeat policy)
+    "schedule-intersection-delay"
+  IO.sleep 5
+  assertTrue "schedule intersection did not select the longer delay"
+    ((← runs.get) == 1)
+  match ← fiber.await with
+  | .success ((1, 1), 1) => pure ()
+  | _ => failTest "delayed schedule intersection returned the wrong output"
+
+def testScheduleUnionUsesShorterDelay : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify (fun count => count + 1))
+  let policy :=
+    (Schedule.spaced (Input := Unit) 1000 |||
+      Schedule.spaced (Input := Unit) 0) &&&
+        Schedule.recurs (Input := Unit) 1
+  let fiber ← Z.unsafeFork (effect.repeat policy) "schedule-union-delay"
+  match ← fiberExitWithin fiber 200 with
+  | some (.success ((1, 1), 1)) => pure ()
+  | some _ => failTest "delayed schedule union returned the wrong output"
+  | none =>
+      fiber.requestInterrupt
+      let _ ← fiber.await
+      failTest "schedule union did not select the shorter delay"
+  assertTrue "schedule union ran the wrong number of effects"
+    ((← runs.get) == 2)
+
+def testScheduleCompositionCombinesEnvironments : IO Unit := do
+  let left : Schedule Nat Unit Nat :=
+    Schedule.make () fun _ _ =>
+      Z.serviceWith fun value => ((), value, .done)
+  let right : Schedule Bool Unit Bool :=
+    Schedule.make () fun _ _ =>
+      Z.serviceWith fun value => ((), value, .done)
+  let policy := left &&& right
+  let program : Z (Nat × Bool) Empty (Nat × Bool) :=
+    (Z.succeedNow ()).repeat policy
+  match ← runProgram "schedule-composition-environment" <|
+      program.provideEnvironment (7, true) with
+  | .success (7, true) => pure ()
+  | _ => failTest "schedule composition did not combine environments"
+
+def testScheduleNamedCompositionInfersInput : IO Unit := do
+  let effect : Z Unit Empty Unit := Z.succeedNow ()
+  let policy := (Schedule.recurs 2).zip Schedule.forever
+  match ← runProgram "schedule-named-composition" <|
+      effect.repeat policy with
+  | .success (2, 2) => pure ()
+  | _ => failTest "named schedule composition did not infer its input"
+
 def testIOErrorCatch : IO Unit := do
   let program : Z Unit Empty String := do
     try
@@ -1932,6 +2057,22 @@ def suite : List (String × IO Unit) := [
   ("testRepeatPreservesFailure", testRepeatPreservesFailure),
   ("testScheduleMapsOutput", testScheduleMapsOutput),
   ("testScheduleCombinesEnvironment", testScheduleCombinesEnvironment),
+  ("testScheduleIntersectionStopsWithFirstPolicy",
+    testScheduleIntersectionStopsWithFirstPolicy),
+  ("testScheduleUnionStopsWithLastPolicy",
+    testScheduleUnionStopsWithLastPolicy),
+  ("testScheduleAndThenChangesPolicy", testScheduleAndThenChangesPolicy),
+  ("testScheduleAndThenEitherTagsOutput",
+    testScheduleAndThenEitherTagsOutput),
+  ("testScheduleExponentialBackoff", testScheduleExponentialBackoff),
+  ("testScheduleIntersectionUsesLongerDelay",
+    testScheduleIntersectionUsesLongerDelay),
+  ("testScheduleUnionUsesShorterDelay",
+    testScheduleUnionUsesShorterDelay),
+  ("testScheduleCompositionCombinesEnvironments",
+    testScheduleCompositionCombinesEnvironments),
+  ("testScheduleNamedCompositionInfersInput",
+    testScheduleNamedCompositionInfersInput),
   ("testIOErrorCatch", testIOErrorCatch),
   ("testExitEquality", testExitEquality),
   ("testCompleteBeforeTask", testCompleteBeforeTask),

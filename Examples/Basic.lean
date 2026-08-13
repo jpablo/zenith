@@ -47,6 +47,10 @@ def repeatExample : Z Unit Empty Nat :=
 def retryExample : Z Unit String Nat :=
   (Z.fail "not ready" : Z Unit String Nat).retry (Schedule.recurs 3)
 
+/-- Exponential delays bounded to three retries. -/
+def boundedBackoff : Schedule Unit String (UInt32 × Nat) :=
+  (Schedule.exponential 10).zip (Schedule.recurs 3)
+
 /-- The same operation as `zipExample`, written with `do`. -/
 def zipExample2 : Z Unit Empty (Nat × String) := do
   let number <- Z.succeedNow 8
