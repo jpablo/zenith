@@ -242,11 +242,44 @@ def check
             if predicate input output then .continue delay else .done
       (nextState, output, checkedDecision)
 
+/--
+Use an effectful predicate to keep or stop an underlying continue decision.
+The schedule and predicate environment requirements are combined.
+-/
+def checkZIO
+    [meet : Environment.Meet R₁ R₂ R]
+    (self : Schedule R₁ Input Output)
+    (predicate : Input -> Output -> Z R₂ Empty Bool) :
+    Schedule R Input Output where
+  State := self.State
+  initial := self.initial
+  step input state :=
+    let base : Z R Empty (self.State × Output × Decision) :=
+      (self.step input state).contramap meet.left
+    base.flatMap fun (nextState, output, decision) =>
+      match decision with
+      | .done =>
+          Z.internal.succeedNow (nextState, output, .done)
+      | .continue delay =>
+          let accepted : Z R Empty Bool :=
+            (predicate input output).contramap meet.right
+          accepted.map fun keepGoing =>
+            let checkedDecision :=
+              if keepGoing then .continue delay else .done
+            (nextState, output, checkedDecision)
+
 /-- Continue while the input satisfies `predicate`. -/
 def whileInput
     (self : Schedule R Input Output)
     (predicate : Input -> Bool) : Schedule R Input Output :=
   self.check fun input _ => predicate input
+
+/-- Continue while the effectful input predicate returns true. -/
+def whileInputZIO
+    [Environment.Meet R₁ R₂ R]
+    (self : Schedule R₁ Input Output)
+    (predicate : Input -> Z R₂ Empty Bool) : Schedule R Input Output :=
+  self.checkZIO fun input _ => predicate input
 
 /-- Continue until the input satisfies `predicate`. -/
 def untilInput
@@ -254,17 +287,40 @@ def untilInput
     (predicate : Input -> Bool) : Schedule R Input Output :=
   self.whileInput fun input => !(predicate input)
 
+/-- Continue until the effectful input predicate returns true. -/
+def untilInputZIO
+    [Environment.Meet R₁ R₂ R]
+    (self : Schedule R₁ Input Output)
+    (predicate : Input -> Z R₂ Empty Bool) : Schedule R Input Output :=
+  self.checkZIO fun input _ =>
+    (predicate input).map fun stopNow => !stopNow
+
 /-- Continue while the output satisfies `predicate`. -/
 def whileOutput
     (self : Schedule R Input Output)
     (predicate : Output -> Bool) : Schedule R Input Output :=
   self.check fun _ output => predicate output
 
+/-- Continue while the effectful output predicate returns true. -/
+def whileOutputZIO
+    [Environment.Meet R₁ R₂ R]
+    (self : Schedule R₁ Input Output)
+    (predicate : Output -> Z R₂ Empty Bool) : Schedule R Input Output :=
+  self.checkZIO fun _ output => predicate output
+
 /-- Continue until the output satisfies `predicate`. -/
 def untilOutput
     (self : Schedule R Input Output)
     (predicate : Output -> Bool) : Schedule R Input Output :=
   self.whileOutput fun output => !(predicate output)
+
+/-- Continue until the effectful output predicate returns true. -/
+def untilOutputZIO
+    [Environment.Meet R₁ R₂ R]
+    (self : Schedule R₁ Input Output)
+    (predicate : Output -> Z R₂ Empty Bool) : Schedule R Input Output :=
+  self.checkZIO fun _ output =>
+    (predicate output).map fun stopNow => !stopNow
 
 instance [Environment.Meet R₁ R₂ R] :
     HAnd

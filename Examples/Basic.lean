@@ -55,6 +55,11 @@ def boundedBackoff : Schedule Unit String (UInt32 × Nat) :=
 def temporaryRetry : Schedule Unit String Nat :=
   (Schedule.forever).whileInput fun error => error == "temporary"
 
+/-- Read the retry limit from the schedule environment. -/
+def configuredRetry : Schedule Nat String Nat :=
+  (Schedule.forever).whileOutputZIO fun retries =>
+    Z.serviceWith fun limit : Nat => retries < limit
+
 /-- Recover with the last error and final schedule output. -/
 def retryOrElseExample : Z Unit Empty Nat :=
   (Z.fail "not ready" : Z Unit String Nat).retryOrElse

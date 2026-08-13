@@ -111,6 +111,22 @@ The available forms are `whileInput`, `untilInput`, `whileOutput`, and
 wants to continue. A false predicate changes the decision to stop but keeps
 the current schedule output.
 
+The `ZIO` forms use an effectful predicate:
+
+```lean
+def configuredRetries : Schedule RetryConfig RequestError Nat :=
+  (Schedule.forever).whileOutputZIO fun retries =>
+    Z.serviceWith fun config : RetryConfig =>
+      retries < config.maximumRetries
+```
+
+The available forms are `checkZIO`, `whileInputZIO`, `untilInputZIO`,
+`whileOutputZIO`, and `untilOutputZIO`. A predicate has type
+`Z R Empty Bool`, so it can use services and run effects but cannot produce a
+typed failure. Zenith combines the schedule and predicate environments with
+`Environment.Meet`. It does not run the predicate after the underlying
+schedule has stopped.
+
 ## Retry fallback
 
 `Z.retryOrElse` runs a fallback after the schedule stops. The fallback receives
@@ -151,5 +167,5 @@ def policy : Schedule RetryConfig FileError Nat :=
 Delays use `UInt32` milliseconds, which matches `Z.sleep`. A delay is
 interruptible. Interruption stops the active delay and the recurrence loop.
 
-Effectful filters, output folds, jitter, Fibonacci backoff, and a manual driver
-are future additions.
+Output folds, jitter, Fibonacci backoff, and a manual driver are future
+additions.

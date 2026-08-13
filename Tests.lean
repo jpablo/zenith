@@ -654,6 +654,87 @@ def testScheduleFilterKeepsUnderlyingStop : IO Unit := do
   assertTrue "schedule filter overrode an underlying stop"
     ((← runs.get) == 2)
 
+def testScheduleCheckZIOCombinesEnvironments : IO Unit := do
+  let base : Schedule Nat Unit Nat :=
+    Schedule.make () fun _ _ =>
+      Z.serviceWith fun limit => ((), limit, .continue 0)
+  let policy : Schedule (Nat × Bool) Unit Nat :=
+    base.checkZIO fun _ output =>
+      (Z.serviceWith fun enabled : Bool => enabled && output < 10 :
+        Z Bool Empty Bool)
+  let program : Z (Nat × Bool) Empty Nat :=
+    (Z.succeedNow ()).repeat policy
+  match ← runProgram "schedule-check-zio-environment" <|
+      program.provideEnvironment (7, false) with
+  | .success 7 => pure ()
+  | _ => failTest "checkZIO did not combine its environment requirements"
+
+def testScheduleCheckZIOSkipsPredicateAfterStop : IO Unit := do
+  let predicateCalls ← IO.mkRef 0
+  let policy := (Schedule.stop (Input := Unit)).checkZIO fun _ _ => zdo
+    Z.succeed <| predicateCalls.modify fun count => count + 1
+    Z.succeedNow true
+  match ← runProgram "schedule-check-zio-underlying-stop" <|
+      (Z.succeedNow ()).repeat policy with
+  | .success () => pure ()
+  | _ => failTest "checkZIO changed an underlying stop"
+  assertTrue "checkZIO ran its predicate after an underlying stop"
+    ((← predicateCalls.get) == 0)
+
+def testScheduleWhileInputZIOStopsRetry : IO Unit := do
+  let attempts ← IO.mkRef 0
+  let effect : Z Unit Nat Unit := zdo
+    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+      let next := count + 1
+      (next, next)
+    Z.fail attempt
+  let policy := (Schedule.forever).whileInputZIO fun error =>
+    Z.succeedNow (error < 3)
+  match ← runProgram "schedule-while-input-zio" (effect.retry policy) with
+  | .failure (.fail 3) => pure ()
+  | _ => failTest "whileInputZIO did not preserve its terminal input"
+  assertTrue "whileInputZIO stopped at the wrong attempt"
+    ((← attempts.get) == 3)
+
+def testScheduleUntilInputZIOStopsRetry : IO Unit := do
+  let attempts ← IO.mkRef 0
+  let effect : Z Unit Nat Unit := zdo
+    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+      let next := count + 1
+      (next, next)
+    Z.fail attempt
+  let policy := (Schedule.forever).untilInputZIO fun error =>
+    Z.succeedNow (error >= 3)
+  match ← runProgram "schedule-until-input-zio" (effect.retry policy) with
+  | .failure (.fail 3) => pure ()
+  | _ => failTest "untilInputZIO did not preserve its terminal input"
+  assertTrue "untilInputZIO stopped at the wrong attempt"
+    ((← attempts.get) == 3)
+
+def testScheduleWhileOutputZIOStopsRepeat : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify fun count => count + 1)
+  let policy := (Schedule.forever).whileOutputZIO fun output =>
+    Z.succeedNow (output < 2)
+  match ← runProgram "schedule-while-output-zio" <|
+      effect.repeat policy with
+  | .success 2 => pure ()
+  | _ => failTest "whileOutputZIO did not preserve its terminal output"
+  assertTrue "whileOutputZIO stopped at the wrong run" ((← runs.get) == 3)
+
+def testScheduleUntilOutputZIOStopsRepeat : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify fun count => count + 1)
+  let policy := (Schedule.forever).untilOutputZIO fun output =>
+    Z.succeedNow (output >= 2)
+  match ← runProgram "schedule-until-output-zio" <|
+      effect.repeat policy with
+  | .success 2 => pure ()
+  | _ => failTest "untilOutputZIO did not preserve its terminal output"
+  assertTrue "untilOutputZIO stopped at the wrong run" ((← runs.get) == 3)
+
 def testRetryOrElseUsesTerminalErrorAndOutput : IO Unit := do
   let attempts ← IO.mkRef 0
   let effect : Z Unit String String := zdo
@@ -1245,6 +1326,20 @@ def testHighUniverseRetryOrElse : IO Unit := do
   match ← runProgram "high-universe-retry-or-else" program with
   | .success 7 => pure ()
   | _ => failTest "retryOrElse did not preserve a high-universe environment"
+
+def testHighUniverseScheduleFilter : IO Unit := do
+  let service : HighGithub := {
+    getIssues := fun _ => Z.succeedNow [1, 2]
+  }
+  let policy : Schedule HighGithub Unit Nat :=
+    (Schedule.forever).whileOutputZIO fun output =>
+      Z.serviceWith fun (_ : HighGithub) => output < 1
+  let program : Z HighGithub Empty Nat :=
+    (Z.succeedNow ()).repeat policy
+  match ← runProgram "high-universe-schedule-filter" <|
+      program.provideEnvironment service with
+  | .success 1 => pure ()
+  | _ => failTest "effectful filter lost a high-universe environment"
 
 def failingHighGithubLayer : Layer Unit IO.Error HighGithub :=
   Layer.failCause (.fail (IO.userError "layer build failed"))
@@ -2231,6 +2326,18 @@ def suite : List (String × IO Unit) := [
   ("testScheduleUntilOutputStopsRepeat", testScheduleUntilOutputStopsRepeat),
   ("testScheduleFilterKeepsUnderlyingStop",
     testScheduleFilterKeepsUnderlyingStop),
+  ("testScheduleCheckZIOCombinesEnvironments",
+    testScheduleCheckZIOCombinesEnvironments),
+  ("testScheduleCheckZIOSkipsPredicateAfterStop",
+    testScheduleCheckZIOSkipsPredicateAfterStop),
+  ("testScheduleWhileInputZIOStopsRetry",
+    testScheduleWhileInputZIOStopsRetry),
+  ("testScheduleUntilInputZIOStopsRetry",
+    testScheduleUntilInputZIOStopsRetry),
+  ("testScheduleWhileOutputZIOStopsRepeat",
+    testScheduleWhileOutputZIOStopsRepeat),
+  ("testScheduleUntilOutputZIOStopsRepeat",
+    testScheduleUntilOutputZIOStopsRepeat),
   ("testRetryOrElseUsesTerminalErrorAndOutput",
     testRetryOrElseUsesTerminalErrorAndOutput),
   ("testRetryOrElseCombinesFallbackError",
@@ -2275,6 +2382,7 @@ def suite : List (String × IO Unit) := [
   ("testHighUniverseTimeout", testHighUniverseTimeout),
   ("testHighUniverseRetry", testHighUniverseRetry),
   ("testHighUniverseRetryOrElse", testHighUniverseRetryOrElse),
+  ("testHighUniverseScheduleFilter", testHighUniverseScheduleFilter),
   ("testHighUniverseLayerFailure", testHighUniverseLayerFailure),
   ("testLayerFromZ", testLayerFromZ),
   ("testLayerReleaseOrder", testLayerReleaseOrder),
