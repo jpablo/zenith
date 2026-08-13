@@ -537,6 +537,42 @@ def testScheduleExponentialBackoff : IO Unit := do
   assertTrue "bounded exponential schedule ran the wrong number of effects"
     ((← runs.get) == 3)
 
+def testScheduleFibonacciBackoff : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Unit :=
+    Z.succeed (runs.modify fun count => count + 1)
+  let policy :=
+    Schedule.fibonacci (Input := Unit) 1 &&&
+      Schedule.recurs (Input := Unit) 4
+  match ← runProgram "schedule-fibonacci" (effect.repeat policy) with
+  | .success (5, 4) => pure ()
+  | _ => failTest "fibonacci schedule returned the wrong delay sequence"
+  assertTrue "bounded fibonacci schedule ran the wrong number of effects"
+    ((← runs.get) == 5)
+
+def testScheduleFibonacciSaturates : IO Unit := do
+  let large : UInt32 := UInt32.ofNat 3000000000
+  let maximum : UInt32 := UInt32.ofNat 4294967295
+  let policy := Schedule.fibonacci (Input := Unit) large
+  match ← Z.unsafeRunSync (policy.step () policy.initial)
+      "schedule-fibonacci-saturation-1" with
+  | .success (state₁, output₁, .continue delay₁) =>
+      assertTrue "fibonacci changed its first delay"
+        (output₁ == large && delay₁ == large)
+      match ← Z.unsafeRunSync (policy.step () state₁)
+          "schedule-fibonacci-saturation-2" with
+      | .success (state₂, output₂, .continue delay₂) =>
+          assertTrue "fibonacci changed its second delay"
+            (output₂ == large && delay₂ == large)
+          match ← Z.unsafeRunSync (policy.step () state₂)
+              "schedule-fibonacci-saturation-3" with
+          | .success (_, output₃, .continue delay₃) =>
+              assertTrue "fibonacci overflow did not saturate"
+                (output₃ == maximum && delay₃ == maximum)
+          | _ => failTest "the third fibonacci step failed"
+      | _ => failTest "the second fibonacci step failed"
+  | _ => failTest "the first fibonacci step failed"
+
 def testScheduleIntersectionUsesLongerDelay : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
@@ -2423,6 +2459,8 @@ def suite : List (String × IO Unit) := [
   ("testScheduleAndThenEitherTagsOutput",
     testScheduleAndThenEitherTagsOutput),
   ("testScheduleExponentialBackoff", testScheduleExponentialBackoff),
+  ("testScheduleFibonacciBackoff", testScheduleFibonacciBackoff),
+  ("testScheduleFibonacciSaturates", testScheduleFibonacciSaturates),
   ("testScheduleIntersectionUsesLongerDelay",
     testScheduleIntersectionUsesLongerDelay),
   ("testScheduleUnionUsesShorterDelay",

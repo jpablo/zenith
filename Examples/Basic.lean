@@ -51,6 +51,10 @@ def retryExample : Z Unit String Nat :=
 def boundedBackoff : Schedule Unit String (UInt32 × Nat) :=
   (Schedule.exponential 10).zip (Schedule.recurs 3)
 
+/-- Fibonacci delays bounded to four retries. -/
+def boundedFibonacci : Schedule Unit String (UInt32 × Nat) :=
+  (Schedule.fibonacci 10).zip (Schedule.recurs 4)
+
 /-- Retry only while the error is temporary. -/
 def temporaryRetry : Schedule Unit String Nat :=
   (Schedule.forever).whileInput fun error => error == "temporary"

@@ -94,6 +94,15 @@ Schedule.exponential 100 (factor := 3) -- 100, 300, 900, ...
 The output is the current delay as `UInt32`. Growth saturates at the largest
 `UInt32` value instead of wrapping to a small delay.
 
+`Schedule.fibonacci one` starts with two `one` delays. Each later delay is the
+sum of the preceding two delays:
+
+```lean
+Schedule.fibonacci 100 -- 100, 100, 200, 300, 500, ...
+```
+
+Fibonacci growth also saturates at the largest `UInt32` value.
+
 ## Filters
 
 Schedule filters can stop a policy from its current input or output:
@@ -202,4 +211,4 @@ def policy : Schedule RetryConfig FileError Nat :=
 Delays use `UInt32` milliseconds, which matches `Z.sleep`. A delay is
 interruptible. Interruption stops the active delay and the recurrence loop.
 
-Jitter, Fibonacci backoff, and a manual driver are future additions.
+Jitter and a manual driver are future additions.

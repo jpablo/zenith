@@ -291,6 +291,10 @@ private def multiplyDelay (delay : UInt32) (factor : Nat) : UInt32 :=
   let maximum : Nat := 4294967295
   UInt32.ofNat (min (delay.toNat * factor) maximum)
 
+private def addDelay (left right : UInt32) : UInt32 :=
+  let maximum : Nat := 4294967295
+  UInt32.ofNat (min (left.toNat + right.toNat) maximum)
+
 /--
 Continue forever with geometric backoff. The first delay is `base`; each next
 delay is the previous delay multiplied by `factor`.
@@ -301,6 +305,17 @@ def exponential
   make base fun _ delay =>
     Z.succeedNow
       (multiplyDelay delay factor, delay, .continue delay)
+
+/--
+Continue forever with Fibonacci backoff. The first two delays are `one`; each
+later delay is the saturated sum of the preceding two delays.
+-/
+def fibonacci (one : UInt32) : Schedule Unit Input UInt32 :=
+  make (one, one) fun _ state =>
+    let current := state.1
+    let next := state.2
+    Z.succeedNow
+      ((next, addDelay current next), current, .continue current)
 
 /--
 Keep an underlying continue decision only when `predicate` accepts its input
