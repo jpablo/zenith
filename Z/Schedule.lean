@@ -1,4 +1,4 @@
-import Z.Combinators
+import Z.Random
 
 /-!
 Composable policies for effect retry and repetition.
@@ -27,6 +27,55 @@ structure Schedule.{ur} (R : Type ur) (Input Output : Type) :
 
 namespace Schedule
 
+/--
+A mutable handle that manually advances a schedule. `next` returns `some`
+output while the schedule continues and `none` after its terminal step.
+-/
+structure Driver.{ur}
+    (R : Type ur)
+    (Input Output : Type)
+    (schedule : Schedule R Input Output) :
+    Type (max 1 ur) where
+  private reference : IO.Ref (Option Output × schedule.State)
+
+namespace Driver
+
+/-- Return the most recently observed output, if the driver has one. -/
+def last
+    (self : Driver R Input Output schedule) : Z Unit Empty (Option Output) :=
+  Z.succeed do
+    let (output, _) ← self.reference.get
+    pure output
+
+/-- Reset the driver to the schedule's initial state and clear its output. -/
+def reset (self : Driver R Input Output schedule) : Z Unit Empty Unit :=
+  Z.succeed <| self.reference.set (none, schedule.initial)
+
+/-- Return the driver's current internal schedule state. -/
+def state (self : Driver R Input Output schedule) :
+    Z Unit Empty schedule.State :=
+  Z.succeed do
+    let (_, state) ← self.reference.get
+    pure state
+
+private def delay (milliseconds : UInt32) : Z R Empty Unit :=
+  (Z.sleep milliseconds).contramap fun _ : R => ()
+
+/-- Advance one schedule step, waiting for its delay if it continues. -/
+def next
+    (self : Driver R Input Output schedule)
+    (input : Input) : Z R Empty (Option Output) :=
+  Z.withIO self.reference.get fun (_, currentState) =>
+    (schedule.step input currentState).flatMap fun
+      (nextState, output, decision) =>
+        Z.withIO (self.reference.set (some output, nextState)) fun _ =>
+          match decision with
+          | .done => Z.internal.succeedNow none
+          | .continue milliseconds =>
+              delay milliseconds *> Z.internal.succeedNow (some output)
+
+end Driver
+
 /-- Build a schedule from an initial state and a step function. -/
 def make
     {S : Type}
@@ -37,6 +86,16 @@ def make
   State := S
   initial := initial
   step := step
+
+/--
+Create a mutable driver for the duration of `use`. A driver cannot be returned
+from `Z`, because it contains a schedule, which lives in a higher universe.
+-/
+def driver
+    (self : Schedule R Input Output)
+    (use : Driver R Input Output self -> Z R E A) : Z R E A :=
+  Z.withIO (IO.mkRef ((none : Option Output), self.initial)) fun reference =>
+    use { reference }
 
 /-- Change the environment supplied to each schedule step. -/
 def contramapEnvironment
@@ -295,6 +354,10 @@ private def addDelay (left right : UInt32) : UInt32 :=
   let maximum : Nat := 4294967295
   UInt32.ofNat (min (left.toNat + right.toNat) maximum)
 
+private def scaleDelay (delay : UInt32) (percentage : Nat) : UInt32 :=
+  let maximum : Nat := 4294967295
+  UInt32.ofNat (min ((delay.toNat * percentage) / 100) maximum)
+
 /--
 Continue forever with geometric backoff. The first delay is `base`; each next
 delay is the previous delay multiplied by `factor`.
@@ -316,6 +379,31 @@ def fibonacci (one : UInt32) : Schedule Unit Input UInt32 :=
     let next := state.2
     Z.succeedNow
       ((next, addDelay current next), current, .continue current)
+
+/--
+Randomly scale each continuing delay by an integer percentage. The default
+range is 80% through 120%. The range endpoints are normalized when reversed.
+-/
+def jittered
+    [meet : Environment.Meet R₁ Random R]
+    (self : Schedule R₁ Input Output)
+    (minimumPercent : Nat := 80)
+    (maximumPercent : Nat := 120) : Schedule R Input Output where
+  State := self.State
+  initial := self.initial
+  step input state :=
+    let base : Z R Empty (self.State × Output × Decision) :=
+      (self.step input state).contramap meet.left
+    base.flatMap fun (nextState, output, decision) =>
+      match decision with
+      | .done => Z.internal.succeedNow (nextState, output, .done)
+      | .continue delay =>
+          let lower := min minimumPercent maximumPercent
+          let upper := max minimumPercent maximumPercent
+          let percentage : Z R Empty Nat :=
+            (Random.nextNatZ lower upper).contramap meet.right
+          percentage.map fun selected =>
+            (nextState, output, .continue (scaleDelay delay selected))
 
 /--
 Keep an underlying continue decision only when `predicate` accepts its input

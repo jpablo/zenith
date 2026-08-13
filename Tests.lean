@@ -573,6 +573,72 @@ def testScheduleFibonacciSaturates : IO Unit := do
       | _ => failTest "the second fibonacci step failed"
   | _ => failTest "the first fibonacci step failed"
 
+def testScheduleJitteredUsesRandomRange : IO Unit := do
+  let requested ← IO.mkRef (none : Option (Nat × Nat))
+  let random : Random := {
+    nextNat := fun lo hi => zdo
+      Z.succeed (requested.set (some (lo, hi)))
+      Z.succeedNow hi
+  }
+  let policy : Schedule Random Unit Nat :=
+    (Schedule.spaced 100).jittered 80 120
+  let step : Z Unit Empty (Nat × Schedule.Decision) :=
+    ((policy.step () policy.initial).map fun (_, output, decision) =>
+      (output, decision)).provideEnvironment random
+  match ← Z.unsafeRunSync step "schedule-jitter-range" with
+  | .success (0, .continue 120) => pure ()
+  | _ => failTest "jittered did not apply the selected percentage"
+  assertTrue "jittered requested the wrong random percentage range"
+    ((← requested.get) == some (80, 120))
+
+def testScheduleJitteredSaturates : IO Unit := do
+  let maximum : UInt32 := UInt32.ofNat 4294967295
+  let random : Random := {
+    nextNat := fun lo _ => Z.succeedNow lo
+  }
+  let policy : Schedule Random Unit Nat :=
+    (Schedule.spaced maximum).jittered 200 200
+  let step : Z Unit Empty Schedule.Decision :=
+    ((policy.step () policy.initial).map fun (_, _, decision) =>
+      decision).provideEnvironment random
+  match ← Z.unsafeRunSync step "schedule-jitter-saturation" with
+  | .success (.continue delay) =>
+      assertTrue "jittered delay overflow did not saturate" (delay == maximum)
+  | _ => failTest "jittered schedule did not continue"
+
+def testScheduleJitteredSkipsTerminalStep : IO Unit := do
+  let draws ← IO.mkRef 0
+  let random : Random := {
+    nextNat := fun _ _ => zdo
+      Z.succeed <| draws.modify fun count => count + 1
+      Z.succeedNow 100
+  }
+  let policy : Schedule Random Unit Unit :=
+    (Schedule.stop).jittered
+  let step : Z Unit Empty Schedule.Decision :=
+    ((policy.step () policy.initial).map fun (_, _, decision) =>
+      decision).provideEnvironment random
+  match ← Z.unsafeRunSync step "schedule-jitter-terminal" with
+  | .success .done => pure ()
+  | _ => failTest "jittered changed an underlying stop"
+  assertTrue "jittered drew randomness after an underlying stop"
+    ((← draws.get) == 0)
+
+def testScheduleJitteredCombinesEnvironment : IO Unit := do
+  let random : Random := {
+    nextNat := fun lo _ => Z.succeedNow lo
+  }
+  let base : Schedule Nat Unit Nat :=
+    Schedule.make () fun _ _ =>
+      Z.serviceWith fun value => ((), value, .continue 10)
+  let policy : Schedule (Nat × Random) Unit Nat := base.jittered 120 120
+  let step : Z Unit Empty (Nat × Schedule.Decision) :=
+    ((policy.step () policy.initial).map fun (_, output, decision) =>
+      (output, decision)).provideEnvironment (7, random)
+  match ← Z.unsafeRunSync step "schedule-jitter-environment" with
+  | .success (7, .continue 12) => pure ()
+  | _ => failTest "jittered did not combine schedule and random environments"
+
 def testScheduleIntersectionUsesLongerDelay : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
@@ -851,6 +917,52 @@ def testScheduleCollectAllIncludesTerminalOutput : IO Unit := do
       (Z.succeedNow ()).repeat policy with
   | .success [0, 1, 2, 3] => pure ()
   | _ => failTest "collectAll did not include the terminal schedule output"
+
+def testScheduleDriverTracksOutputAndState : IO Unit := do
+  let program : Z Unit Empty
+      (Option Nat × Option Nat × Nat × Option Nat × Option Nat ×
+        Option Nat × Nat × Option Nat) :=
+    (Schedule.recurs (Input := String) 2).driver fun driver => zdo
+      let empty ← driver.last
+      let first ← driver.next "first"
+      let state₁ ← driver.state
+      let second ← driver.next "second"
+      let terminal ← driver.next "terminal"
+      let last ← driver.last
+      driver.reset
+      let resetState ← driver.state
+      let resetLast ← driver.last
+      pure (empty, first, state₁, second, terminal, last, resetState,
+        resetLast)
+  match ← Z.unsafeRunSync program "schedule-driver-state" with
+  | .success (none, some 0, 1, some 1, none, some 2, 0, none) => pure ()
+  | _ => failTest "driver did not preserve its output and state transitions"
+
+def testScheduleDriverUsesScheduleEnvironment : IO Unit := do
+  let policy : Schedule Nat Unit Nat :=
+    Schedule.make () fun _ _ =>
+      Z.serviceWith fun value => ((), value, .continue 0)
+  let program : Z Nat Empty (Option Nat) :=
+    policy.driver fun driver => driver.next ()
+  match ← Z.unsafeRunSync
+      (program.provideEnvironment 7) "schedule-driver-environment" with
+  | .success (some 7) => pure ()
+  | _ => failTest "driver did not supply the schedule environment to next"
+
+def testScheduleDriverWaitsForDelay : IO Unit := do
+  let started ← IO.mkRef false
+  let program : Z Unit Empty (Option Nat) :=
+    (Schedule.spaced (Input := Unit) 20).driver fun driver => zdo
+      Z.succeed (started.set true)
+      driver.next ()
+  let fiber ← Z.unsafeFork program "schedule-driver-delay"
+  waitForFlag "schedule driver delay start" started
+  match ← fiberExitWithin fiber 5 with
+  | none => pure ()
+  | some _ => failTest "driver returned before its continuing delay elapsed"
+  match ← fiber.await with
+  | .success (some 0) => pure ()
+  | _ => failTest "delayed driver returned the wrong output"
 
 def testRetryOrElseUsesTerminalErrorAndOutput : IO Unit := do
   let attempts ← IO.mkRef 0
@@ -1487,6 +1599,20 @@ def testHighUniverseScheduleCollectAll : IO Unit := do
       program.provideEnvironment service with
   | .success [0, 1] => pure ()
   | _ => failTest "collectAll lost a high-universe environment"
+
+def testHighUniverseScheduleDriver : IO Unit := do
+  let service : HighGithub := {
+    getIssues := fun _ => Z.succeedNow [1, 2]
+  }
+  let policy : Schedule HighGithub Unit Nat :=
+    Schedule.make () fun _ _ =>
+      Z.serviceWith fun (_ : HighGithub) => ((), 7, .continue 0)
+  let program : Z HighGithub Empty (Option Nat) :=
+    policy.driver fun driver => driver.next ()
+  match ← Z.unsafeRunSync
+      (program.provideEnvironment service) "high-universe-schedule-driver" with
+  | .success (some 7) => pure ()
+  | _ => failTest "driver lost a high-universe schedule environment"
 
 def failingHighGithubLayer : Layer Unit IO.Error HighGithub :=
   Layer.failCause (.fail (IO.userError "layer build failed"))
@@ -2461,6 +2587,13 @@ def suite : List (String × IO Unit) := [
   ("testScheduleExponentialBackoff", testScheduleExponentialBackoff),
   ("testScheduleFibonacciBackoff", testScheduleFibonacciBackoff),
   ("testScheduleFibonacciSaturates", testScheduleFibonacciSaturates),
+  ("testScheduleJitteredUsesRandomRange",
+    testScheduleJitteredUsesRandomRange),
+  ("testScheduleJitteredSaturates", testScheduleJitteredSaturates),
+  ("testScheduleJitteredSkipsTerminalStep",
+    testScheduleJitteredSkipsTerminalStep),
+  ("testScheduleJitteredCombinesEnvironment",
+    testScheduleJitteredCombinesEnvironment),
   ("testScheduleIntersectionUsesLongerDelay",
     testScheduleIntersectionUsesLongerDelay),
   ("testScheduleUnionUsesShorterDelay",
@@ -2499,6 +2632,11 @@ def suite : List (String × IO Unit) := [
     testScheduleRepetitionsCountsContinues),
   ("testScheduleCollectAllIncludesTerminalOutput",
     testScheduleCollectAllIncludesTerminalOutput),
+  ("testScheduleDriverTracksOutputAndState",
+    testScheduleDriverTracksOutputAndState),
+  ("testScheduleDriverUsesScheduleEnvironment",
+    testScheduleDriverUsesScheduleEnvironment),
+  ("testScheduleDriverWaitsForDelay", testScheduleDriverWaitsForDelay),
   ("testRetryOrElseUsesTerminalErrorAndOutput",
     testRetryOrElseUsesTerminalErrorAndOutput),
   ("testRetryOrElseCombinesFallbackError",
@@ -2547,6 +2685,7 @@ def suite : List (String × IO Unit) := [
   ("testHighUniverseScheduleFold", testHighUniverseScheduleFold),
   ("testHighUniverseScheduleCollectAll",
     testHighUniverseScheduleCollectAll),
+  ("testHighUniverseScheduleDriver", testHighUniverseScheduleDriver),
   ("testHighUniverseLayerFailure", testHighUniverseLayerFailure),
   ("testLayerFromZ", testLayerFromZ),
   ("testLayerReleaseOrder", testLayerReleaseOrder),

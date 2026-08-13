@@ -103,6 +103,45 @@ Schedule.fibonacci 100 -- 100, 100, 200, 300, 500, ...
 
 Fibonacci growth also saturates at the largest `UInt32` value.
 
+## Jitter
+
+`policy.jittered` randomizes each continuing delay. It needs the `Random`
+service and uses an inclusive integer percentage range. The default range is
+80% through 120%:
+
+```lean
+def retryPolicy : Schedule Random RequestError UInt32 :=
+  (Schedule.exponential 100).jittered
+```
+
+`policy.jittered 0 100` gives full jitter. Zenith calculates
+`delay * percentage / 100`, rounds down to milliseconds, and saturates at the
+largest `UInt32` value. Reversed endpoints are normalized. The terminal step
+does not draw randomness or change its decision.
+
+## Manual driver
+
+`policy.driver` lets a program advance a schedule itself. The callback receives
+a stateful driver with `next`, `last`, `reset`, and `state`:
+
+```lean
+def firstStep : Z Unit Empty (Option Nat) :=
+  (Schedule.recurs (Input := String) 2).driver fun driver =>
+    driver.next "temporary"
+```
+
+`next` returns `some output` after a continuing step and waits for its delay.
+It returns `none` after the terminal step; `last` then contains that terminal
+output. `reset` clears `last` and restores the initial state.
+
+Call `next` from one fiber at a time. A driver has mutable state and is meant
+to represent one sequential schedule run.
+
+The driver uses a callback instead of returning `Driver` as a `Z` value. A
+driver contains its schedule, and schedules live in a higher Lean universe than
+Zenith success values. The callback form keeps the driver local while still
+allowing schedules that require high-universe services.
+
 ## Filters
 
 Schedule filters can stop a policy from its current input or output:
@@ -211,4 +250,4 @@ def policy : Schedule RetryConfig FileError Nat :=
 Delays use `UInt32` milliseconds, which matches `Z.sleep`. A delay is
 interruptible. Interruption stops the active delay and the recurrence loop.
 
-Jitter and a manual driver are future additions.
+The schedule roadmap in this document is complete.

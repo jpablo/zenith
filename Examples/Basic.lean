@@ -55,6 +55,15 @@ def boundedBackoff : Schedule Unit String (UInt32 × Nat) :=
 def boundedFibonacci : Schedule Unit String (UInt32 × Nat) :=
   (Schedule.fibonacci 10).zip (Schedule.recurs 4)
 
+/-- Randomize exponential delays from 80% through 120% of their base value. -/
+def jitteredBackoff : Schedule Random String (UInt32 × Nat) :=
+  ((Schedule.exponential 10).jittered).zip (Schedule.recurs 3)
+
+/-- Manually advance one step of a schedule. -/
+def manualScheduleStep : Z Unit Empty (Option Nat) :=
+  (Schedule.recurs (Input := String) 2).driver fun driver =>
+    driver.next "temporary"
+
 /-- Retry only while the error is temporary. -/
 def temporaryRetry : Schedule Unit String Nat :=
   (Schedule.forever).whileInput fun error => error == "temporary"
