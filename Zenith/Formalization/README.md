@@ -15,6 +15,11 @@ This folder contains optional machine-checked statements about Zenith.
   maps it to the abstract error algebra.
 * `VarianceLaws.lean` checks the production `Z` variance, coercion, and
   heterogeneous composition signatures.
+* `SequentialCore.lean` defines the pure sequential `ZCore` subset, its
+  terminating evaluation relation, and its lowering to production `ZCore`
+  nodes. It is the first interpreter-correctness boundary.
+* `SequentialMachine.lean` defines the corresponding typed stack machine and
+  proves that each direct model evaluation reaches the same final machine exit.
 
 This is a separate optional library. Application programs do not need to
 import it.

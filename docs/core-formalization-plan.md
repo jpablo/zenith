@@ -58,6 +58,8 @@ Scala and Lean use the same runtime representation.
 | `Zenith/Formalization/ServiceRowConnection.lean` | Connection from keyed rows to abstract requirements |
 | `Zenith/Formalization/ErrorShape.lean` | Checked nested-`Sum` error syntax and interpretation |
 | `Zenith/Formalization/VarianceLaws.lean` | Production `Z` variance and composition signatures |
+| `Zenith/Formalization/SequentialCore.lean` | Pure sequential interpreter model and evaluation laws |
+| `Zenith/Formalization/SequentialMachine.lean` | Pure typed stack machine and model-to-machine proof |
 | `docs/intersection-types.md` | User-facing specification and final status |
 
 Keep the abstract model in the optional `ZenithFormalization` library. Do not
@@ -341,6 +343,22 @@ types in the kernel.
 
 ## Next formalization boundary
 
-The next independent boundary is an interpreter-correctness model. It should
-state a small-step or denotational semantics for a pure `ZCore` subset before
-it attempts to relate that model to the executable interpreter.
+Phase 8 has started with
+[`SequentialCore.lean`](../Zenith/Formalization/SequentialCore.lean). It
+defines the pure sequential `ZCore` subset: completed exits, success
+continuations, error handlers, environment adaptation, environment reads, and
+provided environments. Its big-step evaluator relation has exact rules for
+each instruction and a proof of deterministic final exits. `toZCore` lowers
+each model instruction to the matching public production node.
+
+[`SequentialMachine.lean`](../Zenith/Formalization/SequentialMachine.lean)
+now defines the matching typed stack machine. Its
+`evaluation_runs_to_halt` theorem proves that every direct model evaluation
+reaches the same final exit through the stack transitions. The stack frames
+correspond to the success and error continuation frames in the production
+interpreter.
+
+This is not yet a proof of the executable interpreter. The next step is a
+refinement proof for the matching branches of `runLoop`. Raw `IO`, callbacks,
+fibers, interruption, logging, diagrams, clocks, promises, and mutable
+references remain outside this first proof boundary.
