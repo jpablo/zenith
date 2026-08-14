@@ -28,7 +28,7 @@ The main goals are pedagogical:
 * Parallel effect composition ✅
 * Retry and repeat schedules ✅
 * Interruption-aware deferred results ✅
-* Interruption-aware unbounded queues ✅
+* Interruption-aware bounded and unbounded queues ✅
 
 Pure service constructors can become layers without manual environment
 projection:

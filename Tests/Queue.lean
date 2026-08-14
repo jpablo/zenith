@@ -10,6 +10,11 @@ private def makeQueue : IO (Z.Queue Nat) := do
   | .success queue => pure queue
   | .failure cause => failTest s!"Queue.unbounded failed: {cause}"
 
+private def makeBoundedQueue (capacity : Nat) : IO (Z.Queue Nat) := do
+  match ← Z.unsafeRunSync (Z.Queue.bounded capacity) "queue-make-bounded" with
+  | .success queue => pure queue
+  | .failure cause => failTest s!"Queue.bounded failed: {cause}"
+
 def testQueuePreservesFIFOOrder : IO Unit := do
   let queue ← makeQueue
   match ← Z.unsafeRunSync (queue.offer 1) "queue-offer-first" with
@@ -78,8 +83,102 @@ def testQueueShutdownInterruptsTakers : IO Unit := do
   | .success true => pure ()
   | _ => failTest "Queue.isShutdown did not report shutdown"
 
+def testBoundedQueueBackpressuresOffers : IO Unit := do
+  let queue ← makeBoundedQueue 1
+  match ← Z.unsafeRunSync (queue.offer 1) "bounded-queue-offer-first" with
+  | .success true => pure ()
+  | _ => failTest "bounded Queue.offer rejected its first value"
+  let started ← IO.mkRef false
+  let blocked ← Z.unsafeFork
+    ((Z.succeed (started.set true)) *> queue.offer 2) "bounded-queue-offer"
+  waitForFlag "bounded queue offer" started
+  IO.sleep 10
+  match ← blocked.state.get with
+  | .done exit => failTest s!"bounded Queue.offer did not block: {exit}"
+  | _ => pure ()
+  match ← Z.unsafeRunSync queue.take "bounded-queue-take-first" with
+  | .success 1 => pure ()
+  | _ => failTest "bounded Queue.take did not return the first value"
+  match ← fiberExitWithin blocked with
+  | some (.success true) => pure ()
+  | some exit => failTest s!"blocked Queue.offer returned {exit}"
+  | none => failTest "blocked Queue.offer did not resume after a take"
+  match ← Z.unsafeRunSync queue.take "bounded-queue-take-second" with
+  | .success 2 => pure ()
+  | _ => failTest "bounded Queue.take did not return the accepted offer"
+
+def testZeroCapacityQueueRendezvous : IO Unit := do
+  let queue ← makeBoundedQueue 0
+  let started ← IO.mkRef false
+  let offerer ← Z.unsafeFork
+    ((Z.succeed (started.set true)) *> queue.offer 42) "rendezvous-offer"
+  waitForFlag "rendezvous offer" started
+  IO.sleep 10
+  match ← offerer.state.get with
+  | .done exit => failTest s!"rendezvous Queue.offer did not block: {exit}"
+  | _ => pure ()
+  match ← Z.unsafeRunSync queue.take "rendezvous-take" with
+  | .success 42 => pure ()
+  | _ => failTest "rendezvous Queue.take did not receive the offered value"
+  match ← fiberExitWithin offerer with
+  | some (.success true) => pure ()
+  | some exit => failTest s!"rendezvous Queue.offer returned {exit}"
+  | none => failTest "rendezvous Queue.offer did not resume"
+
+def testBoundedQueueRemovesInterruptedOffer : IO Unit := do
+  let queue ← makeBoundedQueue 1
+  let _ ← Z.unsafeRunSync (queue.offer 1) "bounded-interrupt-offer-first"
+  let firstStarted ← IO.mkRef false
+  let first ← Z.unsafeFork
+    ((Z.succeed (firstStarted.set true)) *> queue.offer 2)
+    "bounded-interrupt-first-offer"
+  waitForFlag "first bounded queue offer" firstStarted
+  IO.sleep 10
+  first.requestInterrupt
+  match ← fiberExitWithin first with
+  | some (.failure .interrupt) => pure ()
+  | some exit => failTest s!"interrupted Queue.offer returned {exit}"
+  | none => failTest "interrupted Queue.offer did not finish"
+
+  let secondStarted ← IO.mkRef false
+  let second ← Z.unsafeFork
+    ((Z.succeed (secondStarted.set true)) *> queue.offer 3)
+    "bounded-interrupt-second-offer"
+  waitForFlag "second bounded queue offer" secondStarted
+  IO.sleep 10
+  match ← Z.unsafeRunSync queue.take "bounded-interrupt-take-first" with
+  | .success 1 => pure ()
+  | _ => failTest "bounded Queue.take did not free a producer slot"
+  match ← fiberExitWithin second with
+  | some (.success true) => pure ()
+  | some exit => failTest s!"replacement Queue.offer returned {exit}"
+  | none => failTest "replacement Queue.offer did not resume"
+  match ← Z.unsafeRunSync queue.take "bounded-interrupt-take-second" with
+  | .success 3 => pure ()
+  | _ => failTest "interrupted Queue.offer consumed a later producer slot"
+
+def testBoundedQueueShutdownRejectsBlockedOffer : IO Unit := do
+  let queue ← makeBoundedQueue 1
+  let _ ← Z.unsafeRunSync (queue.offer 1) "bounded-shutdown-offer-first"
+  let started ← IO.mkRef false
+  let blocked ← Z.unsafeFork
+    ((Z.succeed (started.set true)) *> queue.offer 2)
+    "bounded-shutdown-offer"
+  waitForFlag "bounded queue shutdown offer" started
+  IO.sleep 10
+  let _ ← Z.unsafeRunSync queue.shutdown "bounded-queue-shutdown"
+  match ← fiberExitWithin blocked with
+  | some (.success false) => pure ()
+  | some exit => failTest s!"shutdown Queue.offer returned {exit}"
+  | none => failTest "shutdown did not wake a blocked Queue.offer"
+
 def queueTests : List (String × IO Unit) := [
   ("testQueuePreservesFIFOOrder", testQueuePreservesFIFOOrder),
   ("testQueueRemovesInterruptedTaker", testQueueRemovesInterruptedTaker),
-  ("testQueueShutdownInterruptsTakers", testQueueShutdownInterruptsTakers)
+  ("testQueueShutdownInterruptsTakers", testQueueShutdownInterruptsTakers),
+  ("testBoundedQueueBackpressuresOffers", testBoundedQueueBackpressuresOffers),
+  ("testZeroCapacityQueueRendezvous", testZeroCapacityQueueRendezvous),
+  ("testBoundedQueueRemovesInterruptedOffer", testBoundedQueueRemovesInterruptedOffer),
+  ("testBoundedQueueShutdownRejectsBlockedOffer",
+    testBoundedQueueShutdownRejectsBlockedOffer)
 ]

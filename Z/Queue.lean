@@ -2,93 +2,190 @@ import Init.Data.Queue
 import Z.Combinators
 
 /-!
-An unbounded, multi-producer multi-consumer queue for Zenith fibers.
+FIFO, multi-producer multi-consumer queues for Zenith fibers.
 
-`take` is interruption-aware: cancellation removes a pending taker before a
-later `offer` can consume a value for it.
+Both `take` and a blocked bounded `offer` are interruption-aware. Cancellation
+removes the pending waiter before a later queue operation can consume it.
 -/
 
 namespace Z
 
+private structure Taker (A : Type) where
+  id : Nat
+  observer : Observer Empty A
+
+private structure Offerer (A : Type) where
+  id : Nat
+  value : A
+  observer : Observer Empty Bool
+
 private inductive QueueState (A : Type)
-  | open (values : Std.Queue A) (takers : List (Nat × Observer Empty A))
+  | open
+      (capacity : Option Nat)
+      (values : Std.Queue A)
+      (valueCount : Nat)
+      (takers : List (Taker A))
+      (offerers : List (Offerer A))
   | shutdown
 
-/-- An unbounded, interruption-aware FIFO queue. -/
+/-- A FIFO queue with interruption-aware waiting producers and consumers. -/
 structure Queue (A : Type) where
   private state : IO.Ref (QueueState A)
-  private nextTakerId : IO.Ref Nat
+  private nextWaiterId : IO.Ref Nat
 
 namespace Queue
 
-private def notify (observer : Observer Empty A) (exit : Exit Empty A) : IO Unit :=
+private def notify
+    (observer : Observer Empty B)
+    (exit : Exit Empty B) : IO Unit :=
   try observer exit
   catch _ => pure ()
+
+private def hasSpace (capacity : Option Nat) (valueCount : Nat) : Bool :=
+  match capacity with
+  | none => true
+  | some limit => valueCount < limit
 
 private def removeTaker (self : Queue A) (takerId : Nat) : IO Unit :=
   self.state.modify fun state =>
     match state with
-    | .open values takers =>
-        .open values <| takers.filter fun (id, _) => id != takerId
+    | .open capacity values valueCount takers offerers =>
+        .open capacity values valueCount
+          (takers.filter fun taker => taker.id != takerId)
+          offerers
+    | .shutdown => .shutdown
+
+private def removeOfferer (self : Queue A) (offererId : Nat) : IO Unit :=
+  self.state.modify fun state =>
+    match state with
+    | .open capacity values valueCount takers offerers =>
+        .open capacity values valueCount takers
+          (offerers.filter fun offerer => offerer.id != offererId)
     | .shutdown => .shutdown
 
 private def registerTaker
     (self : Queue A)
     (observer : Observer Empty A) : IO (IO Unit) := do
-  let takerId ← self.nextTakerId.modifyGet fun next => (next, next + 1)
-  let exit? ← self.state.modifyGet fun state =>
+  let takerId ← self.nextWaiterId.modifyGet fun next => (next, next + 1)
+  let (exit?, acceptedOfferer?) ← self.state.modifyGet fun state =>
     match state with
-    | .shutdown => (some (.failure .interrupt), .shutdown)
-    | .open values takers =>
+    | .shutdown => ((some (.failure .interrupt), none), .shutdown)
+    | .open capacity values valueCount takers offerers =>
         match values.dequeue? with
-        | some (value, remaining) =>
-            (some (.success value), .open remaining takers)
-        | none => (none, .open values (takers ++ [(takerId, observer)]))
+        | some (value, remainingValues) =>
+            match offerers with
+            | [] =>
+                ((some (.success value), none),
+                  .open capacity remainingValues (valueCount - 1) takers [])
+            | offerer :: remainingOfferers =>
+                ((some (.success value), some offerer),
+                  .open capacity (remainingValues.enqueue offerer.value) valueCount
+                    takers remainingOfferers)
+        | none =>
+            match offerers with
+            | offerer :: remainingOfferers =>
+                ((some (.success offerer.value), some offerer),
+                  .open capacity values valueCount takers remainingOfferers)
+            | [] =>
+                ((none, none),
+                  .open capacity values valueCount
+                    (takers ++ [{ id := takerId, observer }]) [])
   match exit? with
   | none => pure <| self.removeTaker takerId
   | some exit =>
       notify observer exit
+      match acceptedOfferer? with
+      | none => pure ()
+      | some offerer => notify offerer.observer (.success true)
       pure IO.unit
 
-private def offerValue (self : Queue A) (value : A) : IO Bool := do
-  let (accepted, taker?) ← self.state.modifyGet fun state =>
+private def registerOffer
+    (self : Queue A)
+    (value : A)
+    (observer : Observer Empty Bool) : IO (IO Unit) := do
+  let offererId ← self.nextWaiterId.modifyGet fun next => (next, next + 1)
+  let (accepted?, taker?) ← self.state.modifyGet fun state =>
     match state with
-    | .shutdown => ((false, none), .shutdown)
-    | .open values [] => ((true, none), .open (values.enqueue value) [])
-    | .open values ((_, taker) :: remaining) =>
-        ((true, some taker), .open values remaining)
-  match taker? with
-  | none => pure accepted
-  | some taker =>
-      notify taker (.success value)
-      pure accepted
+    | .shutdown => ((some false, none), .shutdown)
+    | .open capacity values valueCount [] offerers =>
+        if hasSpace capacity valueCount then
+          ((some true, none),
+            .open capacity (values.enqueue value) (valueCount + 1) [] offerers)
+        else
+          ((none, none),
+            .open capacity values valueCount []
+              (offerers ++ [{ id := offererId, value, observer }]))
+    | .open capacity values valueCount (taker :: remainingTakers) offerers =>
+        ((some true, some taker),
+          .open capacity values valueCount remainingTakers offerers)
+  match accepted? with
+  | none => pure <| self.removeOfferer offererId
+  | some accepted =>
+      notify observer (.success accepted)
+      match taker? with
+      | none => pure ()
+      | some taker => notify taker.observer (.success value)
+      pure IO.unit
 
-private def pollValue (self : Queue A) : IO (Option A) :=
-  self.state.modifyGet fun state =>
+private def pollValue (self : Queue A) : IO (Option A) := do
+  let (value?, acceptedOfferer?) ← self.state.modifyGet fun state =>
     match state with
-    | .shutdown => (none, .shutdown)
-    | .open values takers =>
+    | .shutdown => ((none, none), .shutdown)
+    | .open capacity values valueCount takers offerers =>
         match values.dequeue? with
-        | none => (none, state)
-        | some (value, remaining) => (some value, .open remaining takers)
+        | some (value, remainingValues) =>
+            match offerers with
+            | [] =>
+                ((some value, none),
+                  .open capacity remainingValues (valueCount - 1) takers [])
+            | offerer :: remainingOfferers =>
+                ((some value, some offerer),
+                  .open capacity (remainingValues.enqueue offerer.value) valueCount
+                    takers remainingOfferers)
+        | none =>
+            match offerers with
+            | offerer :: remainingOfferers =>
+                ((some offerer.value, some offerer),
+                  .open capacity values valueCount takers remainingOfferers)
+            | [] => ((none, none), state)
+  match acceptedOfferer? with
+  | none => pure ()
+  | some offerer => notify offerer.observer (.success true)
+  pure value?
 
-private def shutdownQueue (self : Queue A) : IO (List (Observer Empty A)) :=
+private def shutdownQueue
+    (self : Queue A) : IO (List (Taker A) × List (Offerer A)) :=
   self.state.modifyGet fun state =>
     match state with
-    | .shutdown => ([], .shutdown)
-    | .open _ takers => (takers.map Prod.snd, .shutdown)
+    | .shutdown => (([], []), .shutdown)
+    | .open _ _ _ takers offerers => ((takers, offerers), .shutdown)
+
+private def make (capacity : Option Nat) : UIO (Queue A) :=
+  Z.succeed (do
+    pure {
+      state := ← IO.mkRef (.open capacity Std.Queue.empty 0 [] [])
+      nextWaiterId := ← IO.mkRef 0
+    })
 
 /-- Allocate an unbounded FIFO queue. -/
 def unbounded : UIO (Queue A) :=
-  Z.succeed (do
-    pure {
-      state := ← IO.mkRef (.open Std.Queue.empty [])
-      nextTakerId := ← IO.mkRef 0
-    }) |>.withLabel "Queue.unbounded"
+  make none |>.withLabel "Queue.unbounded"
 
-/-- Offer a value. Returns `false` only after queue shutdown. -/
+/--
+Allocate a FIFO queue that holds at most `capacity` queued values.
+
+`capacity = 0` creates a rendezvous queue: an offer waits for a taker.
+-/
+def bounded (capacity : Nat) : UIO (Queue A) :=
+  make (some capacity) |>.withLabel "Queue.bounded"
+
+/--
+Offer a value. An unbounded queue accepts it immediately. A bounded queue
+waits until it has capacity or a taker is ready. Returns `false` after queue
+shutdown.
+-/
 def offer (self : Queue A) (value : A) : UIO Bool :=
-  Z.succeed (self.offerValue value) |>.withLabel "Queue.offer"
+  Z.asyncInterrupt (self.registerOffer value) |>.withLabel "Queue.offer"
 
 /-- Take the next value, waiting interruptibly while the queue is empty. -/
 def take (self : Queue A) : UIO A :=
@@ -98,12 +195,17 @@ def take (self : Queue A) : UIO A :=
 def poll (self : Queue A) : UIO (Option A) :=
   Z.succeed (self.pollValue) |>.withLabel "Queue.poll"
 
-/-- Shut down the queue and interrupt all pending takers. -/
+/--
+Shut down the queue. This discards queued values, interrupts pending takers,
+and makes pending and future offers return `false`.
+-/
 def shutdown (self : Queue A) : UIO Unit :=
   Z.succeed (do
-    let takers ← self.shutdownQueue
+    let (takers, offerers) ← self.shutdownQueue
     for taker in takers do
-      notify taker (.failure .interrupt)) |>.withLabel "Queue.shutdown"
+      notify taker.observer (.failure .interrupt)
+    for offerer in offerers do
+      notify offerer.observer (.success false)) |>.withLabel "Queue.shutdown"
 
 /-- Report whether the queue has been shut down. -/
 def isShutdown (self : Queue A) : UIO Bool :=
