@@ -22,3 +22,21 @@ Imports are transitive, so that doing a simple `import Z` in a file will bring a
 `import Z.Debug` loads `Z` and the Graphviz writer. The writer depends on
 `Z.ExecutionDiagram` and `Z.Debug.Colors`, so only programs that request DOT
 output compile and load that implementation.
+
+## Optional integration libraries
+
+The HTTP server adapter is a separate library:
+
+```
+lean_lib ZenithHttp
+```
+
+It exports `Zenith.Http`. Applications that need an HTTP server write:
+
+```
+import Z
+import Zenith.Http
+```
+
+`import Z` does not import `Zenith.Http`. This keeps the core effect library
+independent of the Zenith HTTP adapter and its HTTP transport API.

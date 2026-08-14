@@ -1,4 +1,5 @@
 import Tests.Support
+import Zenith.Http
 
 open Std
 
@@ -12,23 +13,23 @@ private def request : IO (Std.Http.Request Std.Http.Body.Stream) := do
   pure <| Std.Http.Request.new.body body
 
 def testAppAdapter : IO Unit := do
-  let successful : Z.Http.App IO.Error := {
-    handle := fun _ => Z.Http.Response.text "ok"
+  let successful : Zenith.Http.App IO.Error := {
+    handle := fun _ => Zenith.Http.Response.text "ok"
   }
   let successfulResponse ←
     (successful.toHandler.onRequest (← request)).run.block
   assertTrue "a successful HTTP app did not return 200"
     (successfulResponse.line.status.toCode == 200)
 
-  let providedHandler : Z.Http.Request -> Z String IO.Error Z.Http.Response :=
-    fun _ => Z.serviceWithM Z.Http.Response.text
-  let provided := Z.Http.App.provide providedHandler "provided"
+  let providedHandler : Zenith.Http.Request -> Z String IO.Error Zenith.Http.Response :=
+    fun _ => Z.serviceWithM Zenith.Http.Response.text
+  let provided := Zenith.Http.App.provide providedHandler "provided"
   let providedResponse ←
     (provided.toHandler.onRequest (← request)).run.block
   assertTrue "App.provide did not close the app environment"
     (providedResponse.line.status.toCode == 200)
 
-  let failing : Z.Http.App String := {
+  let failing : Zenith.Http.App String := {
     handle := fun _ => (Z.fail "handler failure").map impossible
   }
   let failureResponse ←
@@ -37,11 +38,11 @@ def testAppAdapter : IO Unit := do
     (failureResponse.line.status.toCode == 500)
 
 def testScopedServerLifecycle : IO Unit := do
-  let app : Z.Http.App IO.Error := {
-    handle := fun _ => Z.Http.Response.text "lifecycle"
+  let app : Zenith.Http.App IO.Error := {
+    handle := fun _ => Zenith.Http.Response.text "lifecycle"
   }
   let program : Z Unit IO.Error Unit := Z.scoped do
-    let server ← Z.Http.Server.acquire loopback app
+    let server ← Zenith.Http.Server.acquire loopback app
     if server.localAddress?.isSome then
       Z.succeed ()
     else

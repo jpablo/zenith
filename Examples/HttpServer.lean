@@ -1,4 +1,5 @@
 import Z
+import Zenith.Http
 
 open Std
 
@@ -13,16 +14,16 @@ owns the listening socket and waits for the standard server to shut down.
 private def address : Net.SocketAddress :=
   .v4 ⟨.ofParts 127 0 0 1, 8080⟩
 
-private def app : Z.Http.App IO.Error where
+private def app : Zenith.Http.App IO.Error where
   handle request :=
     if toString request.line.uri == "/health" then
-      Z.Http.Response.text "ok\n"
+      Zenith.Http.Response.text "ok\n"
     else
-      Z.Http.Response.notFound "Try GET /health\n"
+      Zenith.Http.Response.notFound "Try GET /health\n"
 
 private def program : Z Console IO.Error Unit :=
   Z.scoped <| zdo
-    let _server ← Z.Http.Server.acquire address app
+    let _server ← Zenith.Http.Server.acquire address app
     Console.printLineM "Listening on http://127.0.0.1:8080/health"
     Console.printLineM "Press Enter to stop the server."
     let _ ← Console.readLineM

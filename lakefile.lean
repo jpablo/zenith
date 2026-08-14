@@ -49,6 +49,11 @@ lean_exe interpreterBench {
 lean_lib Z
 lean_lib Examples
 
+-- Optional integrations build on the core `Z` library but are not re-exported
+-- by `import Z`.
+lean_lib ZenithHttp where
+  roots := #[`Zenith.Http]
+
 -- Helpers and regression cases for the `tests` executable.
 -- `Tests.NotationScope` and `Tests.CoercionScope` carry no runtime tests: they
 -- assert what must and must not elaborate, so building them is the check.
@@ -64,6 +69,7 @@ lean_lib TestsLib where
     `Tests.Stream,
     `Tests.Primitives,
     `Tests.Scope,
+    `Tests.CoreImportBoundary,
     `Tests.Http,
     `Tests.NotationScope,
     `Tests.CoercionScope,

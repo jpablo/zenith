@@ -4,13 +4,14 @@ import Z.Scope
 /-!
 Thin integration with Lean's `Std.Http.Server`.
 
-Zenith owns the application effect and the server lifetime. Lean's standard
+`Zenith.Http` is an optional integration. The core `Z` library does not import
+it. Zenith owns the application effect and the server lifetime. Lean's standard
 library owns HTTP parsing, sockets, request bodies, and response streaming.
 Typed application failures and defects become an HTTP 500 response because the
 standard server callback has no typed error channel.
 -/
 
-namespace Z.Http
+namespace Zenith.Http
 
 open Std
 
@@ -109,4 +110,4 @@ def serve
     server.awaitShutdown
 
 end Server
-end Z.Http
+end Zenith.Http
