@@ -27,6 +27,7 @@ The main goals are pedagogical:
 * Structured sequential and parallel causes ✅
 * Parallel effect composition ✅
 * Retry and repeat schedules ✅
+* Interruption-aware deferred results ✅
 
 Pure service constructors can become layers without manual environment
 projection:
@@ -133,4 +134,5 @@ This will (re)create a bunch of svg files under `diagrams/*`.
 * [Structured failure causes](docs/causes.md)
 * [Parallel effect composition](docs/parallelism.md)
 * [Retry and repeat schedules](docs/schedules.md)
+* [Deferred results](docs/deferred.md)
 * [Execution tracing](docs/debugging.md)

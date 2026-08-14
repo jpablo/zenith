@@ -2,6 +2,7 @@ import Z.Interpreter
 import Z.Parallel
 import Z.Schedule
 import Z.Scope
+import Z.Deferred
 import Z.Console
 import Z.Random
 import Z.Layer

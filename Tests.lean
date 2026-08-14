@@ -5,6 +5,7 @@ import Tests.Regressions
 import Tests.RegressionsProvide
 import Tests.RegressionsKeyed
 import Tests.HEIO
+import Tests.Deferred
 import Tests.Primitives
 import Tests.Scope
 import Examples.GithubIssueSync
@@ -2723,6 +2724,7 @@ def suite : List (String × IO Unit) := [
     |>.append provideRegressionTests
     |>.append keyedRegressionTests
     |>.append heioPrimitiveTests
+    |>.append deferredTests
     |>.append primitiveTests
     |>.append scopeTests
 

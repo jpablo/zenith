@@ -51,6 +51,7 @@ lean_lib TestsLib where
     `Tests.RegressionsProvide,
     `Tests.RegressionsKeyed,
     `Tests.HEIO,
+    `Tests.Deferred,
     `Tests.Primitives,
     `Tests.Scope,
     `Tests.NotationScope,
