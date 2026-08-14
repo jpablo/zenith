@@ -63,12 +63,13 @@ lean_lib ZenithServices where
 lean_lib ZenithFormalization where
   roots := #[
     `Zenith.Formalization.CoreLaws,
-    `Zenith.Formalization.ServiceKeyLaws
+    `Zenith.Formalization.ServiceKeyLaws,
+    `Zenith.Formalization.TypeAlgebra
   ]
 
 -- Helpers and regression cases for the `tests` executable.
--- `Tests.NotationScope` and `Tests.CoercionScope` carry no runtime tests: they
--- assert what must and must not elaborate, so building them is the check.
+-- Some roots carry no runtime tests. They assert what must and must not
+-- elaborate, so compiling them is the check.
 lean_lib TestsLib where
   roots := #[
     `Tests.Support,
@@ -83,8 +84,10 @@ lean_lib TestsLib where
     `Tests.Scope,
     `Tests.CoreImportBoundary,
     `Tests.Http,
+    `Tests.IntersectionTypes,
     `Tests.NotationScope,
     `Tests.CoercionScope,
+    `Tests.Variance,
     `Examples.KeyedLayerMakeDiagnostics
   ]
 

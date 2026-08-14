@@ -1,6 +1,11 @@
 import Z
 
-namespace Variance
+/-!
+Compile-time regression cases for Zenith environment, error, and success
+variance. The accompanying explanation is in `docs/variance.md`.
+-/
+
+namespace Tests.Variance
 
 abbrev InferredEnvironment
     {R : Type u} {E A : Type} (_ : Z R E A) : Type u := R
@@ -66,7 +71,6 @@ def inferredCombined := zdo[Empty]
   let string <- Z.environment String
   pure (nat, string)
 
-#check inferredCombined
 example : Z (Nat × String) Empty (Nat × String) := inferredCombined
 
 def inferredReordered := zdo[Empty]
@@ -74,14 +78,12 @@ def inferredReordered := zdo[Empty]
   let nat <- Z.environment Nat
   pure (string, nat)
 
-#check inferredReordered
 example : InferredEnvironment inferredCombined =
     InferredEnvironment inferredReordered := rfl
 
 def inferredGrouped := zdo[Empty]
   Z.environment (String × Nat)
 
-#check inferredGrouped
 example : InferredEnvironment inferredCombined =
     InferredEnvironment inferredGrouped := rfl
 
@@ -90,7 +92,6 @@ def inferredRepeated := zdo[Empty]
   let second <- Z.environment Nat
   pure (first, second)
 
-#check inferredRepeated
 example : Z Nat Empty (Nat × Nat) := inferredRepeated
 
 def inferredThree := zdo[Empty]
@@ -99,7 +100,6 @@ def inferredThree := zdo[Empty]
   let bool <- Z.environment Bool
   pure (nat, string, bool)
 
-#check inferredThree
 example : Z (Bool × Nat × String) Empty (Nat × String × Bool) :=
   inferredThree
 
@@ -109,7 +109,6 @@ def inferredNonAdjacentDuplicate := zdo[Empty]
   let second <- Z.environment Nat
   pure (first, string, second)
 
-#check inferredNonAdjacentDuplicate
 example : Z (Nat × String) Empty (Nat × String × Nat) :=
   inferredNonAdjacentDuplicate
 
@@ -118,13 +117,11 @@ def inferredError := zdo[IO.Error]
   let value <- Z.attempt (pure 1)
   pure (nat, value)
 
-#check inferredError
 example : Z Nat IO.Error (Nat × Nat) := inferredError
 
 def inferredPure := zdo[Empty]
   pure 42
 
-#check inferredPure
 example : Z Unit Empty Nat := inferredPure
 
 def inferredIf (selectNat : Bool) := zdo[Empty]
@@ -134,7 +131,6 @@ def inferredIf (selectNat : Bool) := zdo[Empty]
   else
     Z.environment String
 
-#check inferredIf
 example : Bool → Z (Nat × String) Empty String := inferredIf
 
 def inferredMatch (selection : Option Bool) := zdo[Empty]
@@ -144,7 +140,6 @@ def inferredMatch (selection : Option Bool) := zdo[Empty]
       pure "nat"
   | _ => Z.environment String
 
-#check inferredMatch
 example : Option Bool → Z (Nat × String) Empty String := inferredMatch
 
 def inferredTry := zdo[IO.Error]
@@ -154,7 +149,6 @@ def inferredTry := zdo[IO.Error]
   catch _ =>
     Z.environment String
 
-#check inferredTry
 example : Z (Nat × String) IO.Error String := inferredTry
 
 def inferredLoop := zdo[Empty]
@@ -163,7 +157,6 @@ def inferredLoop := zdo[Empty]
     pure ()
   Z.environment String
 
-#check inferredLoop
 example : Z (Nat × String) Empty String := inferredLoop
 
 def inferredReturn (stopEarly : Bool) := zdo[Empty]
@@ -172,13 +165,11 @@ def inferredReturn (stopEarly : Bool) := zdo[Empty]
   let _ <- Z.environment Nat
   Z.environment String
 
-#check inferredReturn
 example : Bool → Z (Nat × String) Empty String := inferredReturn
 
 def inferredNestedActions := zdo[Empty]
   pure ((<- Z.environment Nat), (<- Z.environment String))
 
-#check inferredNestedActions
 example : Z (Nat × String) Empty (Nat × String) := inferredNestedActions
 
 example : Z Nat Empty (Nat × Nat) := zdo
@@ -254,14 +245,12 @@ example : Z Unit IO.Error Nat := zdo
 def inferredAllPure := zdo
   pure 1
 
-#check inferredAllPure
 example : Z Unit Empty Nat := inferredAllPure
 
 def inferredBareThrow := zdo
   let _ : Nat <- throw (IO.userError "defect")
   pure 1
 
-#check inferredBareThrow
 example : Z Unit Empty Nat := inferredBareThrow
 
 def stringAction : Z Unit String Nat := Z.succeed 1
@@ -271,7 +260,6 @@ def inferredAllErrors := zdo
   let second <- Z.attempt (pure 2)
   pure (first + second)
 
-#check inferredAllErrors
 example : Z Unit (IO.Error ⊕ String) Nat := inferredAllErrors
 
 def inferredAllErrorsReordered := zdo
@@ -279,7 +267,6 @@ def inferredAllErrorsReordered := zdo
   let first <- stringAction
   pure (first + second)
 
-#check inferredAllErrorsReordered
 example : Z Unit (IO.Error ⊕ String) Nat := inferredAllErrorsReordered
 
 def prejoinedAction : Z Unit (String ⊕ IO.Error) Nat := Z.succeed 1
@@ -287,7 +274,6 @@ def prejoinedAction : Z Unit (String ⊕ IO.Error) Nat := Z.succeed 1
 def inferredNormalizedErrorSum := zdo
   prejoinedAction
 
-#check inferredNormalizedErrorSum
 example : Z Unit (IO.Error ⊕ String) Nat := inferredNormalizedErrorSum
 
 def inferredAllBranches (useString : Bool) := zdo
@@ -296,7 +282,6 @@ def inferredAllBranches (useString : Bool) := zdo
   else
     Z.attempt (pure 2)
 
-#check inferredAllBranches
 example : Bool → Z Unit (IO.Error ⊕ String) Nat := inferredAllBranches
 
 def inferredAllParameters := zdo
@@ -306,7 +291,6 @@ def inferredAllParameters := zdo
   let second <- Z.attempt (pure 2)
   pure (nat + first + string.length + second)
 
-#check inferredAllParameters
 example : Z (Nat × String) (IO.Error ⊕ String) Nat :=
   inferredAllParameters
 
@@ -316,7 +300,6 @@ def inferredAllLoop := zdo
     pure ()
   Z.attempt (pure 2)
 
-#check inferredAllLoop
 example : Z Unit (IO.Error ⊕ String) Nat := inferredAllLoop
 
 def inferredTypedCatch := zdo
@@ -326,7 +309,6 @@ def inferredTypedCatch := zdo
   catch _ =>
     (Z.environment String).map String.length
 
-#check inferredTypedCatch
 example : Z (Nat × String) Empty Nat := inferredTypedCatch
 
 def inferredDefectCatch := zdo
@@ -336,7 +318,6 @@ def inferredDefectCatch := zdo
   catch _ =>
     Z.succeed 1
 
-#check inferredDefectCatch
 example : Z Unit Empty Nat := inferredDefectCatch
 
 def inferredMultipleCatch := zdo
@@ -349,7 +330,6 @@ def inferredMultipleCatch := zdo
   catch number =>
     pure (number + 1)
 
-#check inferredMultipleCatch
 example : Z Unit Empty Nat := inferredMultipleCatch
 
 def inferredFinally := zdo
@@ -359,7 +339,6 @@ def inferredFinally := zdo
   finally
     Z.attempt (pure ())
 
-#check inferredFinally
 example : Z Unit (IO.Error ⊕ String) Nat := inferredFinally
 
 def inferredCatchFinally := zdo
@@ -371,7 +350,6 @@ def inferredCatchFinally := zdo
   finally
     Z.attempt (pure ())
 
-#check inferredCatchFinally
 example : Z Unit IO.Error Nat := inferredCatchFinally
 
 def explicitCaughtAction : Z Unit IO.Error Nat := zdo
@@ -383,7 +361,6 @@ def explicitCaughtAction : Z Unit IO.Error Nat := zdo
 def inferredAroundNestedCatch := zdo
   explicitCaughtAction
 
-#check inferredAroundNestedCatch
 example : Z Unit IO.Error Nat := inferredAroundNestedCatch
 
 def handledBody : Z Nat String Nat := Z.fail "handled"
@@ -392,7 +369,6 @@ def inferredHandledError := zdo
   handledBody.catchAllMeet fun _ =>
     (Z.environment String).map String.length
 
-#check inferredHandledError
 example : Z (Nat × String) Empty Nat := inferredHandledError
 
 structure HighService : Type 1 where
@@ -408,7 +384,6 @@ def inferredHighService := zdo[Empty]
   let string <- Z.environment String
   pure (value + string.length)
 
-#check inferredHighService
 example : Z (String × HighService) Empty Nat := inferredHighService
 
-end Variance
+end Tests.Variance

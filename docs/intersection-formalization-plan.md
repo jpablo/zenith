@@ -53,13 +53,13 @@ Scala and Lean use the same runtime representation.
 
 | File | Purpose |
 |---|---|
-| `docs/intersection-types.lean` | Abstract syntax, semantics, and proofs |
+| `Zenith/Formalization/TypeAlgebra.lean` | Abstract syntax, semantics, and proofs |
 | `Zenith/Formalization/ServiceKeyLaws.lean` | Existing production service-row laws |
 | `Z/ErrorChannelLaws.lean` | New production error-channel laws, if the selected representation permits them |
 | `docs/intersection-types.md` | User-facing specification and final status |
 
-Keep the abstract model in the documentation file until its public API is
-stable. Do not add it to `Z.lean` during the first milestone.
+Keep the abstract model in the optional `ZenithFormalization` library. Do not
+add it to `Z.lean` during the first milestone.
 
 ## Phase 1: Define semantic syntax
 
@@ -288,7 +288,7 @@ After the proofs pass:
 Run these commands after each phase:
 
 ```sh
-lake env lean docs/intersection-types.lean
+lake build ZenithFormalization
 lake build
 git diff --check
 ```
@@ -312,12 +312,13 @@ Use one reviewable commit for each completed proof boundary:
 
 ## Current status
 
-Phases 1 and 2 are complete in `docs/intersection-types.lean`. The file now
+Phases 1 and 2 are complete in `Zenith/Formalization/TypeAlgebra.lean`. The
+file now
 defines the two abstract syntax trees and proves their preorder, equivalence,
 GLB, and LUB laws. This work is independent of the production runtime.
 
 ## Immediate next change
 
-Start Phase 3 in `docs/intersection-types.lean`: add canonical normal forms
+Start Phase 3 in `Zenith/Formalization/TypeAlgebra.lean`: add canonical normal forms
 for both syntax trees. This phase needs a lawful total order for leaves, but
 it does not require a production representation decision.

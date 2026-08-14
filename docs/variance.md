@@ -352,9 +352,9 @@ an audit finalizer, and fake services composed by `Z.provide`. Its environment
 uses the stable keyed row rather than a product. The runtime cases are in
 [`Tests.lean`](../Tests.lean).
 
-The checked examples are in [`variance.lean`](variance.lean). Run them from the
-project root:
+The checked examples are in [`Tests/Variance.lean`](../Tests/Variance.lean).
+Run them from the project root:
 
 ```sh
-lake env lean docs/variance.lean
+lake env lean Tests/Variance.lean
 ```

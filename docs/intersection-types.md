@@ -4,8 +4,8 @@ This document catalogues the properties that an encoding of Scala
 intersection types can need. It then separates the complete problem from the
 smaller environment-combination problem in Zenith.
 
-The checked Lean sketches are in
-[`intersection-types.lean`](intersection-types.lean).
+The abstract formalization is in
+[`Zenith/Formalization/TypeAlgebra.lean`](../Zenith/Formalization/TypeAlgebra.lean).
 
 ## Terminology
 
@@ -556,13 +556,13 @@ Promotion did not add a proof-carrying wrapper. Public row syntax rejects
 key-to-service conflicts, and every normalized row has a checked
 `Row.Coherent` proof.
 
-The next step is to formalize the core profile in
-[`intersection-types.lean`](intersection-types.lean). That model must define
-the two syntax sorts, their subtype relations, normalization, and obligations
-1 through 6. After those proofs exist, the production service-row laws can be
-related to the abstract requirement model. The error representation can then
-be checked against the same specification. The ordered implementation plan is
-in [`intersection-formalization-plan.md`](intersection-formalization-plan.md).
+The core profile is formalized in
+[`Zenith/Formalization/TypeAlgebra.lean`](../Zenith/Formalization/TypeAlgebra.lean).
+It now defines the two syntax sorts and proves their preorder, equivalence,
+GLB, and LUB laws. The next step is normalization, followed by connections to
+production service rows and the error representation. The ordered
+implementation plan is in
+[`intersection-formalization-plan.md`](intersection-formalization-plan.md).
 
 The issue-sync case combines stable environments, normalized errors, ordered
 catch chains, and automatic layer composition in a larger program.
@@ -581,8 +581,6 @@ The native checked example is
 [`Examples/StableServiceKeysDemo.lean`](../Examples/StableServiceKeysDemo.lean).
 Its compile-time diagnostic checks are in
 [`Examples/KeyedLayerMakeDiagnostics.lean`](../Examples/KeyedLayerMakeDiagnostics.lean).
-[`stable-service-keys.lean`](stable-service-keys.lean) is its documentation
-import.
 The API declarations are in the `Z` namespace. The examples in this section
 use:
 
@@ -1015,10 +1013,11 @@ next interruption check. Use `HEIO.asyncInterrupt` when an operation can cancel
 its active work. The checked examples cover interruption before acquisition,
 during a cancellable acquisition, and during program execution.
 
-Run the checked sketches from the project root:
+Build the formalization and compile-time checks from the project root:
 
 ```sh
-lake env lean docs/intersection-types.lean
+lake build ZenithFormalization
+lake build TestsLib
 lake build Examples.KeyedLayerMakeDiagnostics
 ```
 

@@ -79,9 +79,10 @@ program failure or a later acquisition failure.
 parallel. `memoize` and `share` give explicit scoped sharing. All other layer
 builds are fresh.
 
-The complete checked example is in [`Problems.lean`](Problems.lean). Run it
-from the project root:
+The complete checked example is in
+[`Examples/HighUniverseServices.lean`](../Examples/HighUniverseServices.lean).
+Run it from the project root:
 
 ```sh
-lake env lean docs/Problems.lean
+lake env lean Examples/HighUniverseServices.lean
 ```

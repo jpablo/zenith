@@ -8,6 +8,7 @@ entry point.
 * `ErrorHandling.lean` demonstrates typed failures and recovery.
 * `GithubIssueSync.lean` and `GithubIssueSyncDemo.lean` define and run an
   issue-sync application.
+* `HighUniverseServices.lean` shows a service and layer that live in `Type 1`.
 * `HttpServer.lean` demonstrates the optional `Zenith.Http` adapter.
 * `OnionArchitecture.lean` demonstrates service boundaries and layers.
 * `ScopedResourceDemo.lean` demonstrates safe resource lifetime management.

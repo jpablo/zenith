@@ -6,8 +6,8 @@ This folder contains the Zenith regression suite. Run all runtime tests with:
 lake test
 ```
 
-`Tests.lean` is the executable test runner. It imports each module in this
-folder and can run one named test with:
+`Tests.lean` is the executable test runner for runtime cases. It can run one
+named test with:
 
 ```sh
 lake exe tests TEST_NAME
@@ -22,6 +22,10 @@ Test groups follow the public feature layout:
   provision defects.
 * `HEIO.lean` tests the internal layer runtime.
 * `Http.lean` tests the optional HTTP adapter.
+* `IntersectionTypes.lean` and `Variance.lean` are compile-time checks for the
+  product-environment, error-channel, and variance encodings.
 
-`NotationScope.lean`, `CoercionScope.lean`, and `CoreImportBoundary.lean` are
-compile-time checks. Their expected elaboration messages are part of the test.
+`NotationScope.lean`, `CoercionScope.lean`, `CoreImportBoundary.lean`,
+`IntersectionTypes.lean`, and `Variance.lean` are compile-time checks. Their
+expected elaboration messages are part of the test. Lake builds them as roots
+of `TestsLib`; it does not link them into the runtime test executable.

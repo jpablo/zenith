@@ -1,17 +1,20 @@
 import Z
 
-namespace Problems
+/-!
+A compile-time example of a high-universe service and the layer that provides
+it. The accompanying explanation is in `docs/Problems.md`.
+-/
+
+namespace Examples.HighUniverseServices
 
 structure Issue where
 
 -- Standard `IO` still cannot return an effect from `Type 1`.
-#check_failure IO (Z Unit Empty Unit)
 
 structure Github : Type 1 where
   getIssues : String -> Z Unit IO.Error (List Issue)
 
 -- The public environment parameter accepts `Github : Type 1`.
-#check Z Github IO.Error Unit
 
 def program : Z Github IO.Error (List Issue) :=
   Z.serviceWithM fun github =>
@@ -26,8 +29,4 @@ def githubLayer : Layer Unit IO.Error Github :=
 def runProgram : IO (Exit IO.Error (List Issue)) :=
   githubLayer.run () program
 
-#check githubLayer
-#check program
-#check runProgram
-
-end Problems
+end Examples.HighUniverseServices
