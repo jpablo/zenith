@@ -595,7 +595,7 @@ def program := zdo
   let name <- Z.serviceWith[Repository User]
     (fun repository => repository.value.name)
   let number <- Z.serviceWithZ[Repository Issue]
-    (fun repository => Z.succeedNow repository.value.number)
+    (fun repository => Z.succeed repository.value.number)
   pure s!"{name}:{number}"
 
 def supplied : Z (Services[]) Empty String :=

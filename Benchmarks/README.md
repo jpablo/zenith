@@ -35,7 +35,7 @@ The initial baseline was measured on 2026-08-11 at commit `c917a3f`.
 | `baseline/io-bind` | 1 ns/op |
 | `baseline/io-task` | 5,648 ns/op |
 | `baseline/io-ref` | 7 ns/op |
-| `run/succeedNow` | 8,254 ns/op |
+| `run/succeed` | 8,254 ns/op |
 | `run/flatMap` | 866 ns/op |
 | `run/sync` | 845 ns/op |
 | `run/error-recovery` | 1,929 ns/op |
@@ -43,7 +43,7 @@ The initial baseline was measured on 2026-08-11 at commit `c917a3f`.
 | `run/fork-join` | 14,250 ns/op |
 
 The `io-bind` case is a compiler-optimized lower bound. The `io-task` case is
-the useful reference for `run/succeedNow`, because both cases create and wait
+the useful reference for `run/succeed`, because both cases create and wait
 for a Lean task.
 
 ## Disabled-instrumentation fast path
@@ -58,7 +58,7 @@ the initial baseline.
 | `baseline/io-bind` | 1 ns/op | 1 ns/op | reference |
 | `baseline/io-task` | 5,648 ns/op | 5,582 ns/op | reference |
 | `baseline/io-ref` | 7 ns/op | 8 ns/op | reference |
-| `run/succeedNow` | 8,254 ns/op | 6,936 ns/op | 1.19× faster |
+| `run/succeed` | 8,254 ns/op | 6,936 ns/op | 1.19× faster |
 | `run/flatMap` | 866 ns/op | 211 ns/op | 4.10× faster |
 | `run/sync` | 845 ns/op | 246 ns/op | 3.43× faster |
 | `run/error-recovery` | 1,929 ns/op | 452 ns/op | 4.27× faster |
@@ -82,7 +82,7 @@ same configuration as the initial baseline.
 
 | Case | Initial | Current | Improvement |
 | --- | ---: | ---: | ---: |
-| `run/succeedNow` | 8,254 ns/op | 317 ns/op | 26.04× |
+| `run/succeed` | 8,254 ns/op | 317 ns/op | 26.04× |
 | `run/flatMap` | 866 ns/op | 178 ns/op | 4.87× |
 | `run/sync` | 845 ns/op | 199 ns/op | 4.25× |
 | `run/error-recovery` | 1,929 ns/op | 393 ns/op | 4.91× |

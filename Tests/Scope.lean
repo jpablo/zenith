@@ -16,13 +16,13 @@ structure HighLabel : Type 1 where
 def record
     (events : IO.Ref (List String))
     (event : String) : Z Unit Empty Unit :=
-  Z.succeed <| events.modify fun current => current ++ [event]
+  Z.fromIO <| events.modify fun current => current ++ [event]
 
 def resource
     (events : IO.Ref (List String))
     (name : String) : Z Scope Empty String :=
   Z.acquireRelease
-    (record events s!"acquire-{name}" *> Z.succeedNow name)
+    (record events s!"acquire-{name}" *> Z.succeed name)
     (fun value => record events s!"release-{value}")
 
 def failingResource
@@ -94,7 +94,7 @@ def testScopeAcquisitionMasking : IO Unit := do
   let events ← IO.mkRef ([] : List String)
   let started ← IO.mkRef false
   let acquire : Z Unit Empty String := do
-    Z.succeed (started.set true)
+    Z.fromIO (started.set true)
     Z.sleep 100
     record events "acquired"
     pure "slow"
@@ -122,7 +122,7 @@ def testScopeRunsAllFinalizersAfterDefect : IO Unit := do
   let body := zdo
     let _ ← resource events "first"
     let _ ← Z.acquireRelease
-      (record events "acquire-second" *> Z.succeedNow "second")
+      (record events "acquire-second" *> Z.succeed "second")
       (fun _ => failingRelease)
     pure ()
   let program : Z Unit Empty Unit := Z.scoped body
@@ -141,7 +141,7 @@ def testScopeCombinesFinalizerDefects : IO Unit := do
   let secondDefect := IO.userError "second release failed"
   let trackedResource (name : String) (defect : IO.Error) :=
     Z.acquireRelease
-      (record events s!"acquire-{name}" *> Z.succeedNow name)
+      (record events s!"acquire-{name}" *> Z.succeed name)
       (fun _ =>
         record events s!"release-{name}" *>
           (Z.die defect : Z Unit Empty Empty))
@@ -230,11 +230,11 @@ def testScopedFiberInterruptedAtClosure : IO Unit := do
   let events ← IO.mkRef ([] : List String)
   let started ← IO.mkRef false
   let child : Z Unit Empty Unit :=
-    (Z.succeed (started.set true) *> Z.sleep 2000)
+    (Z.fromIO (started.set true) *> Z.sleep 2000)
       |>.ensuring (record events "child-finalizer")
   let body : Z Scope Empty (Fiber Empty Unit) := do
     let fiber ← child.forkScoped "scope-child"
-    Z.succeed (waitForFlag "scoped child" started)
+    Z.fromIO (waitForFlag "scoped child" started)
     pure fiber
   let program : Z Unit Empty (Fiber Empty Unit) := Z.scoped body
   let fiber ← match ← Z.unsafeRunSync program "scoped-fiber-closure" with
@@ -251,7 +251,7 @@ def testScopedFiberPreservesCompletedExit : IO Unit := do
   let child : Z Unit String Unit := Z.fail "expected child failure"
   let body : Z Scope Empty (Fiber String Unit) := do
     let fiber ← child.forkScoped "completed-scope-child"
-    Z.succeed do
+    Z.fromIO do
       let _ ← fiber.await
       pure ()
     pure fiber
@@ -268,11 +268,11 @@ def testScopedFiberInterruptedAfterBodyFailure : IO Unit := do
   let events ← IO.mkRef ([] : List String)
   let started ← IO.mkRef false
   let child : Z Unit Empty Unit :=
-    (Z.succeed (started.set true) *> Z.sleep 2000)
+    (Z.fromIO (started.set true) *> Z.sleep 2000)
       |>.ensuring (record events "failed-body-child-finalizer")
   let body : Z Scope String Unit := zdo
     let _ ← child.forkScoped "failed-body-scope-child"
-    Z.succeed (waitForFlag "failed-body scoped child" started)
+    Z.fromIO (waitForFlag "failed-body scoped child" started)
     Z.fail "expected body failure"
   let program : Z Unit String Unit := Z.scoped body
   match ← runProgram "scoped-fiber-body-failure" program with

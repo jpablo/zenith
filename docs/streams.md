@@ -9,15 +9,15 @@ def numbers : Z.Stream Unit Empty Nat :=
 
 def doubled : Z Unit Empty (List Nat) :=
   Z.Stream.runCollect <|
-    Z.Stream.mapZ numbers fun value =>
-      Z.succeedNow (value * 2)
+    Z.Stream.map numbers fun value =>
+      Z.succeed (value * 2)
 ```
 
 ## Basic operations
 
-* `unfoldZ initial step` creates a stream from an effectful state transition.
+* `unfold initial step` creates a stream from an effectful state transition.
 * `fromList values` creates a finite stream.
-* `mapZ` transforms each value with an effect.
+* `map` transforms each value with an effect.
 * `filter` removes values with a Boolean predicate.
 * `runForeach` consumes values with an effect.
 * `runCollect` returns all values in source order.
@@ -35,14 +35,14 @@ typed error channel.
 
 ## Parallel mapping
 
-`stream.mapZPar workers transform` runs up to `workers` transformations at a
+`stream.mapPar workers transform` runs up to `workers` transformations at a
 time. It preserves source order. The current implementation uses ordered
 batches: it starts one batch, emits that batch in source order, then starts the
 next batch. A zero worker count uses one worker.
 
 ## Use in the TODO report
 
-`Examples/TodoReport.lean` creates a stream of source paths with `unfoldZ`,
+`Examples/TodoReport.lean` creates a stream of source paths with `unfold`,
 buffers discovery with capacity 32, maps file scanning in parallel, and then
 collects and sorts the results. Directory traversal therefore pauses when file
 reads are busy instead of retaining all source paths first.

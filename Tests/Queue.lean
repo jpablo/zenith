@@ -38,9 +38,9 @@ def testQueueRemovesInterruptedTaker : IO Unit := do
   let firstStarted ← IO.mkRef false
   let firstResumed ← IO.mkRef false
   let first ← Z.unsafeFork (do
-    Z.succeed (firstStarted.set true)
+    Z.fromIO (firstStarted.set true)
     let _ ← queue.take
-    Z.succeed (firstResumed.set true)) "queue-first-taker"
+    Z.fromIO (firstResumed.set true)) "queue-first-taker"
   waitForFlag "first queue taker" firstStarted
   IO.sleep 10
   first.requestInterrupt
@@ -51,7 +51,7 @@ def testQueueRemovesInterruptedTaker : IO Unit := do
 
   let secondStarted ← IO.mkRef false
   let second ← Z.unsafeFork
-    ((Z.succeed (secondStarted.set true)) *> queue.take) "queue-second-taker"
+    ((Z.fromIO (secondStarted.set true)) *> queue.take) "queue-second-taker"
   waitForFlag "second queue taker" secondStarted
   IO.sleep 10
   match ← Z.unsafeRunSync (queue.offer 42) "queue-offer-after-interrupt" with
@@ -68,7 +68,7 @@ def testQueueShutdownInterruptsTakers : IO Unit := do
   let queue ← makeQueue
   let started ← IO.mkRef false
   let taker ← Z.unsafeFork
-    ((Z.succeed (started.set true)) *> queue.take) "queue-shutdown-taker"
+    ((Z.fromIO (started.set true)) *> queue.take) "queue-shutdown-taker"
   waitForFlag "queue shutdown taker" started
   IO.sleep 10
   let _ ← Z.unsafeRunSync queue.shutdown "queue-shutdown"
@@ -90,7 +90,7 @@ def testBoundedQueueBackpressuresOffers : IO Unit := do
   | _ => failTest "bounded Queue.offer rejected its first value"
   let started ← IO.mkRef false
   let blocked ← Z.unsafeFork
-    ((Z.succeed (started.set true)) *> queue.offer 2) "bounded-queue-offer"
+    ((Z.fromIO (started.set true)) *> queue.offer 2) "bounded-queue-offer"
   waitForFlag "bounded queue offer" started
   IO.sleep 10
   match ← blocked.state.get with
@@ -111,7 +111,7 @@ def testZeroCapacityQueueRendezvous : IO Unit := do
   let queue ← makeBoundedQueue 0
   let started ← IO.mkRef false
   let offerer ← Z.unsafeFork
-    ((Z.succeed (started.set true)) *> queue.offer 42) "rendezvous-offer"
+    ((Z.fromIO (started.set true)) *> queue.offer 42) "rendezvous-offer"
   waitForFlag "rendezvous offer" started
   IO.sleep 10
   match ← offerer.state.get with
@@ -130,7 +130,7 @@ def testBoundedQueueRemovesInterruptedOffer : IO Unit := do
   let _ ← Z.unsafeRunSync (queue.offer 1) "bounded-interrupt-offer-first"
   let firstStarted ← IO.mkRef false
   let first ← Z.unsafeFork
-    ((Z.succeed (firstStarted.set true)) *> queue.offer 2)
+    ((Z.fromIO (firstStarted.set true)) *> queue.offer 2)
     "bounded-interrupt-first-offer"
   waitForFlag "first bounded queue offer" firstStarted
   IO.sleep 10
@@ -142,7 +142,7 @@ def testBoundedQueueRemovesInterruptedOffer : IO Unit := do
 
   let secondStarted ← IO.mkRef false
   let second ← Z.unsafeFork
-    ((Z.succeed (secondStarted.set true)) *> queue.offer 3)
+    ((Z.fromIO (secondStarted.set true)) *> queue.offer 3)
     "bounded-interrupt-second-offer"
   waitForFlag "second bounded queue offer" secondStarted
   IO.sleep 10
@@ -162,7 +162,7 @@ def testBoundedQueueShutdownRejectsBlockedOffer : IO Unit := do
   let _ ← Z.unsafeRunSync (queue.offer 1) "bounded-shutdown-offer-first"
   let started ← IO.mkRef false
   let blocked ← Z.unsafeFork
-    ((Z.succeed (started.set true)) *> queue.offer 2)
+    ((Z.fromIO (started.set true)) *> queue.offer 2)
     "bounded-shutdown-offer"
   waitForFlag "bounded queue shutdown offer" started
   IO.sleep 10

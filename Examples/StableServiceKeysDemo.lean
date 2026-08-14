@@ -211,7 +211,7 @@ def config : Config := {
 }
 
 def github : Github := {
-  issueCount := fun _ => Z.succeedNow 2
+  issueCount := fun _ => Z.succeed 2
 }
 
 def store : Store := {
@@ -289,7 +289,7 @@ def parameterizedProgram := zdo
   let name <- Z.serviceWith[Repository User]
     (fun repository => repository.value.name)
   let number <- Z.serviceWithZ[Repository Issue]
-    (fun repository => Z.succeedNow repository.value.number)
+    (fun repository => Z.succeed repository.value.number)
   pure s!"{name}:{number}"
 
 example : Z
@@ -345,7 +345,7 @@ example : Bool → Z
 def scopedParameterizedProgram := zdo
   try
     Z.serviceWithZ[Repository User] fun repository =>
-      (Z.succeedNow repository.value.name : Z Unit String String)
+      (Z.succeed repository.value.name : Z Unit String String)
   catch _ =>
     let number <- Z.serviceWith[Repository Issue]
       (fun repository => repository.value.number)
@@ -368,7 +368,7 @@ example : Z
 def parameterizedProgramWithErrors := zdo
   let name <- Z.serviceWithZ[Repository User]
     (fun repository =>
-      (Z.succeedNow repository.value.name : Z Unit String String))
+      (Z.succeed repository.value.name : Z Unit String String))
   let number <- Z.serviceWithZ[Repository Issue]
     (fun repository => Z.attempt (pure repository.value.number))
   pure s!"{name}:{number}"
@@ -659,7 +659,7 @@ def githubFromConfigLayer
             let config := Services.get[Config] environment
             HEIO.pure {
               issueCount := fun organization =>
-                Z.succeedNow <|
+                Z.succeed <|
                   if organization == config.organization then 2 else 0
             })
       (fun _ _ =>
@@ -1114,7 +1114,7 @@ def parallelMetricsFromGithubLayer
         (HEIO.liftIO.{0} Cause.die
           (observeAutomaticParallelStart counter barrier))
         fun started => HEIO.pure {
-          count := Z.succeedNow started.down
+          count := Z.succeed started.down
         })
 
 def parallelReporterFromGithubLayer
@@ -1129,7 +1129,7 @@ def parallelReporterFromGithubLayer
         (HEIO.liftIO.{0} Cause.die
           (observeAutomaticParallelStart counter barrier))
         fun started => HEIO.pure {
-          report := Z.succeedNow (toString started.down)
+          report := Z.succeed (toString started.down)
         })
 
 def automaticParallelDependencyGraph
@@ -1156,7 +1156,7 @@ example : Z (Services[Metrics, Reporter]) Empty String :=
   sharedGraphProgram
 
 def sharedGraphUnitProgram : Z (Services[Metrics, Reporter]) Empty Unit :=
-  Z.succeedNow ()
+  Z.succeed ()
 
 def parallelGraphProgram := zdo
   let count ← Z.serviceWithZ[Metrics]
@@ -1179,7 +1179,7 @@ def waitingSharedGraphProgram
   Z.async fun _ => started.set true
 
 def metricsUnitProgram : Z (Services[Metrics]) Empty Unit :=
-  Z.succeedNow ()
+  Z.succeed ()
 
 def automaticallyProvidedSharedGraph
     (events : IO.Ref (List String)) :=

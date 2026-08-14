@@ -170,7 +170,7 @@ Create a fresh scope, supply it to `effect`, and close it on every exit path.
 def «scoped»
     [remove : Scope.Remove Scoped Rest]
     (effect : Z Scoped E A) : Z Rest E A :=
-  Z.withIO Scope.make fun closeable =>
+  Z.flatMapIO Scope.make fun closeable =>
     let body : Z Rest E A :=
       effect.contramap fun environment =>
         remove.insert environment closeable.scope

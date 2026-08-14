@@ -146,7 +146,7 @@ example : ErrorChannel.CanInject (String ⊕ IO.Error) (IO.Error ⊕ String) :=
   inferInstance
 
 def joinedErrors : Z Unit (String ⊕ IO.Error) Nat :=
-  let first : Z Unit String Unit := Z.succeedNow ()
+  let first : Z Unit String Unit := Z.succeed ()
   Z.flatMapMeetJoin first fun _ => Z.attempt (pure 42)
 
 abbrev InferredEnvironment

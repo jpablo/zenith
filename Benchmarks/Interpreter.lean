@@ -30,9 +30,9 @@ def Config.quick : Config where
   forkSteps := 50
 
 private partial def flatMapProgram : Nat -> Nat -> Z Unit Empty Nat
-  | 0, total => Z.succeedNow total
+  | 0, total => Z.succeed total
   | steps + 1, total =>
-      (Z.succeedNow total).flatMap fun value =>
+      (Z.succeed total).flatMap fun value =>
         flatMapProgram steps (value + 1)
 
 private partial def ioBindProgram : Nat -> Nat -> IO Nat
@@ -45,13 +45,13 @@ private partial def ioBindProgram : Nat -> Nat -> IO Nat
   value.modify (· + 1)
 
 private partial def syncProgram : Nat -> Nat -> Z Unit Empty Nat
-  | 0, total => Z.succeedNow total
+  | 0, total => Z.succeed total
   | steps + 1, total =>
-      (Z.succeed (pure total)).flatMap fun value =>
+      (Z.fromIO (pure total)).flatMap fun value =>
         syncProgram steps (value + 1)
 
 private partial def errorProgram : Nat -> Nat -> Z Unit Empty Nat
-  | 0, total => Z.succeedNow total
+  | 0, total => Z.succeed total
   | steps + 1, total =>
       (Z.fail "expected" : Z Unit String Nat).catchAll fun _ =>
         errorProgram steps (total + 1)
@@ -60,15 +60,15 @@ private def immediateAsync (value : Nat) : Z Unit Empty Nat :=
   Z.async fun callback => callback (.success value)
 
 private partial def asyncProgram : Nat -> Nat -> Z Unit Empty Nat
-  | 0, total => Z.succeedNow total
+  | 0, total => Z.succeed total
   | steps + 1, total =>
       (immediateAsync total).flatMap fun value =>
         asyncProgram steps (value + 1)
 
 private partial def forkProgram : Nat -> Nat -> Z Unit Empty Nat
-  | 0, total => Z.succeedNow total
+  | 0, total => Z.succeed total
   | steps + 1, total => do
-      let fiber <- (Z.succeedNow total).fork "benchmark-child"
+      let fiber <- (Z.succeed total).fork "benchmark-child"
       let value <- fiber.join
       forkProgram steps (value + 1)
 
@@ -180,11 +180,11 @@ private def cases (config : Config) : IO (List Case) := do
             s!"baseline-io-ref: expected {expected}, got {actual}"
     },
     {
-      name := "run/succeedNow"
+      name := "run/succeed"
       operations := config.runnerIterations
       action := do
         for index in [0:config.runnerIterations] do
-          runExpected s!"benchmark-run-{index}" 0 (Z.succeedNow 0)
+          runExpected s!"benchmark-run-{index}" 0 (Z.succeed 0)
     },
     {
       name := "run/flatMap"

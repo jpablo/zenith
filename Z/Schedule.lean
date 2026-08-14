@@ -43,18 +43,18 @@ namespace Driver
 /-- Return the most recently observed output, if the driver has one. -/
 def last
     (self : Driver R Input Output schedule) : Z Unit Empty (Option Output) :=
-  Z.succeed do
+  Z.fromIO do
     let (output, _) ← self.reference.get
     pure output
 
 /-- Reset the driver to the schedule's initial state and clear its output. -/
 def reset (self : Driver R Input Output schedule) : Z Unit Empty Unit :=
-  Z.succeed <| self.reference.set (none, schedule.initial)
+  Z.fromIO <| self.reference.set (none, schedule.initial)
 
 /-- Return the driver's current internal schedule state. -/
 def state (self : Driver R Input Output schedule) :
     Z Unit Empty schedule.State :=
-  Z.succeed do
+  Z.fromIO do
     let (_, state) ← self.reference.get
     pure state
 
@@ -65,10 +65,10 @@ private def delay (milliseconds : UInt32) : Z R Empty Unit :=
 def next
     (self : Driver R Input Output schedule)
     (input : Input) : Z R Empty (Option Output) :=
-  Z.withIO self.reference.get fun (_, currentState) =>
+  Z.flatMapIO self.reference.get fun (_, currentState) =>
     (schedule.step input currentState).flatMap fun
       (nextState, output, decision) =>
-        Z.withIO (self.reference.set (some output, nextState)) fun _ =>
+        Z.flatMapIO (self.reference.set (some output, nextState)) fun _ =>
           match decision with
           | .done => Z.internal.succeedNow none
           | .continue milliseconds =>
@@ -94,7 +94,7 @@ from `Z`, because it contains a schedule, which lives in a higher universe.
 def driver
     (self : Schedule R Input Output)
     (use : Driver R Input Output self -> Z R E A) : Z R E A :=
-  Z.withIO (IO.mkRef ((none : Option Output), self.initial)) fun reference =>
+  Z.flatMapIO (IO.mkRef ((none : Option Output), self.initial)) fun reference =>
     use { reference }
 
 /-- Change the environment supplied to each schedule step. -/
@@ -150,7 +150,7 @@ def fold
 Effectfully fold the outputs for which the underlying schedule continues.
 The schedule and accumulator environment requirements are combined.
 -/
-def foldZIO
+def foldM
     [meet : Environment.Meet R₁ R₂ R]
     (self : Schedule R₁ Input Output)
     (initial : Accumulator)
@@ -197,14 +197,14 @@ def collectAll
 
 /-- Stop at the first step without requesting another effect run. -/
 def stop : Schedule Unit Input Unit :=
-  make () fun _ _ => Z.succeedNow ((), (), .done)
+  make () fun _ _ => Z.succeed ((), (), .done)
 
 /-- Continue without a delay for exactly `count` additional effect runs. -/
 def recurs (count : Nat) : Schedule Unit Input Nat :=
   make 0 fun _ current =>
     let decision :=
       if current < count then .continue 0 else .done
-    Z.succeedNow (current + 1, current, decision)
+    Z.succeed (current + 1, current, decision)
 
 /-- Continue once without a delay. -/
 def once : Schedule Unit Input Unit :=
@@ -213,17 +213,17 @@ def once : Schedule Unit Input Unit :=
 /-- Continue forever without a delay and emit the recurrence count. -/
 def forever : Schedule Unit Input Nat :=
   make 0 fun _ current =>
-    Z.succeedNow (current + 1, current, .continue 0)
+    Z.succeed (current + 1, current, .continue 0)
 
 /-- Continue forever without a delay and emit each input. -/
 def identity : Schedule Unit Input Input :=
   make () fun input state =>
-    Z.succeedNow (state, input, .continue 0)
+    Z.succeed (state, input, .continue 0)
 
 /-- Continue forever with a fixed delay between effect runs. -/
 def spaced (milliseconds : UInt32) : Schedule Unit Input Nat :=
   make 0 fun _ current =>
-    Z.succeedNow (current + 1, current, .continue milliseconds)
+    Z.succeed (current + 1, current, .continue milliseconds)
 
 private def Decision.intersection : Decision -> Decision -> Decision
   | .continue leftDelay, .continue rightDelay =>
@@ -366,7 +366,7 @@ def exponential
     (base : UInt32)
     (factor : Nat := 2) : Schedule Unit Input UInt32 :=
   make base fun _ delay =>
-    Z.succeedNow
+    Z.succeed
       (multiplyDelay delay factor, delay, .continue delay)
 
 /--
@@ -377,7 +377,7 @@ def fibonacci (one : UInt32) : Schedule Unit Input UInt32 :=
   make (one, one) fun _ state =>
     let current := state.1
     let next := state.2
-    Z.succeedNow
+    Z.succeed
       ((next, addDelay current next), current, .continue current)
 
 /--
@@ -427,7 +427,7 @@ def check
 Use an effectful predicate to keep or stop an underlying continue decision.
 The schedule and predicate environment requirements are combined.
 -/
-def checkZIO
+def checkM
     [meet : Environment.Meet R₁ R₂ R]
     (self : Schedule R₁ Input Output)
     (predicate : Input -> Output -> Z R₂ Empty Bool) :
@@ -456,11 +456,11 @@ def whileInput
   self.check fun input _ => predicate input
 
 /-- Continue while the effectful input predicate returns true. -/
-def whileInputZIO
+def whileInputM
     [Environment.Meet R₁ R₂ R]
     (self : Schedule R₁ Input Output)
     (predicate : Input -> Z R₂ Empty Bool) : Schedule R Input Output :=
-  self.checkZIO fun input _ => predicate input
+  self.checkM fun input _ => predicate input
 
 /-- Continue until the input satisfies `predicate`. -/
 def untilInput
@@ -469,11 +469,11 @@ def untilInput
   self.whileInput fun input => !(predicate input)
 
 /-- Continue until the effectful input predicate returns true. -/
-def untilInputZIO
+def untilInputM
     [Environment.Meet R₁ R₂ R]
     (self : Schedule R₁ Input Output)
     (predicate : Input -> Z R₂ Empty Bool) : Schedule R Input Output :=
-  self.checkZIO fun input _ =>
+  self.checkM fun input _ =>
     (predicate input).map fun stopNow => !stopNow
 
 /-- Continue while the output satisfies `predicate`. -/
@@ -483,11 +483,11 @@ def whileOutput
   self.check fun _ output => predicate output
 
 /-- Continue while the effectful output predicate returns true. -/
-def whileOutputZIO
+def whileOutputM
     [Environment.Meet R₁ R₂ R]
     (self : Schedule R₁ Input Output)
     (predicate : Output -> Z R₂ Empty Bool) : Schedule R Input Output :=
-  self.checkZIO fun _ output => predicate output
+  self.checkM fun _ output => predicate output
 
 /-- Continue until the output satisfies `predicate`. -/
 def untilOutput
@@ -496,11 +496,11 @@ def untilOutput
   self.whileOutput fun output => !(predicate output)
 
 /-- Continue until the effectful output predicate returns true. -/
-def untilOutputZIO
+def untilOutputM
     [Environment.Meet R₁ R₂ R]
     (self : Schedule R₁ Input Output)
     (predicate : Output -> Z R₂ Empty Bool) : Schedule R Input Output :=
-  self.checkZIO fun _ output =>
+  self.checkM fun _ output =>
     (predicate output).map fun stopNow => !stopNow
 
 instance [Environment.Meet R₁ R₂ R] :

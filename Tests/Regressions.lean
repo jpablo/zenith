@@ -20,7 +20,7 @@ def testAsyncInterruptionRunsFinalizer : IO Unit := do
   let finalized ← IO.mkRef false
   let program : Z Unit Empty Unit :=
     (Z.async fun _ => registered.set true).ensuring
-      (Z.succeed (finalized.set true))
+      (Z.fromIO (finalized.set true))
   let fiber ← Z.unsafeFork program "async-interruption-finalizer"
   waitForFlag "async registration" registered
   fiber.requestInterrupt
@@ -44,7 +44,7 @@ def testInterruptRecoveryRemainsInterruptible : IO Unit := do
   let secondLoop : Z Unit Empty Unit := Z.repeatN 1200 (Z.sleep 5)
   let program : Z Unit Empty Unit := do
     let _ ← firstLoop.exit
-    let _ ← Z.succeed (recovered.set true)
+    let _ ← Z.fromIO (recovered.set true)
     secondLoop
   let fiber ← Z.unsafeFork program "interrupt-recovery"
   IO.sleep 25
@@ -115,14 +115,14 @@ def testFiberInterruptDistinguishesItsOwnInterruption : IO Unit := do
   -- enters its uninterruptible region would stop it at its very first step.
   let child : Z Unit Empty Unit :=
     (do
-      let _ ← Z.succeed (childMasked.set true)
+      let _ ← Z.fromIO (childMasked.set true)
       Z.repeatN 300 (Z.sleep 5)).uninterruptible
   let parent : Z Unit Empty Unit := do
     let fiber ← child.fork "stubborn-child"
-    let _ ← Z.succeed (waitForFlag "child inside its mask" childMasked)
-    let _ ← Z.succeed (joining.set true)
+    let _ ← Z.fromIO (waitForFlag "child inside its mask" childMasked)
+    let _ ← Z.fromIO (joining.set true)
     let _ ← fiber.interrupt
-    let _ ← Z.succeed (continued.set true)
+    let _ ← Z.fromIO (continued.set true)
     pure ()
   let parentFiber ← Z.unsafeFork parent "self-interrupted-joiner"
   waitForFlag "parent reaching the join" joining
@@ -148,9 +148,9 @@ def testEnsuringFinalizerCompletesUnderInterrupt : IO Unit := do
   let started ← IO.mkRef false
   let completed ← IO.mkRef false
   let finalizer : Z Unit Empty Unit := do
-    let _ ← Z.succeed (started.set true)
+    let _ ← Z.fromIO (started.set true)
     let _ ← Z.repeatN 20 (Z.sleep 5)
-    let _ ← Z.succeed (completed.set true)
+    let _ ← Z.fromIO (completed.set true)
     pure ()
   let program : Z Unit Empty Unit :=
     (Z.async fun _ => registered.set true).ensuring finalizer
@@ -238,7 +238,7 @@ def testCoercedIOFailureIsCatchable : IO Unit := do
   -- a typed error the handler sees. The coercion itself only reaches the
   -- defect-only channel; `Tests/CoercionScope.lean` pins that rejection.
   let attempted : Z Unit IO.Error Nat := Z.attempt failing
-  let program : Z Unit Empty Nat := attempted.catchAll fun _ => Z.succeedNow 0
+  let program : Z Unit Empty Nat := attempted.catchAll fun _ => Z.succeed 0
   match ← runProgram "coerced-io-failure" program with
   | .success 0 => pure ()
   | exit =>
@@ -260,7 +260,7 @@ def testZDoAnnotatedCatchMatchesInferred : IO Unit := do
       let _ : Nat ← dieBody
       pure 0
     catch _ =>
-      Z.succeedNow 7
+      Z.succeed 7
   let inferred : Z Unit Empty Nat := inferred
   match ← runProgram "zdo-inferred-defect-catch" inferred with
   | .success 7 => pure ()
@@ -271,7 +271,7 @@ def testZDoAnnotatedCatchMatchesInferred : IO Unit := do
       let _ : Nat ← dieBody
       pure 0
     catch _ =>
-      Z.succeedNow 7
+      Z.succeed 7
   match ← runProgram "zdo-annotated-defect-catch" annotated with
   | .success 7 => pure ()
   | exit =>
@@ -284,7 +284,7 @@ def testZDoExplicitErrorCatchMatchesInferred : IO Unit := do
       let _ : Nat ← dieBody
       pure 0
     catch _ =>
-      Z.succeedNow 7
+      Z.succeed 7
   let explicit : Z Unit IO.Error Nat := explicit
   match ← runProgram "zdo-explicit-error-defect-catch" explicit with
   | .success 7 => pure ()
@@ -301,12 +301,12 @@ def testMemoizedLayerUsesBuildInput : IO Unit := do
     Layer.fromFunction fun value => value + 100
   let program : Z String Empty String := Z.serviceWith id
 
-  match ← (upstream.to source).run 1 program "memoize-direct" with
+  match ← (upstream.andThen source).run 1 program "memoize-direct" with
   | .success "source-101" => pure ()
   | .success other => failTest s!"the direct composition produced {other}"
   | .failure cause => failTest s!"the direct composition failed: {cause}"
 
-  let shared := source.share fun sharedSource => upstream.to sharedSource
+  let shared := source.share fun sharedSource => upstream.andThen sharedSource
   match ← shared.run 1 program "memoize-shared" with
   | .success "source-101" => pure ()
   | .success other =>
@@ -337,7 +337,7 @@ def testRandomServiceIsConcurrencySafe : IO Unit := do
       let values ← IO.mkRef ([] : List Nat)
       for _ in [0:drawsPerWorker] do
         match ← Z.unsafeRunSync
-            (Random.randomLive.nextNat 0 range) s!"random-{index}" with
+            (Random.live.nextNat 0 range) s!"random-{index}" with
         | .success value => values.modify (value :: ·)
         | _ => pure ()
       values.get

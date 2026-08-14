@@ -200,10 +200,10 @@ namespace Z
 
   def getOrFail (v : Option A): Z Unit IO.Error A := 
     match v with
-    | some a => Z.succeedNow a
+    | some a => Z.succeed a
     | none => Z.fail <| IO.userError "none found!"
 
-  /-- Similar to Z.succeed, but exposes the IO.Error in the error channel  -/
+  /-- Similar to Z.fromIO, but exposes the IO.Error in the error channel  -/
   def internal.attempt (io : IO A) (md := mempty): Z R IO.Error A  :=
     let infallible : IO (IO.Error ⊕ A) :=
       try

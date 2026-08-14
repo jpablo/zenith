@@ -56,7 +56,7 @@ private def completeExit (self : Deferred E A) (exit : Exit E A) : IO Bool := do
 
 /-- Allocate an unresolved result cell. -/
 def make : UIO (Deferred E A) :=
-  Z.succeed (do
+  Z.fromIO (do
     pure {
       state := ← IO.mkRef (.pending [])
       nextObserverId := ← IO.mkRef 0
@@ -64,14 +64,14 @@ def make : UIO (Deferred E A) :=
 
 /-- Observe the completed exit, if the cell already has one. -/
 def poll (self : Deferred E A) : UIO (Option (Exit E A)) :=
-  Z.succeed (do
+  Z.fromIO (do
     match ← self.state.get with
     | .pending _ => pure none
     | .done exit => pure (some exit)) |>.withLabel "Deferred.poll"
 
 /-- Complete the cell with an explicit exit. Only the first completion wins. -/
 def done (self : Deferred E A) (exit : Exit E A) : UIO Bool :=
-  Z.succeed (self.completeExit exit) |>.withLabel "Deferred.done"
+  Z.fromIO (self.completeExit exit) |>.withLabel "Deferred.done"
 
 /-- Complete the cell successfully. Only the first completion wins. -/
 def succeed (self : Deferred E A) (value : A) : UIO Bool :=

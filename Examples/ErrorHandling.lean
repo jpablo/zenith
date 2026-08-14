@@ -2,7 +2,7 @@ import Z
 
 /-! Examples of typed errors, `IO.Error`, and `zdo` recovery. -/
 
-open Console (consoleLive)
+open Console (live)
 
 inductive ExampleError where
   | failed
@@ -19,22 +19,22 @@ def typedFailure : Z Unit ExampleError Unit :=
 def errorHandling1a : Z Unit Empty Unit :=
   typedFailure.foldZ
     (fun error =>
-      consoleLive.printLine s!"Recovered from an error: {error}")
-    (fun _ => consoleLive.printLine "The action succeeded.")
+      live.printLine s!"Recovered from an error: {error}")
+    (fun _ => live.printLine "The action succeeded.")
 
 /-- Native `try` syntax in `zdo` handles the typed error channel. -/
 def errorHandling1b := zdo
   try
     typedFailure
   catch error =>
-    consoleLive.printLine s!"Recovered from an error: {error}"
+    live.printLine s!"Recovered from an error: {error}"
 
 example : Z Unit Empty Unit := errorHandling1b
 
 /-- `catchAll` is the direct combinator form of the same recovery. -/
 def errorHandling1c : Z Unit Empty Unit :=
   typedFailure.catchAll fun error =>
-    consoleLive.printLine s!"Recovered from an error: {error}"
+    live.printLine s!"Recovered from an error: {error}"
 
 /-- `Z.attempt` puts an `IO.Error` in the typed error channel. -/
 def ioErrorExample : Z Unit IO.Error Nat :=
@@ -47,7 +47,7 @@ def errorHandling2a := zdo
     let value <- ioErrorExample.withLabel "ioErrorExample"
     pure (value + 10)
   catch error =>
-    let _ <- consoleLive.printLine
+    let _ <- live.printLine
       s!"Recovered from an IO.Error: {error}"
     pure 10
 
@@ -59,7 +59,7 @@ def defectRecovery := zdo
     let _ : Nat <- throw (IO.userError "defect")
     pure 0
   catch error =>
-    let _ <- consoleLive.printLine s!"Recovered from a defect: {error}"
+    let _ <- live.printLine s!"Recovered from a defect: {error}"
     pure 1
 
 example : Z Unit Empty Nat := defectRecovery

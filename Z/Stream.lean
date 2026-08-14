@@ -44,7 +44,7 @@ private def recordFailure
 private def rethrowFailure
     (failure : FailureRef E)
     (fallback : Cause E) : Z R E A :=
-  Z.withIO failure.get fun
+  Z.flatMapIO failure.get fun
     | some recorded => (Z.failCause (R := R) recorded).map impossible
     | none => (Z.failCause (R := R) fallback).map impossible
 
@@ -72,7 +72,7 @@ private partial def unfoldLoop
     (state : IO.Ref (Option S))
     (step : S -> Z R E (Option (A × S)))
     (consume : A -> Z R E Unit) : Z R E Unit :=
-  Z.withIO state.get fun
+  Z.flatMapIO state.get fun
     | none => pure ()
     | some current =>
         step current |>.flatMap fun
@@ -83,23 +83,23 @@ private partial def unfoldLoop
                 unfoldLoop state step consume
 
 /-- Create a stream from an effectful state transition. -/
-def unfoldZ
+def unfold
     (initial : S)
     (step : S -> Z R E (Option (A × S))) : Stream R E A := {
   run := fun consume =>
-    Z.withIO (IO.mkRef (some initial)) fun state =>
+    Z.flatMapIO (IO.mkRef (some initial)) fun state =>
       unfoldLoop state step consume
 }
 
 /-- Create a stream from a finite list. -/
 def fromList (values : List A) : Stream Unit Empty A :=
-  unfoldZ values fun remaining =>
+  unfold values fun remaining =>
     match remaining with
     | [] => pure none
     | value :: tail => pure (some (value, tail))
 
 /-- Transform each stream value with an effect. -/
-def mapZ
+def map
     (self : Stream R E A)
     (transform : A -> Z R E B) : Stream R E B := {
   run := fun consume =>
@@ -124,11 +124,11 @@ def runForeach
 
 /-- Collect all stream values in source order. -/
 def runCollect (self : Stream R E A) : Z R E (List A) :=
-  Z.withIO (IO.mkRef ([] : List A)) fun values =>
+  Z.flatMapIO (IO.mkRef ([] : List A)) fun values =>
     (self.runForeach fun value =>
       Z.internal.succeed <| values.modify (value :: ·))
       |>.flatMap fun _ =>
-        Z.withIO values.get fun collected => pure collected.reverse
+        Z.flatMapIO values.get fun collected => pure collected.reverse
 
 private partial def bufferSource
     (source : Stream R E A)
@@ -168,7 +168,7 @@ values ahead of its consumer.
 def buffer (self : Stream R E A) (capacity : Nat) : Stream R E A := {
   run := fun consume =>
     (boundedQueue (R := R) (E := E) (A := Option A) capacity).flatMap fun queue =>
-      Z.withIO (IO.mkRef (none : Option (Cause E))) fun failure =>
+      Z.flatMapIO (IO.mkRef (none : Option (Cause E))) fun failure =>
         ((bufferProducer self queue failure).fork "stream-buffer-producer")
           |>.mapFailure Empty.elim
           |>.flatMap fun producer =>
@@ -196,7 +196,7 @@ private partial def joinMapFibers
 private def drainMapFibers
     (pending : IO.Ref (List (Fiber E B)))
     (consume : B -> Z R E Unit) : Z R E Unit :=
-  Z.withIO pending.get fun fibers =>
+  Z.flatMapIO pending.get fun fibers =>
     (joinMapFibers fibers consume).flatMap fun _ =>
       Z.internal.succeed (pending.set [])
 
@@ -204,21 +204,21 @@ private def drainMapFibers
 Transform values in source order with batches of at most `parallelism` active
 effects. A zero parallelism uses one worker.
 -/
-def mapZPar
+def mapPar
     (self : Stream R E A)
     (parallelism : Nat)
     (transform : A -> Z R E B) : Stream R E B := {
   run := fun consume =>
     let parallelism := max parallelism 1
-    Z.withIO (IO.mkRef ([] : List (Fiber E B))) fun pending =>
+    Z.flatMapIO (IO.mkRef ([] : List (Fiber E B))) fun pending =>
       let schedule : A -> Z R E Unit := fun value =>
-        ((transform value).fork "stream-mapZPar")
+        ((transform value).fork "stream-mapPar")
           |>.mapFailure Empty.elim
           |>.flatMap fun fiber =>
             (appendMapFiber pending fiber parallelism).flatMap fun full =>
               if full then drainMapFibers pending consume else pure ()
       let cleanup : Z R Empty Unit :=
-        Z.withIO pending.get fun fibers =>
+        Z.flatMapIO pending.get fun fibers =>
           Z.internal.succeed (stopFibers fibers)
       ((self.runForeach schedule) *> drainMapFibers pending consume)
         |>.ensuring cleanup

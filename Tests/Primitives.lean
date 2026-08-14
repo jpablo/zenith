@@ -180,8 +180,8 @@ def testConsoleAccessors : IO Unit := do
   let output ← IO.mkRef ([] : List String)
   let console : Console := {
     printLine := fun line =>
-      Z.succeed <| output.modify (fun lines => lines ++ [toString line])
-    readLine := Z.succeedNow "typed-input"
+      Z.fromIO <| output.modify (fun lines => lines ++ [toString line])
+    readLine := Z.succeed "typed-input"
   }
   let program : Z Console IO.Error String := do
     Console.printLineZ (42 : Nat)
@@ -208,7 +208,7 @@ def testRandomBoundariesAndAccessor : IO Unit := do
   let call ← IO.mkRef (none : Option (Nat × Nat))
   let random : Random := {
     nextNat := fun lo hi => do
-      let _ ← Z.succeed (call.set (some (lo, hi)))
+      let _ ← Z.fromIO (call.set (some (lo, hi)))
       pure 17
   }
   match ← runProgram "random-accessor"
@@ -218,16 +218,16 @@ def testRandomBoundariesAndAccessor : IO Unit := do
   assertTrue "Random.nextNatZ changed the requested range"
     ((← call.get) == some (3, 9))
 
-  match ← runProgram "random-single-value" (Random.randomLive.nextNat 4 4) with
+  match ← runProgram "random-single-value" (Random.live.nextNat 4 4) with
   | .success 4 => pure ()
-  | _ => failTest "Random.randomLive did not support a one-value range"
+  | _ => failTest "Random.live did not support a one-value range"
 
   for _ in [0:128] do
-    match ← runProgram "random-bounds" (Random.randomLive.nextNat 10 5) with
+    match ← runProgram "random-bounds" (Random.live.nextNat 10 5) with
     | .success value =>
-        assertTrue s!"Random.randomLive returned {value} outside [5, 10]"
+        assertTrue s!"Random.live returned {value} outside [5, 10]"
           (5 ≤ value && value ≤ 10)
-    | _ => failTest "Random.randomLive failed while checking its bounds"
+    | _ => failTest "Random.live failed while checking its bounds"
 
 def primitiveTests : List (String × IO Unit) := [
   ("testCauseUtilities", testCauseUtilities),

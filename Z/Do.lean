@@ -190,7 +190,7 @@ private partial def collectActions
       | `(pure $value) => do
           let collected ← collectActions value.raw environment error defaultError
           let value : Term := ⟨collected.raw⟩
-          let action ← `(Z.succeedNow $value)
+          let action ← `(Z.succeed $value)
           pure (action, collected.environmentRequirements,
             collected.errorRequirements)
       | _ => pure (action, #[], #[])

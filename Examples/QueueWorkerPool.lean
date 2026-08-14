@@ -17,7 +17,7 @@ private partial def worker
   | none => pure ()
   | some job =>
       Z.sleep 5
-      Z.succeed <| results.modify ((job * job) :: ·)
+      Z.fromIO <| results.modify ((job * job) :: ·)
       worker queue results
 
 /-- Run at most `workerCount` jobs at the same time and return sorted results. -/
@@ -26,7 +26,7 @@ def run (jobs : List Nat) (workerCount : Nat) : Z Unit Empty (List Nat) := do
     Z.die (R := Unit) <|
       IO.userError "QueueWorkerPool requires at least one worker"
   let queue ← Z.Queue.unbounded
-  let results ← Z.succeed <| IO.mkRef ([] : List Nat)
+  let results ← Z.fromIO <| IO.mkRef ([] : List Nat)
   let workers ← (List.range workerCount).mapM fun index =>
     (worker queue results).fork s!"queue-worker-{index}"
   for job in jobs do
@@ -42,7 +42,7 @@ def run (jobs : List Nat) (workerCount : Nat) : Z Unit Empty (List Nat) := do
   for worker in workers do
     let _ ← worker.join
     pure ()
-  let output ← Z.succeed results.get
+  let output ← Z.fromIO results.get
   pure <| output.mergeSort (· < ·)
 
 def demo : Z Unit Empty (List Nat) :=

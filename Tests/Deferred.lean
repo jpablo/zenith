@@ -15,7 +15,7 @@ def testDeferredCompletesWaitingFiber : IO Unit := do
   let deferred ← makeDeferred
   let started ← IO.mkRef false
   let startedEffect : Z Unit String Unit :=
-    (Z.succeed (started.set true)).widenError
+    (Z.fromIO (started.set true)).widenError
   let fiber ← Z.unsafeFork (startedEffect *> deferred.await) "deferred-await"
   waitForFlag "deferred awaiter" started
   IO.sleep 5
@@ -65,10 +65,10 @@ def testDeferredInterruptsAwaiter : IO Unit := do
   let finalized ← IO.mkRef 0
   let resumed ← IO.mkRef false
   let resumedEffect : Z Unit String Unit :=
-    (Z.succeed (resumed.set true)).widenError
+    (Z.fromIO (resumed.set true)).widenError
   let fiber ← Z.unsafeFork
     ((deferred.await *> resumedEffect).ensuring <|
-      Z.succeed (finalized.modify (· + 1)))
+      Z.fromIO (finalized.modify (· + 1)))
     "deferred-interrupt"
   IO.sleep 10
   fiber.requestInterrupt

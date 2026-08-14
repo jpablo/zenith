@@ -9,7 +9,7 @@ To write a Graphviz DOT execution diagram, import `Z.Debug`:
 import Z.Debug
 
 def run : IO (Exit Empty Unit) :=
-  Z.Debug.runWithGraphviz (Z.succeedNow ()) "diagrams/example.dot" "example"
+  Z.Debug.runWithGraphviz (Z.succeed ()) "diagrams/example.dot" "example"
 ```
 
 `Z.Debug.runWithGraphviz` opens the DOT file, installs the Graphviz observer,

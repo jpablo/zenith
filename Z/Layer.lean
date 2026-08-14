@@ -138,10 +138,6 @@ def memoize
 def succeed (value : A) : Layer Unit Empty A :=
   fromHEIO fun _ => HEIO.pure value
 
-def succeedEnvironment
-    (environment : Environment A) : Layer Unit Empty A :=
-  succeed environment
-
 def failCause (cause : Cause E) : Layer R E A :=
   fromHEIO fun _ => HEIO.throw cause
 
@@ -210,7 +206,7 @@ instance (priority := low)
   ⟨adapt environment.coe error.coe output.coe⟩
 
 /-- Feed the output of one layer into the next layer. -/
-def to
+def andThen
     (self : Layer R E A)
     (next : Layer A E B) : Layer R E B :=
   ⟨fun environment =>

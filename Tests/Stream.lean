@@ -9,8 +9,8 @@ def testStreamTransformsAndCollects : IO Unit := do
   let program : Z Unit Empty (List Nat) :=
     Z.Stream.runCollect <|
       Z.Stream.filter
-        (Z.Stream.mapZ (Z.Stream.fromList [1, 2, 3, 4]) fun value =>
-          Z.succeedNow (value * 2))
+        (Z.Stream.map (Z.Stream.fromList [1, 2, 3, 4]) fun value =>
+          Z.succeed (value * 2))
         fun value => decide (value > 4)
   match ← Z.unsafeRunSync program "stream-transforms" with
   | .success [6, 8] => pure ()
@@ -27,9 +27,9 @@ def testStoppingBufferedStreamStopsProducer : IO Unit := do
   let started ← IO.mkRef false
   let finalized ← IO.mkRef false
   let source : Z.Stream Unit Empty Nat :=
-    Z.Stream.unfoldZ () fun _ =>
-      ((Z.succeed (started.set true)) *> Z.sleep 2000 *> pure (some (1, ())))
-        |>.ensuring (Z.succeed (finalized.set true))
+    Z.Stream.unfold () fun _ =>
+      ((Z.fromIO (started.set true)) *> Z.sleep 2000 *> pure (some (1, ())))
+        |>.ensuring (Z.fromIO (finalized.set true))
   let fiber ← Z.unsafeFork
     ((source.buffer 1).runForeach fun _ => pure ()) "stream-buffer-cancel"
   waitForFlag "buffered stream producer" started
@@ -41,20 +41,20 @@ def testStoppingBufferedStreamStopsProducer : IO Unit := do
   assertTrue "buffered stream producer finalizer did not run"
     (← finalized.get)
 
-def testStreamMapZParBoundsParallelism : IO Unit := do
+def testStreamMapParBoundsParallelism : IO Unit := do
   let active ← IO.mkRef 0
   let maximum ← IO.mkRef 0
   let transform (value : Nat) : Z Unit Empty Nat :=
-    ((Z.succeed do
+    ((Z.fromIO do
       let current ← active.modifyGet fun previous =>
         let next := previous + 1
         (next, next)
       maximum.modify fun previous => max previous current) *>
       Z.sleep 30 *>
       pure (value * value))
-      |>.ensuring (Z.succeed <| active.modify fun current => current - 1)
+      |>.ensuring (Z.fromIO <| active.modify fun current => current - 1)
   let program : Z Unit Empty (List Nat) :=
-    (Z.Stream.fromList [1, 2, 3, 4]).mapZPar 2 transform |>.runCollect
+    (Z.Stream.fromList [1, 2, 3, 4]).mapPar 2 transform |>.runCollect
   match ← Z.unsafeRunSync program "stream-map-par" with
   | .success [1, 4, 9, 16] => pure ()
   | exit => failTest s!"parallel stream mapping returned {exit}"
@@ -65,5 +65,5 @@ def streamTests : List (String × IO Unit) := [
   ("testStreamTransformsAndCollects", testStreamTransformsAndCollects),
   ("testStreamBufferPreservesValues", testStreamBufferPreservesValues),
   ("testStoppingBufferedStreamStopsProducer", testStoppingBufferedStreamStopsProducer),
-  ("testStreamMapZParBoundsParallelism", testStreamMapZParBoundsParallelism)
+  ("testStreamMapParBoundsParallelism", testStreamMapParBoundsParallelism)
 ]

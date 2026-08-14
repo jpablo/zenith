@@ -34,7 +34,7 @@ def observerRaceOnce (index : Nat) : IO Bool := do
 
 def testFinalizerFailure : IO Unit := do
   let program : Z Unit Empty Nat :=
-    (Z.succeedNow 7).ensuring (Z.die (IO.userError "finalizer failed"))
+    (Z.succeed 7).ensuring (Z.die (IO.userError "finalizer failed"))
   match <- runProgram "finalizer-failure" program with
   | .failure (.die _) => pure ()
   | _ => failTest "ensuring did not return the finalizer defect"
@@ -55,7 +55,7 @@ def testCompositeCauseRecovery : IO Unit := do
     (Z.failCause <| .sequential (.die defect) (.fail "typed")).map
       impossible
   let recovered : Z Unit Empty String :=
-    recoverable.catchAll fun error => Z.succeedNow s!"handled {error}"
+    recoverable.catchAll fun error => Z.succeed s!"handled {error}"
   match ← runProgram "composite-cause-recovery" recovered with
   | .success "handled typed" => pure ()
   | _ => failTest "catchAll did not find a typed failure in a cause tree"
@@ -63,7 +63,7 @@ def testCompositeCauseRecovery : IO Unit := do
   let unhandled : Z Unit String String :=
     (Z.failCause <| .parallel (.die defect) .interrupt).map impossible
   let propagated : Z Unit Empty String :=
-    unhandled.catchAll fun _ => Z.succeedNow "unexpected recovery"
+    unhandled.catchAll fun _ => Z.succeed "unexpected recovery"
   match ← runProgram "composite-cause-propagation" propagated with
   | .failure (.parallel (.die error) .interrupt) =>
       assertTrue "catchAll changed an unhandled defect" (error == defect)
@@ -77,7 +77,7 @@ def testQueueWorkerPool : IO Unit := do
 def testZipParSuccessAndOverlap : IO Unit := do
   let counter ← Std.Mutex.new 0
   let branch : Z Unit Empty Nat :=
-    Z.succeed do
+    Z.fromIO do
       counter.atomically do modify (· + 1)
       IO.sleep 50
       counter.atomically get
@@ -94,7 +94,7 @@ def testZipParCancelsFailingSibling : IO Unit := do
       leftStarted.set true
       pure (leftCancelled.set true)
   let right : Z Unit String String := zdo
-    Z.succeed (waitForFlag "left zipPar branch" leftStarted)
+    Z.fromIO (waitForFlag "left zipPar branch" leftStarted)
     Z.fail "right failed"
   match ← runProgram "zip-par-fail-fast" (left.zipPar right) with
   | .failure (.fail "right failed") => pure ()
@@ -153,7 +153,7 @@ def testZipParCombinesRequirementsAndErrors : IO Unit := do
 
   let failed : Z Unit String Unit := Z.fail "left failed"
   let succeeded : Z Unit Nat Unit :=
-    (Z.succeedNow ()).mapFailure Empty.elim
+    (Z.succeed ()).mapFailure Empty.elim
   let failureProgram : Z Unit (String ⊕ Nat) (Unit × Unit) :=
     failed.zipPar succeeded
   match ← runProgram "zip-par-combined-errors" failureProgram with
@@ -171,7 +171,7 @@ def testZipParPreservesCancelledCleanupFailure : IO Unit := do
     (Z.die cleanupDefect).map impossible
   let left := pending.ensuring cleanup
   let right : Z Unit String Unit := zdo
-    Z.succeed (waitForFlag "left cleanup branch" leftStarted)
+    Z.fromIO (waitForFlag "left cleanup branch" leftStarted)
     Z.fail "right failed"
   match ← runProgram "zip-par-cancelled-cleanup" (left.zipPar right) with
   | .failure (.parallel
@@ -189,8 +189,8 @@ def testRaceReturnsFirstSuccessAndCancelsLoser : IO Unit := do
       leftStarted.set true
       pure (leftCancelled.set true)
   let right : Z Unit String String := zdo
-    Z.succeed (waitForFlag "left race branch" leftStarted)
-    Z.succeedNow "right won"
+    Z.fromIO (waitForFlag "left race branch" leftStarted)
+    Z.succeed "right won"
   match ← runProgram "race-first-success" (left.race right) with
   | .success "right won" => pure ()
   | _ => failTest "race did not return the first successful value"
@@ -204,13 +204,13 @@ def testRaceWaitsForLoserFinalizer : IO Unit := do
     Z.asyncInterrupt fun _ => do
       leftStarted.set true
       pure IO.unit
-  let finalizer : Z Unit Empty Unit := Z.succeed do
+  let finalizer : Z Unit Empty Unit := Z.fromIO do
     IO.sleep 5
     leftFinalized.set true
   let left := pending.ensuring finalizer
   let right : Z Unit Empty Unit := zdo
-    Z.succeed (waitForFlag "race loser" leftStarted)
-    Z.succeedNow ()
+    Z.fromIO (waitForFlag "race loser" leftStarted)
+    Z.succeed ()
   match ← runProgram "race-loser-finalizer" (left.race right) with
   | .success () => pure ()
   | _ => failTest "race did not return the successful branch"
@@ -221,7 +221,7 @@ def testRaceWaitsForSuccessAfterFailure : IO Unit := do
   let failed : Z Unit String String := Z.fail "left failed"
   let succeeded : Z Unit String String := zdo
     Z.sleep 5
-    Z.succeedNow "right succeeded"
+    Z.succeed "right succeeded"
   match ← runProgram "race-after-failure" (failed.race succeeded) with
   | .success "right succeeded" => pure ()
   | _ => failTest "race treated the first failure as the winner"
@@ -291,7 +291,7 @@ def testRaceEitherPreservesWinnerSide : IO Unit := do
   let left : Z Unit Empty Nat :=
     Z.asyncInterrupt fun _ =>
       pure (leftCancelled.set true)
-  let right : Z Unit Empty String := Z.succeedNow "right"
+  let right : Z Unit Empty String := Z.succeed "right"
   match ← runProgram "race-either" (left.raceEither right) with
   | .success (.inr "right") => pure ()
   | _ => failTest "raceEither did not tag the winning branch"
@@ -300,7 +300,7 @@ def testRaceEitherPreservesWinnerSide : IO Unit := do
 
 def testTimeoutKeepsFastSuccess : IO Unit := do
   let program : Z Unit String (Option Nat) :=
-    (Z.succeedNow 7).timeout 100
+    (Z.succeed 7).timeout 100
   match ← runProgram "timeout-fast-success" program with
   | .success (some 7) => pure ()
   | _ => failTest "timeout did not keep a fast successful value"
@@ -328,7 +328,7 @@ def testTimeoutWaitsForFinalizer : IO Unit := do
   let finalized ← IO.mkRef false
   let pending : Z Unit Empty Unit :=
     Z.asyncInterrupt fun _ => pure IO.unit
-  let finalizer : Z Unit Empty Unit := Z.succeed do
+  let finalizer : Z Unit Empty Unit := Z.fromIO do
     IO.sleep 5
     finalized.set true
   let program := (pending.ensuring finalizer).timeout 5
@@ -367,13 +367,13 @@ def testTimeoutPreservesEnvironmentAndError : IO Unit := do
 def testRetryRecursUntilSuccess : IO Unit := do
   let attempts ← IO.mkRef 0
   let effect : Z Unit String Nat := zdo
-    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+    let attempt ← Z.fromIO <| attempts.modifyGet fun count =>
       let next := count + 1
       (next, next)
     if attempt < 3 then
       Z.fail s!"attempt {attempt}"
     else
-      Z.succeedNow attempt
+      Z.succeed attempt
   match ← runProgram "retry-success" <|
       effect.retry (Schedule.recurs 2) with
   | .success 3 => pure ()
@@ -383,7 +383,7 @@ def testRetryRecursUntilSuccess : IO Unit := do
 def testRetryPreservesLastFailure : IO Unit := do
   let attempts ← IO.mkRef 0
   let effect : Z Unit String Nat := zdo
-    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+    let attempt ← Z.fromIO <| attempts.modifyGet fun count =>
       let next := count + 1
       (next, next)
     Z.fail s!"attempt {attempt}"
@@ -397,7 +397,7 @@ def testRetryDoesNotRetryDefects : IO Unit := do
   let attempts ← IO.mkRef 0
   let defect := IO.userError "retry defect"
   let effect : Z Unit String Nat := zdo
-    Z.succeed (attempts.modify (fun count => count + 1))
+    Z.fromIO (attempts.modify (fun count => count + 1))
     (Z.die defect).map impossible
   match ← runProgram "retry-defect" <|
       effect.retry (Schedule.recurs 5) with
@@ -410,7 +410,7 @@ def testRetrySpacedDelayIsInterruptible : IO Unit := do
   let attempts ← IO.mkRef 0
   let started ← IO.mkRef false
   let effect : Z Unit String Unit := zdo
-    Z.succeed do
+    Z.fromIO do
       attempts.modify (fun count => count + 1)
       started.set true
     Z.fail "retry"
@@ -428,7 +428,7 @@ def testRetrySpacedDelayIsInterruptible : IO Unit := do
 def testRepeatReturnsScheduleOutput : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit String Unit :=
-    Z.succeed (runs.modify (fun count => count + 1))
+    Z.fromIO (runs.modify (fun count => count + 1))
   match ← runProgram "repeat-output" <|
       effect.repeat (Schedule.recurs 3) with
   | .success 3 => pure ()
@@ -438,13 +438,13 @@ def testRepeatReturnsScheduleOutput : IO Unit := do
 def testRepeatPreservesFailure : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit String Unit := zdo
-    let run ← Z.succeed <| runs.modifyGet fun count =>
+    let run ← Z.fromIO <| runs.modifyGet fun count =>
       let next := count + 1
       (next, next)
     if run == 2 then
       Z.fail "repeat failed"
     else
-      Z.succeedNow ()
+      Z.succeed ()
   match ← runProgram "repeat-failure" <|
       effect.repeat (Schedule.recurs 5) with
   | .failure (.fail "repeat failed") => pure ()
@@ -454,7 +454,7 @@ def testRepeatPreservesFailure : IO Unit := do
 def testScheduleMapsOutput : IO Unit := do
   let policy := (Schedule.recurs 2).map fun count => s!"step {count}"
   match ← runProgram "schedule-map" <|
-      (Z.succeedNow () : Z Unit String Unit).repeat policy with
+      (Z.succeed () : Z Unit String Unit).repeat policy with
   | .success "step 2" => pure ()
   | _ => failTest "Schedule.map did not transform the final output"
 
@@ -462,10 +462,10 @@ def testScheduleCombinesEnvironment : IO Unit := do
   let attempts ← IO.mkRef 0
   let effect : Z Nat String Nat := zdo
     let value ← Z.service Nat
-    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+    let attempt ← Z.fromIO <| attempts.modifyGet fun count =>
       let next := count + 1
       (next, next)
-    if attempt == 1 then Z.fail "retry" else Z.succeedNow value
+    if attempt == 1 then Z.fail "retry" else Z.succeed value
   let policy : Schedule Bool String Nat :=
     Schedule.make 0 fun _ state =>
       Z.serviceWith fun enabled =>
@@ -484,7 +484,7 @@ def testScheduleCombinesEnvironment : IO Unit := do
 def testScheduleIntersectionStopsWithFirstPolicy : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify (fun count => count + 1))
+    Z.fromIO (runs.modify (fun count => count + 1))
   let policy :=
     Schedule.recurs (Input := Unit) 2 &&&
       Schedule.forever (Input := Unit)
@@ -497,7 +497,7 @@ def testScheduleIntersectionStopsWithFirstPolicy : IO Unit := do
 def testScheduleUnionStopsWithLastPolicy : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify (fun count => count + 1))
+    Z.fromIO (runs.modify (fun count => count + 1))
   let policy :=
     Schedule.recurs (Input := Unit) 1 |||
       Schedule.recurs (Input := Unit) 3
@@ -510,7 +510,7 @@ def testScheduleUnionStopsWithLastPolicy : IO Unit := do
 def testScheduleAndThenChangesPolicy : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify (fun count => count + 1))
+    Z.fromIO (runs.modify (fun count => count + 1))
   let policy :=
     Schedule.recurs (Input := Unit) 1 ++
       Schedule.recurs (Input := Unit) 2
@@ -523,7 +523,7 @@ def testScheduleAndThenChangesPolicy : IO Unit := do
 def testScheduleAndThenEitherTagsOutput : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify (fun count => count + 1))
+    Z.fromIO (runs.modify (fun count => count + 1))
   let first := (Schedule.recurs (Input := Unit) 1).map fun count =>
     s!"first {count}"
   let policy := first.andThenEither
@@ -537,7 +537,7 @@ def testScheduleAndThenEitherTagsOutput : IO Unit := do
 def testScheduleExponentialBackoff : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify (fun count => count + 1))
+    Z.fromIO (runs.modify (fun count => count + 1))
   let policy :=
     Schedule.exponential (Input := Unit) 2 &&&
       Schedule.recurs (Input := Unit) 2
@@ -550,7 +550,7 @@ def testScheduleExponentialBackoff : IO Unit := do
 def testScheduleFibonacciBackoff : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify fun count => count + 1)
+    Z.fromIO (runs.modify fun count => count + 1)
   let policy :=
     Schedule.fibonacci (Input := Unit) 1 &&&
       Schedule.recurs (Input := Unit) 4
@@ -587,8 +587,8 @@ def testScheduleJitteredUsesRandomRange : IO Unit := do
   let requested ← IO.mkRef (none : Option (Nat × Nat))
   let random : Random := {
     nextNat := fun lo hi => zdo
-      Z.succeed (requested.set (some (lo, hi)))
-      Z.succeedNow hi
+      Z.fromIO (requested.set (some (lo, hi)))
+      Z.succeed hi
   }
   let policy : Schedule Random Unit Nat :=
     (Schedule.spaced 100).jittered 80 120
@@ -604,7 +604,7 @@ def testScheduleJitteredUsesRandomRange : IO Unit := do
 def testScheduleJitteredSaturates : IO Unit := do
   let maximum : UInt32 := UInt32.ofNat 4294967295
   let random : Random := {
-    nextNat := fun lo _ => Z.succeedNow lo
+    nextNat := fun lo _ => Z.succeed lo
   }
   let policy : Schedule Random Unit Nat :=
     (Schedule.spaced maximum).jittered 200 200
@@ -620,8 +620,8 @@ def testScheduleJitteredSkipsTerminalStep : IO Unit := do
   let draws ← IO.mkRef 0
   let random : Random := {
     nextNat := fun _ _ => zdo
-      Z.succeed <| draws.modify fun count => count + 1
-      Z.succeedNow 100
+      Z.fromIO <| draws.modify fun count => count + 1
+      Z.succeed 100
   }
   let policy : Schedule Random Unit Unit :=
     (Schedule.stop).jittered
@@ -636,7 +636,7 @@ def testScheduleJitteredSkipsTerminalStep : IO Unit := do
 
 def testScheduleJitteredCombinesEnvironment : IO Unit := do
   let random : Random := {
-    nextNat := fun lo _ => Z.succeedNow lo
+    nextNat := fun lo _ => Z.succeed lo
   }
   let base : Schedule Nat Unit Nat :=
     Schedule.make () fun _ _ =>
@@ -652,7 +652,7 @@ def testScheduleJitteredCombinesEnvironment : IO Unit := do
 def testScheduleIntersectionUsesLongerDelay : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify (fun count => count + 1))
+    Z.fromIO (runs.modify (fun count => count + 1))
   let policy :=
     (Schedule.spaced (Input := Unit) 20 &&&
       Schedule.spaced (Input := Unit) 1) &&&
@@ -669,7 +669,7 @@ def testScheduleIntersectionUsesLongerDelay : IO Unit := do
 def testScheduleUnionUsesShorterDelay : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify (fun count => count + 1))
+    Z.fromIO (runs.modify (fun count => count + 1))
   let policy :=
     (Schedule.spaced (Input := Unit) 1000 |||
       Schedule.spaced (Input := Unit) 0) &&&
@@ -694,14 +694,14 @@ def testScheduleCompositionCombinesEnvironments : IO Unit := do
       Z.serviceWith fun value => ((), value, .done)
   let policy := left &&& right
   let program : Z (Nat × Bool) Empty (Nat × Bool) :=
-    (Z.succeedNow ()).repeat policy
+    (Z.succeed ()).repeat policy
   match ← runProgram "schedule-composition-environment" <|
       program.provideEnvironment (7, true) with
   | .success (7, true) => pure ()
   | _ => failTest "schedule composition did not combine environments"
 
 def testScheduleNamedCompositionInfersInput : IO Unit := do
-  let effect : Z Unit Empty Unit := Z.succeedNow ()
+  let effect : Z Unit Empty Unit := Z.succeed ()
   let policy := (Schedule.recurs 2).zip Schedule.forever
   match ← runProgram "schedule-named-composition" <|
       effect.repeat policy with
@@ -711,7 +711,7 @@ def testScheduleNamedCompositionInfersInput : IO Unit := do
 def testScheduleWhileInputStopsRetry : IO Unit := do
   let attempts ← IO.mkRef 0
   let effect : Z Unit String Unit := zdo
-    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+    let attempt ← Z.fromIO <| attempts.modifyGet fun count =>
       let next := count + 1
       (next, next)
     Z.fail (if attempt == 1 then "retry" else "stop")
@@ -724,7 +724,7 @@ def testScheduleWhileInputStopsRetry : IO Unit := do
 def testScheduleUntilInputStopsRetry : IO Unit := do
   let attempts ← IO.mkRef 0
   let effect : Z Unit Nat Unit := zdo
-    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+    let attempt ← Z.fromIO <| attempts.modifyGet fun count =>
       let next := count + 1
       (next, next)
     Z.fail attempt
@@ -737,7 +737,7 @@ def testScheduleUntilInputStopsRetry : IO Unit := do
 def testScheduleWhileOutputStopsRepeat : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify (fun count => count + 1))
+    Z.fromIO (runs.modify (fun count => count + 1))
   let policy := (Schedule.forever).whileOutput (fun output => output < 2)
   match ← runProgram "schedule-while-output" (effect.repeat policy) with
   | .success 2 => pure ()
@@ -747,7 +747,7 @@ def testScheduleWhileOutputStopsRepeat : IO Unit := do
 def testScheduleUntilOutputStopsRepeat : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify (fun count => count + 1))
+    Z.fromIO (runs.modify (fun count => count + 1))
   let policy := (Schedule.forever).untilOutput (fun output => output >= 2)
   match ← runProgram "schedule-until-output" (effect.repeat policy) with
   | .success 2 => pure ()
@@ -757,7 +757,7 @@ def testScheduleUntilOutputStopsRepeat : IO Unit := do
 def testScheduleFilterKeepsUnderlyingStop : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify (fun count => count + 1))
+    Z.fromIO (runs.modify (fun count => count + 1))
   let policy := (Schedule.recurs 1).whileOutput fun _ => true
   match ← runProgram "schedule-filter-underlying-stop" <|
       effect.repeat policy with
@@ -771,86 +771,86 @@ def testScheduleCheckZIOCombinesEnvironments : IO Unit := do
     Schedule.make () fun _ _ =>
       Z.serviceWith fun limit => ((), limit, .continue 0)
   let policy : Schedule (Nat × Bool) Unit Nat :=
-    base.checkZIO fun _ output =>
+    base.checkM fun _ output =>
       (Z.serviceWith fun enabled : Bool => enabled && output < 10 :
         Z Bool Empty Bool)
   let program : Z (Nat × Bool) Empty Nat :=
-    (Z.succeedNow ()).repeat policy
+    (Z.succeed ()).repeat policy
   match ← runProgram "schedule-check-zio-environment" <|
       program.provideEnvironment (7, false) with
   | .success 7 => pure ()
-  | _ => failTest "checkZIO did not combine its environment requirements"
+  | _ => failTest "checkM did not combine its environment requirements"
 
 def testScheduleCheckZIOSkipsPredicateAfterStop : IO Unit := do
   let predicateCalls ← IO.mkRef 0
-  let policy := (Schedule.stop (Input := Unit)).checkZIO fun _ _ => zdo
-    Z.succeed <| predicateCalls.modify fun count => count + 1
-    Z.succeedNow true
+  let policy := (Schedule.stop (Input := Unit)).checkM fun _ _ => zdo
+    Z.fromIO <| predicateCalls.modify fun count => count + 1
+    Z.succeed true
   match ← runProgram "schedule-check-zio-underlying-stop" <|
-      (Z.succeedNow ()).repeat policy with
+      (Z.succeed ()).repeat policy with
   | .success () => pure ()
-  | _ => failTest "checkZIO changed an underlying stop"
-  assertTrue "checkZIO ran its predicate after an underlying stop"
+  | _ => failTest "checkM changed an underlying stop"
+  assertTrue "checkM ran its predicate after an underlying stop"
     ((← predicateCalls.get) == 0)
 
 def testScheduleWhileInputZIOStopsRetry : IO Unit := do
   let attempts ← IO.mkRef 0
   let effect : Z Unit Nat Unit := zdo
-    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+    let attempt ← Z.fromIO <| attempts.modifyGet fun count =>
       let next := count + 1
       (next, next)
     Z.fail attempt
-  let policy := (Schedule.forever).whileInputZIO fun error =>
-    Z.succeedNow (error < 3)
+  let policy := (Schedule.forever).whileInputM fun error =>
+    Z.succeed (error < 3)
   match ← runProgram "schedule-while-input-zio" (effect.retry policy) with
   | .failure (.fail 3) => pure ()
-  | _ => failTest "whileInputZIO did not preserve its terminal input"
-  assertTrue "whileInputZIO stopped at the wrong attempt"
+  | _ => failTest "whileInputM did not preserve its terminal input"
+  assertTrue "whileInputM stopped at the wrong attempt"
     ((← attempts.get) == 3)
 
 def testScheduleUntilInputZIOStopsRetry : IO Unit := do
   let attempts ← IO.mkRef 0
   let effect : Z Unit Nat Unit := zdo
-    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+    let attempt ← Z.fromIO <| attempts.modifyGet fun count =>
       let next := count + 1
       (next, next)
     Z.fail attempt
-  let policy := (Schedule.forever).untilInputZIO fun error =>
-    Z.succeedNow (error >= 3)
+  let policy := (Schedule.forever).untilInputM fun error =>
+    Z.succeed (error >= 3)
   match ← runProgram "schedule-until-input-zio" (effect.retry policy) with
   | .failure (.fail 3) => pure ()
-  | _ => failTest "untilInputZIO did not preserve its terminal input"
-  assertTrue "untilInputZIO stopped at the wrong attempt"
+  | _ => failTest "untilInputM did not preserve its terminal input"
+  assertTrue "untilInputM stopped at the wrong attempt"
     ((← attempts.get) == 3)
 
 def testScheduleWhileOutputZIOStopsRepeat : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify fun count => count + 1)
-  let policy := (Schedule.forever).whileOutputZIO fun output =>
-    Z.succeedNow (output < 2)
+    Z.fromIO (runs.modify fun count => count + 1)
+  let policy := (Schedule.forever).whileOutputM fun output =>
+    Z.succeed (output < 2)
   match ← runProgram "schedule-while-output-zio" <|
       effect.repeat policy with
   | .success 2 => pure ()
-  | _ => failTest "whileOutputZIO did not preserve its terminal output"
-  assertTrue "whileOutputZIO stopped at the wrong run" ((← runs.get) == 3)
+  | _ => failTest "whileOutputM did not preserve its terminal output"
+  assertTrue "whileOutputM stopped at the wrong run" ((← runs.get) == 3)
 
 def testScheduleUntilOutputZIOStopsRepeat : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify fun count => count + 1)
-  let policy := (Schedule.forever).untilOutputZIO fun output =>
-    Z.succeedNow (output >= 2)
+    Z.fromIO (runs.modify fun count => count + 1)
+  let policy := (Schedule.forever).untilOutputM fun output =>
+    Z.succeed (output >= 2)
   match ← runProgram "schedule-until-output-zio" <|
       effect.repeat policy with
   | .success 2 => pure ()
-  | _ => failTest "untilOutputZIO did not preserve its terminal output"
-  assertTrue "untilOutputZIO stopped at the wrong run" ((← runs.get) == 3)
+  | _ => failTest "untilOutputM did not preserve its terminal output"
+  assertTrue "untilOutputM stopped at the wrong run" ((← runs.get) == 3)
 
 def testScheduleFoldAccumulatesContinues : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify fun count => count + 1)
+    Z.fromIO (runs.modify fun count => count + 1)
   let policy := (Schedule.recurs (Input := Unit) 3).fold
     ([] : List Nat) fun outputs output => outputs ++ [output]
   match ← runProgram "schedule-fold" (effect.repeat policy) with
@@ -863,21 +863,21 @@ def testScheduleFoldKeepsInitialAfterStop : IO Unit := do
   let policy := (Schedule.stop (Input := Unit)).fold 7 fun total _ =>
     total + 1
   match ← runProgram "schedule-fold-stop" <|
-      (Z.succeedNow ()).repeat policy with
+      (Z.succeed ()).repeat policy with
   | .success 7 => pure ()
   | _ => failTest "fold changed its accumulator after an underlying stop"
 
 def testScheduleFoldZIORunsEffect : IO Unit := do
   let foldCalls ← IO.mkRef 0
-  let policy := (Schedule.recurs (Input := Unit) 3).foldZIO 0 fun total output =>
+  let policy := (Schedule.recurs (Input := Unit) 3).foldM 0 fun total output =>
     zdo
-      Z.succeed <| foldCalls.modify fun count => count + 1
-      Z.succeedNow (total + output)
+      Z.fromIO <| foldCalls.modify fun count => count + 1
+      Z.succeed (total + output)
   match ← runProgram "schedule-fold-zio" <|
-      (Z.succeedNow ()).repeat policy with
+      (Z.succeed ()).repeat policy with
   | .success 3 => pure ()
-  | _ => failTest "foldZIO returned the wrong accumulator"
-  assertTrue "foldZIO ran after the underlying schedule stopped"
+  | _ => failTest "foldM returned the wrong accumulator"
+  assertTrue "foldM ran after the underlying schedule stopped"
     ((← foldCalls.get) == 3)
 
 def testScheduleFoldZIOCombinesEnvironments : IO Unit := do
@@ -887,20 +887,20 @@ def testScheduleFoldZIOCombinesEnvironments : IO Unit := do
         let decision := if count == 0 then .continue 0 else .done
         (count + 1, value, decision)
   let policy : Schedule (Nat × Bool) Unit Nat :=
-    base.foldZIO 0 fun total output =>
+    base.foldM 0 fun total output =>
       (Z.serviceWith fun enabled : Bool =>
         if enabled then total + output else total : Z Bool Empty Nat)
   let program : Z (Nat × Bool) Empty Nat :=
-    (Z.succeedNow ()).repeat policy
+    (Z.succeed ()).repeat policy
   match ← runProgram "schedule-fold-zio-environment" <|
       program.provideEnvironment (3, true) with
   | .success 3 => pure ()
-  | _ => failTest "foldZIO did not combine its environment requirements"
+  | _ => failTest "foldM did not combine its environment requirements"
 
 def testScheduleIdentityReturnsInputs : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Nat :=
-    Z.succeed <| runs.modifyGet fun count =>
+    Z.fromIO <| runs.modifyGet fun count =>
       let next := count + 1
       (next, next)
   let policy := Schedule.identity.zip (Schedule.recurs 1)
@@ -913,7 +913,7 @@ def testScheduleIdentityReturnsInputs : IO Unit := do
 def testScheduleRepetitionsCountsContinues : IO Unit := do
   let runs ← IO.mkRef 0
   let effect : Z Unit Empty Unit :=
-    Z.succeed (runs.modify fun count => count + 1)
+    Z.fromIO (runs.modify fun count => count + 1)
   let policy := (Schedule.recurs (Input := Unit) 3).repetitions
   match ← runProgram "schedule-repetitions" (effect.repeat policy) with
   | .success 3 => pure ()
@@ -924,7 +924,7 @@ def testScheduleRepetitionsCountsContinues : IO Unit := do
 def testScheduleCollectAllIncludesTerminalOutput : IO Unit := do
   let policy := (Schedule.recurs (Input := Unit) 3).collectAll
   match ← runProgram "schedule-collect-all" <|
-      (Z.succeedNow ()).repeat policy with
+      (Z.succeed ()).repeat policy with
   | .success [0, 1, 2, 3] => pure ()
   | _ => failTest "collectAll did not include the terminal schedule output"
 
@@ -963,7 +963,7 @@ def testScheduleDriverWaitsForDelay : IO Unit := do
   let started ← IO.mkRef false
   let program : Z Unit Empty (Option Nat) :=
     (Schedule.spaced (Input := Unit) 20).driver fun driver => zdo
-      Z.succeed (started.set true)
+      Z.fromIO (started.set true)
       driver.next ()
   let fiber ← Z.unsafeFork program "schedule-driver-delay"
   waitForFlag "schedule driver delay start" started
@@ -977,12 +977,12 @@ def testScheduleDriverWaitsForDelay : IO Unit := do
 def testRetryOrElseUsesTerminalErrorAndOutput : IO Unit := do
   let attempts ← IO.mkRef 0
   let effect : Z Unit String String := zdo
-    let attempt ← Z.succeed <| attempts.modifyGet fun count =>
+    let attempt ← Z.fromIO <| attempts.modifyGet fun count =>
       let next := count + 1
       (next, next)
     Z.fail s!"attempt {attempt}"
   let recovered := effect.retryOrElse (Schedule.recurs 2) fun error output =>
-    Z.succeedNow s!"{error}; retries {output}"
+    Z.succeed s!"{error}; retries {output}"
   match ← runProgram "retry-or-else" recovered with
   | .success "attempt 3; retries 2" => pure ()
   | _ => failTest "retryOrElse did not receive the terminal error and output"
@@ -997,16 +997,16 @@ def testRetryOrElseCombinesFallbackError : IO Unit := do
   | _ => failTest "retryOrElse did not preserve the fallback error"
 
 def testRetryOrElseEitherTagsResult : IO Unit := do
-  let successful : Z Unit String Nat := Z.succeedNow 7
+  let successful : Z Unit String Nat := Z.succeed 7
   let successProgram := successful.retryOrElseEither
-    (Schedule.stop) fun _ _ => Z.succeedNow "fallback"
+    (Schedule.stop) fun _ _ => Z.succeed "fallback"
   match ← runProgram "retry-or-else-either-success" successProgram with
   | .success (.inr 7) => pure ()
   | _ => failTest "retryOrElseEither did not tag the effect success"
 
   let failed : Z Unit String Nat := Z.fail "failed"
   let fallbackProgram := failed.retryOrElseEither
-    (Schedule.stop) fun error _ => Z.succeedNow s!"handled {error}"
+    (Schedule.stop) fun error _ => Z.succeed s!"handled {error}"
   match ← runProgram "retry-or-else-either-fallback" fallbackProgram with
   | .success (.inl "handled failed") => pure ()
   | _ => failTest "retryOrElseEither did not tag the fallback success"
@@ -1030,8 +1030,8 @@ def testRetryOrElseDoesNotHandleDefects : IO Unit := do
   let effect : Z Unit String Nat :=
     (Z.die (R := Unit) defect).map impossible |>.mapFailure Empty.elim
   let program := effect.retryOrElse (Schedule.recurs 2) fun _ _ => zdo
-    Z.succeed (fallbackCalled.set true)
-    Z.succeedNow 0
+    Z.fromIO (fallbackCalled.set true)
+    Z.succeed 0
   match ← runProgram "retry-or-else-defect" program with
   | .failure (.die error) =>
       assertTrue "retryOrElse changed the defect" (error == defect)
@@ -1046,8 +1046,8 @@ def testRetryOrElsePreservesCompositeDefect : IO Unit := do
     (Z.failCause <| .sequential (.fail "typed") (.die defect)).map
       impossible
   let program := effect.retryOrElse (Schedule.stop) fun _ _ => zdo
-    Z.succeed (fallbackCalled.set true)
-    Z.succeedNow 0
+    Z.fromIO (fallbackCalled.set true)
+    Z.succeed 0
   match ← runProgram "retry-or-else-composite-defect" program with
   | .failure (.die error) =>
       assertTrue "retryOrElse changed the composite defect" (error == defect)
@@ -1191,7 +1191,7 @@ def testFromAsyncInterruption : IO Unit := do
     (← cancelled.get)
 
 def testAsyncSleepCompletion : IO Unit := do
-  let program : Z Unit Empty Nat := Z.sleep 5 *> Z.succeedNow 42
+  let program : Z Unit Empty Nat := Z.sleep 5 *> Z.succeed 42
   match ← runProgram "asynchronous-sleep-completion" program with
   | .success 42 => pure ()
   | _ => failTest "the asynchronous timer did not resume its Zenith fiber"
@@ -1286,7 +1286,7 @@ def testAsyncInterruptResumeDefect : IO Unit :=
 def testUnsafeRunSyncHasNoPollingDelay : IO Unit := do
   let before <- IO.monoMsNow.toIO
   for index in [0:4] do
-    let _ <- Z.unsafeRunSync (Z.succeedNow index) s!"direct-wait-{index}"
+    let _ <- Z.unsafeRunSync (Z.succeed index) s!"direct-wait-{index}"
   let elapsed := (<- IO.monoMsNow.toIO) - before
   assertTrue s!"four immediate runs took {elapsed} ms" (elapsed < 250)
 
@@ -1299,7 +1299,7 @@ def testInterpreterLoggingIsDisabledByDefault : IO Unit := do
     RuntimeLog.setEnabled true
     try
       log "logging-test" "enabled"
-      let _ <- Z.unsafeRunSync (Z.succeedNow ()) "logging-interpreter-test"
+      let _ <- Z.unsafeRunSync (Z.succeed ()) "logging-interpreter-test"
     finally
       RuntimeLog.setEnabled false
   assertTrue "runtime logging could not be enabled"
@@ -1312,7 +1312,7 @@ def testFiberIdsAreUnique : IO Unit := do
   let fibers <- IO.mkRef ([] : List (Fiber Empty Unit))
   let duplicate <- IO.mkRef false
   for _ in [0:1000] do
-    let fiber <- Z.unsafeFork (Z.succeedNow ()) "unique-id"
+    let fiber <- Z.unsafeFork (Z.succeed ()) "unique-id"
     fibers.modify (fiber :: ·)
     let fiberId := toString fiber.fiberId
     let isDuplicate <- ids.modifyGet fun current =>
@@ -1481,7 +1481,7 @@ def testGraphVizDiagramEvents : IO Unit :=
 
 def testChildDiagramLifetime : IO Unit := do
   let program : Z Unit Empty Unit := do
-    let _ <- (Z.sleep 50 *> Z.succeedNow ()).fork "child"
+    let _ <- (Z.sleep 50 *> Z.succeed ()).fork "child"
     pure ()
   let dotFile := "/tmp/zenith-child-regression.dot"
   let _ ← Z.Debug.runWithGraphviz program dotFile "parent"
@@ -1500,7 +1500,7 @@ def highGithubLayer : Layer Unit IO.Error HighGithub :=
   Layer.fromHEIO fun _ => do
     let seed <- HEIO.liftIO.{1} Cause.die highGithubSeed
     pure {
-      getIssues := fun _ => Z.succeedNow [seed.down]
+      getIssues := fun _ => Z.succeed [seed.down]
     }
 
 def highGithubProgram : Z HighGithub IO.Error Nat := do
@@ -1515,7 +1515,7 @@ def testHighUniverseEnvironment : IO Unit := do
 
 def testHighUniverseZipPar : IO Unit := do
   let service : HighGithub := {
-    getIssues := fun _ => Z.succeedNow [1, 2]
+    getIssues := fun _ => Z.succeed [1, 2]
   }
   let program :=
     (highGithubProgram.zipPar highGithubProgram).provideEnvironment service
@@ -1525,7 +1525,7 @@ def testHighUniverseZipPar : IO Unit := do
 
 def testHighUniverseRace : IO Unit := do
   let service : HighGithub := {
-    getIssues := fun _ => Z.succeedNow [1, 2]
+    getIssues := fun _ => Z.succeed [1, 2]
   }
   let program :=
     (highGithubProgram.race highGithubProgram).provideEnvironment service
@@ -1535,7 +1535,7 @@ def testHighUniverseRace : IO Unit := do
 
 def testHighUniverseTimeout : IO Unit := do
   let service : HighGithub := {
-    getIssues := fun _ => Z.succeedNow [1, 2]
+    getIssues := fun _ => Z.succeed [1, 2]
   }
   let program :=
     (highGithubProgram.timeout 100).provideEnvironment service
@@ -1545,7 +1545,7 @@ def testHighUniverseTimeout : IO Unit := do
 
 def testHighUniverseRetry : IO Unit := do
   let service : HighGithub := {
-    getIssues := fun _ => Z.succeedNow [1, 2]
+    getIssues := fun _ => Z.succeed [1, 2]
   }
   let program :=
     (highGithubProgram.retry (Schedule.recurs 1)).provideEnvironment service
@@ -1555,12 +1555,12 @@ def testHighUniverseRetry : IO Unit := do
 
 def testHighUniverseRetryOrElse : IO Unit := do
   let service : HighGithub := {
-    getIssues := fun _ => Z.succeedNow [1, 2]
+    getIssues := fun _ => Z.succeed [1, 2]
   }
   let effect : Z HighGithub String Nat :=
     Z.serviceWithZ fun _ => (Z.fail "failed").map impossible
   let program :=
-    (effect.retryOrElse (Schedule.stop) fun _ _ => Z.succeedNow 7)
+    (effect.retryOrElse (Schedule.stop) fun _ _ => Z.succeed 7)
       |>.provideEnvironment service
   match ← runProgram "high-universe-retry-or-else" program with
   | .success 7 => pure ()
@@ -1568,13 +1568,13 @@ def testHighUniverseRetryOrElse : IO Unit := do
 
 def testHighUniverseScheduleFilter : IO Unit := do
   let service : HighGithub := {
-    getIssues := fun _ => Z.succeedNow [1, 2]
+    getIssues := fun _ => Z.succeed [1, 2]
   }
   let policy : Schedule HighGithub Unit Nat :=
-    (Schedule.forever).whileOutputZIO fun output =>
+    (Schedule.forever).whileOutputM fun output =>
       Z.serviceWith fun (_ : HighGithub) => output < 1
   let program : Z HighGithub Empty Nat :=
-    (Z.succeedNow ()).repeat policy
+    (Z.succeed ()).repeat policy
   match ← runProgram "high-universe-schedule-filter" <|
       program.provideEnvironment service with
   | .success 1 => pure ()
@@ -1582,13 +1582,13 @@ def testHighUniverseScheduleFilter : IO Unit := do
 
 def testHighUniverseScheduleFold : IO Unit := do
   let service : HighGithub := {
-    getIssues := fun _ => Z.succeedNow [1, 2]
+    getIssues := fun _ => Z.succeed [1, 2]
   }
   let policy : Schedule HighGithub Unit Nat :=
-    (Schedule.recurs (Input := Unit) 1).foldZIO 0 fun total _ =>
+    (Schedule.recurs (Input := Unit) 1).foldM 0 fun total _ =>
       Z.serviceWith fun (_ : HighGithub) => total + 1
   let program : Z HighGithub Empty Nat :=
-    (Z.succeedNow ()).repeat policy
+    (Z.succeed ()).repeat policy
   match ← runProgram "high-universe-schedule-fold" <|
       program.provideEnvironment service with
   | .success 1 => pure ()
@@ -1596,7 +1596,7 @@ def testHighUniverseScheduleFold : IO Unit := do
 
 def testHighUniverseScheduleCollectAll : IO Unit := do
   let service : HighGithub := {
-    getIssues := fun _ => Z.succeedNow [1, 2]
+    getIssues := fun _ => Z.succeed [1, 2]
   }
   let base : Schedule HighGithub Unit Nat :=
     Schedule.make 0 fun _ count =>
@@ -1604,7 +1604,7 @@ def testHighUniverseScheduleCollectAll : IO Unit := do
         let decision := if count == 0 then .continue 0 else .done
         (count + 1, count, decision)
   let program : Z HighGithub Empty (List Nat) :=
-    (Z.succeedNow ()).repeat base.collectAll
+    (Z.succeed ()).repeat base.collectAll
   match ← runProgram "high-universe-schedule-collect-all" <|
       program.provideEnvironment service with
   | .success [0, 1] => pure ()
@@ -1612,7 +1612,7 @@ def testHighUniverseScheduleCollectAll : IO Unit := do
 
 def testHighUniverseScheduleDriver : IO Unit := do
   let service : HighGithub := {
-    getIssues := fun _ => Z.succeedNow [1, 2]
+    getIssues := fun _ => Z.succeed [1, 2]
   }
   let policy : Schedule HighGithub Unit Nat :=
     Schedule.make () fun _ _ =>
@@ -1747,7 +1747,7 @@ def testHighUniverseLayerRelease : IO Unit := do
       (fun _ =>
         HEIO.bind (recordLayerEvent events "acquire-high") fun _ =>
           HEIO.pure {
-            getIssues := fun _ => Z.succeedNow [1]
+            getIssues := fun _ => Z.succeed [1]
           })
       (fun _ _ => recordLayerEvent events "release-high")
   match <- layer.run () highGithubProgram "high-layer-release" with
@@ -1763,7 +1763,7 @@ def testHighUniverseLayerSharing : IO Unit := do
       (fun _ =>
         HEIO.bind (recordLayerEvent events "acquire-shared") fun _ =>
           HEIO.pure {
-            getIssues := fun _ => Z.succeedNow [1]
+            getIssues := fun _ => Z.succeed [1]
           })
       (fun _ _ => recordLayerEvent events "release-shared")
   let sharedSource := source.share fun shared =>
@@ -1780,11 +1780,11 @@ def testHighUniverseLayerSharing : IO Unit := do
 def testHighUniverseParallelLayers : IO Unit := do
   let left : Layer Unit IO.Error HighGithub :=
     Layer.fromHEIO fun _ => HEIO.pure {
-      getIssues := fun _ => Z.succeedNow [1]
+      getIssues := fun _ => Z.succeed [1]
     }
   let right : Layer Unit IO.Error HighGithub :=
     Layer.fromHEIO fun _ => HEIO.pure {
-      getIssues := fun _ => Z.succeedNow [2]
+      getIssues := fun _ => Z.succeed [2]
     }
   let combined := left.zipWithPar right fun first _ => first
   match <- combined.run () highGithubProgram "high-layer-parallel" with
@@ -1890,7 +1890,7 @@ def testAcquireReleaseZLayer : IO Unit := do
       events.modify fun current => current ++ ["acquire-z"]
       pure "service"
   let release (_ : String) : Z Unit Empty Unit :=
-    Z.succeed <| events.modify fun current => current ++ ["release-z"]
+    Z.fromIO <| events.modify fun current => current ++ ["release-z"]
   let layer := Layer.acquireReleaseZ acquire release
   let program : Z String IO.Error Unit :=
     Z.serviceWith fun _ => ()
@@ -1909,7 +1909,7 @@ structure IssueSyncScenario where
 def recordIssueSyncEvent
     (events : IO.Ref (List String))
     (event : String) : Z Unit Empty Unit :=
-  Z.succeed <| events.modify fun current => current ++ [event]
+  Z.fromIO <| events.modify fun current => current ++ [event]
 
 def makeIssueSyncServices
     (events : IO.Ref (List String))
@@ -1922,7 +1922,7 @@ def makeIssueSyncServices
     load := (zdo
       let _ ← recordIssueSyncEvent events "config"
       match scenario.config with
-      | .ok value => Z.succeedNow value
+      | .ok value => Z.succeed value
       | .error error => Z.fail error :
         Z Unit GithubIssueSync.ConfigError GithubIssueSync.SyncConfig)
   }
@@ -1930,7 +1930,7 @@ def makeIssueSyncServices
     openIssues := fun organization => (zdo
       let _ ← recordIssueSyncEvent events s!"github:{organization}"
       match scenario.github with
-      | .ok issues => Z.succeedNow issues
+      | .ok issues => Z.succeed issues
       | .error error => Z.fail error :
         Z Unit GithubIssueSync.GithubError (List GithubIssueSync.Issue))
   }
@@ -2111,7 +2111,7 @@ def testZDoInferredEnvironment : IO Unit := do
   | _ => failTest "zdo did not normalize a grouped environment requirement"
 
   let highService : HighGithub := {
-    getIssues := fun _ => Z.succeedNow [1, 2]
+    getIssues := fun _ => Z.succeed [1, 2]
   }
   let highProgram := zdo[IO.Error]
     let issues <- Z.serviceWithZ fun github : HighGithub =>
@@ -2191,7 +2191,7 @@ def testErrorChannelJoin : IO Unit := do
   | .failure (.fail (.inl "left")) => pure ()
   | _ => failTest "error join did not inject the left error"
 
-  let leftSuccess : Z Unit String Unit := Z.succeedNow ()
+  let leftSuccess : Z Unit String Unit := Z.succeed ()
   let rightProgram : Z Unit (String ⊕ IO.Error) Unit :=
     Z.flatMapMeetJoin leftSuccess fun _ =>
       Z.attempt (throw (IO.userError "right"))
@@ -2210,7 +2210,7 @@ def testZDoInferredErrors : IO Unit := do
   | .failure (.fail (.inr "left")) => pure ()
   | _ => failTest "zdo did not inject an inferred String error"
 
-  let stringSuccess : Z Unit String Unit := Z.succeedNow ()
+  let stringSuccess : Z Unit String Unit := Z.succeed ()
   let failingIO : IO Nat := throw (IO.userError "right")
   let rightProgram := zdo
     let _ <- stringSuccess
@@ -2282,7 +2282,7 @@ def testZDoInferredCatch : IO Unit := do
       let _ : Nat <- throw (IO.userError "defect")
       pure 0
     catch _ =>
-      Z.succeedNow 7
+      Z.succeed 7
   let defectCaught : Z Unit Empty Nat := defectCaught
   match <- runProgram "zdo-inferred-defect-catch" defectCaught with
   | .success 7 => pure ()
@@ -2380,7 +2380,7 @@ def testZDoInferredMultipleCatch : IO Unit := do
     catch _ =>
       pure 7
     catch _ =>
-      let _ ← Z.succeed <| secondCalled.set true
+      let _ ← Z.fromIO <| secondCalled.set true
       pure 8
   let firstRecovery : Z Unit Empty Nat := firstRecovery
   match ← runProgram "zdo-inferred-multiple-catch-skip" firstRecovery with
@@ -2458,11 +2458,11 @@ def testZDoInferredFinally : IO Unit := do
   let successEvents ← IO.mkRef ([] : List String)
   let successProgram := zdo
     try
-      let _ ← Z.succeed <| successEvents.modify (fun events =>
+      let _ ← Z.fromIO <| successEvents.modify (fun events =>
         events ++ ["body"])
       pure 1
     finally
-      Z.succeed <| successEvents.modify (fun events =>
+      Z.fromIO <| successEvents.modify (fun events =>
         events ++ ["finalizer"])
   let successProgram : Z Unit Empty Nat := successProgram
   match ← runProgram "zdo-inferred-finally-success" successProgram with
@@ -2477,7 +2477,7 @@ def testZDoInferredFinally : IO Unit := do
       let _ : Nat ← (Z.fail "body" : Z Unit String Nat)
       pure 0
     finally
-      Z.succeed <| failureEvents.modify (fun events =>
+      Z.fromIO <| failureEvents.modify (fun events =>
         events ++ ["finalizer"])
   let bodyFailure : Z Unit String Nat := bodyFailure
   match ← runProgram "zdo-inferred-finally-body-failure" bodyFailure with
@@ -2519,7 +2519,7 @@ def testZDoInferredFinally : IO Unit := do
       if stop then return 7
       pure ()
     finally
-      Z.succeed <| returnEvents.modify (fun events =>
+      Z.fromIO <| returnEvents.modify (fun events =>
         events ++ ["finalizer"])
     pure 9
   let returnProgram : Z Unit Empty Nat := returnProgram true
@@ -2539,7 +2539,7 @@ def testZDoInferredFinally : IO Unit := do
         total := total + value
         pure ()
       finally
-        Z.succeed <| finalizerCount.modify (fun count => count + 1)
+        Z.fromIO <| finalizerCount.modify (fun count => count + 1)
     pure total
   let loopProgram : Z Unit Empty Nat := loopProgram
   match ← runProgram "zdo-inferred-finally-loop-control" loopProgram with

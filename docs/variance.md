@@ -87,8 +87,8 @@ lets the elaborator reorder and reassociate existing error sums.
 The public constructors return the most precise `Z` type:
 
 ```lean
-def Z.succeedNow (value : A) : Z Unit Empty A
-def Z.succeed (action : IO A) : Z Unit Empty A
+def Z.succeed (value : A) : Z Unit Empty A
+def Z.fromIO (action : IO A) : Z Unit Empty A
 def Z.done (exit : Exit E A) : Z Unit E A
 def Z.fail [ToString E] (error : E) : Z Unit E Empty
 def Z.attempt (action : IO A) : Z Unit IO.Error A
@@ -99,7 +99,7 @@ coercions adapt a precise result to its use site. For example:
 
 ```lean
 example : Z R IO.Error Nat :=
-  Z.succeedNow 1
+  Z.succeed 1
 ```
 
 Lean elaborates the precise constructor before it inserts the `Z` coercion.
@@ -107,7 +107,7 @@ Thus, a value with an unknown element type can need an annotation:
 
 ```lean
 example : Z R IO.Error (List Issue) :=
-  Z.succeedNow ([] : List Issue)
+  Z.succeed ([] : List Issue)
 ```
 
 Framework code can use `Z.internal.succeedNow`, `Z.internal.succeed`,
@@ -305,7 +305,7 @@ types, and folds them with `ErrorChannel.Join`:
 
 ```lean
 def inferred := zdo
-  let first <- (Z.succeedNow 1 : Z Unit String Nat)
+  let first <- (Z.succeed 1 : Z Unit String Nat)
   let second <- Z.attempt (pure 2)
   pure (first + second)
 

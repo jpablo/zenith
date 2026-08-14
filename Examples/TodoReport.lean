@@ -207,7 +207,7 @@ private def sourceFiles
     (fileSystem : FileSystem)
     (config : AppConfig)
     (directory : FilePath) : Z.Stream Unit FileError FilePath :=
-  Z.Stream.unfoldZ [.directory directory] <|
+  Z.Stream.unfold [.directory directory] <|
     nextSourcePath fileSystem config
 
 private def scanFile
@@ -233,7 +233,7 @@ def scanDirectoryWithWorkers
     (directory : FilePath)
     (workerCount capacity : Nat) : Z Unit FileError ScanResult :=
   let paths := Z.Stream.buffer (sourceFiles fileSystem config directory) capacity
-  let scans := Z.Stream.mapZPar paths workerCount (scanFile fileSystem config)
+  let scans := Z.Stream.mapPar paths workerCount (scanFile fileSystem config)
   Z.Stream.runCollect scans |>.map fun results =>
     (results.foldl ScanResult.combine {}).normalize
 
@@ -284,7 +284,7 @@ def liveFileSystem : FileSystem := {
 }
 
 def liveConsole : Console := {
-  printLine := fun message => Z.succeed (IO.println message)
+  printLine := fun message => Z.fromIO (IO.println message)
 }
 
 def configLayer :
@@ -387,22 +387,22 @@ private def findFile
 def memoryFileSystem (memory : MemoryFileSystem) : FileSystem := {
   listDirectory := fun path =>
     match findDirectory memory.directories path with
-    | some entries => Z.succeedNow entries
+    | some entries => Z.succeed entries
     | none => Z.fail (FileError.operationFailed
         "list directory" path "directory not found")
   readFile := fun path =>
     match findFile memory.files path with
-    | some content => Z.succeedNow content
+    | some content => Z.succeed content
     | none => Z.fail (FileError.operationFailed
         "read file" path "file not found")
   writeFile := fun path content =>
-    Z.succeed <| memory.writes.modify fun writes =>
+    Z.fromIO <| memory.writes.modify fun writes =>
       writes ++ [(path, content)]
 }
 
 def memoryConsole (messages : IO.Ref (List String)) : Console := {
   printLine := fun message =>
-    Z.succeed <| messages.modify fun current => current ++ [message]
+    Z.fromIO <| messages.modify fun current => current ++ [message]
 }
 
 private def check (message : String) (condition : Bool) : IO Unit := do
@@ -453,14 +453,14 @@ def test : IO Unit := do
     (memoryFileSystem memory) with
     readFile := fun path =>
       (zdo
-        let _ <- Z.succeed do
+        let _ <- Z.fromIO do
           let active ← activeReads.modifyGet fun previous =>
             let next := previous + 1
             (next, next)
           maximumActiveReads.modify fun previous => max previous active
         let _ <- Z.sleep 30
         (memoryFileSystem memory).readFile path)
-        |>.ensuring (Z.succeed <| activeReads.modify fun active => active - 1)
+        |>.ensuring (Z.fromIO <| activeReads.modify fun active => active - 1)
   }
   let parallelConfig := defaultConfig root output
   let parallelScan := scanDirectoryWithWorkers

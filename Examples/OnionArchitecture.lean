@@ -48,10 +48,10 @@ structure BusinessLogic : Type 1 where
   deriving ServiceKey
 
 def makeHttpClient (config : HttpConfig) : HttpClient := {
-  get := fun path => Z.succeed do
+  get := fun path => Z.fromIO do
     IO.println s!"GET {config.baseUrl}{path}"
     pure "ok"
-  post := fun path body => Z.succeed do
+  post := fun path body => Z.fromIO do
     IO.println s!"POST {config.baseUrl}{path}: {body}"
 }
 

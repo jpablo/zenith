@@ -50,7 +50,7 @@ def reportFromLabel :
     KeyedLayer (Services[Label]) Empty [reportEntry] :=
   KeyedLayer.singleton reportEntry <|
     Layer.fromFunction fun environment => {
-      render := Z.succeedNow (Services.get[Label] environment).text
+      render := Z.succeed (Services.get[Label] environment).text
     }
 
 def reportFromLabelAndNote :
@@ -60,7 +60,7 @@ def reportFromLabelAndNote :
       render :=
         let label := (Services.get[Label] environment).text
         let note := (Services.get[Note] environment).text
-        Z.succeedNow s!"{label}:{note}"
+        Z.succeed s!"{label}:{note}"
     }
 
 def singleProviderGraph :
@@ -109,7 +109,7 @@ def makeRepository (config : Config) (clock : Clock) : Repository :=
 def makeApplication
     (repository : Repository)
     (config : Config) : Application :=
-  { run := Z.succeedNow s!"{config.base}:{repository.label}" }
+  { run := Z.succeed s!"{config.base}:{repository.label}" }
 
 def makeDefaultConfig : Config :=
   { base := "default" }

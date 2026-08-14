@@ -6,7 +6,7 @@ structure Console where
 
 namespace Console
 
-  def consoleLive: Console where
+  def live : Console where
     printLine line := 
       Z.internal.succeed (IO.println line) |>.withLabel s!"📺 println '{line}'"
         

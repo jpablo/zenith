@@ -17,8 +17,8 @@ example (effect : Z Unit Empty Empty) : Z R E A :=
 
 #check_failure (show Unit from (42 : Nat))
 
-example : Z R IO.Error Nat := Z.succeedNow 1
-example : Z R IO.Error (List Nat) := Z.succeedNow ([] : List Nat)
+example : Z R IO.Error Nat := Z.succeed 1
+example : Z R IO.Error (List Nat) := Z.succeed ([] : List Nat)
 
 example (self : Z R E A) [ToString E] : Z R (Cause E) A :=
   self.foldCauseZ (fun cause => Z.fail cause) pure
@@ -190,7 +190,7 @@ example : Z (String × Nat) Empty (Nat × String) := zdo
   pure (nat, string)
 
 example : Z Nat Empty Nat := zdo
-  Z.succeedNow ()
+  Z.succeed ()
   Z.environment Nat
 
 example : Z (Nat × String) IO.Error String := zdo
@@ -262,7 +262,7 @@ def inferredBareThrow := zdo
 #check inferredBareThrow
 example : Z Unit Empty Nat := inferredBareThrow
 
-def stringAction : Z Unit String Nat := Z.succeedNow 1
+def stringAction : Z Unit String Nat := Z.succeed 1
 
 def inferredAllErrors := zdo
   let first <- stringAction
@@ -280,7 +280,7 @@ def inferredAllErrorsReordered := zdo
 #check inferredAllErrorsReordered
 example : Z Unit (IO.Error ⊕ String) Nat := inferredAllErrorsReordered
 
-def prejoinedAction : Z Unit (String ⊕ IO.Error) Nat := Z.succeedNow 1
+def prejoinedAction : Z Unit (String ⊕ IO.Error) Nat := Z.succeed 1
 
 def inferredNormalizedErrorSum := zdo
   prejoinedAction
@@ -332,7 +332,7 @@ def inferredDefectCatch := zdo
     let _ : Nat <- throw (IO.userError "expected")
     pure 0
   catch _ =>
-    Z.succeedNow 1
+    Z.succeed 1
 
 #check inferredDefectCatch
 example : Z Unit Empty Nat := inferredDefectCatch
@@ -376,7 +376,7 @@ def explicitCaughtAction : Z Unit IO.Error Nat := zdo
   try
     throw (IO.userError "expected")
   catch _ =>
-    Z.succeedNow 1
+    Z.succeed 1
 
 def inferredAroundNestedCatch := zdo
   explicitCaughtAction

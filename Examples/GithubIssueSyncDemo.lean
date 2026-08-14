@@ -6,7 +6,7 @@ open GithubIssueSync
 open Z
 
 def printStep (message : String) : Z Unit Empty Unit :=
-  Z.succeed (IO.println message)
+  Z.fromIO (IO.println message)
 
 def loadConfig : Z Unit ConfigError SyncConfig := zdo
   let _ <- printStep "[config] load"

@@ -248,7 +248,7 @@ def succeedNow
 
 end internal
 
-def succeedNow (value : A) : Z Unit Empty A :=
+def succeed (value : A) : Z Unit Empty A :=
   internal.succeedNow value
 
 def map (f : A -> B) (self : Z R E A) : Z R E B :=
@@ -291,9 +291,9 @@ def succeed
 
 end internal
 
-def succeed
+def fromIO
     (io : IO A)
-    (md := Metadata.withLabel "succeed") : Z Unit Empty A :=
+    (md := Metadata.withLabel "fromIO") : Z Unit Empty A :=
   internal.succeed io md
 
 def fork
@@ -401,7 +401,7 @@ def provideEnvironment
     (md := mempty) : Z Unit E A :=
   ⟨fun _ => ZCore.provideEnvironment (effect.close environment) () md⟩
 
-def withIO
+def flatMapIO
     (io : IO A)
     (f : A -> Z R E B) : Z R E B :=
   (internal.succeed io).flatMap f

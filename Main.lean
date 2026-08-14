@@ -10,12 +10,12 @@ def runExample (name : String) (program : Z Unit E A) : IO Unit := do
       throw (IO.userError s!"Example '{name}' failed.")
 
 def main : IO Unit := do
-  runExample "succeedNowExample" succeedNowExample
+  runExample "succeedExample" succeedExample
   runExample "zipExample" zipExample
   runExample "zipExample2" zipExample2
   runExample "mapExample" mapExample
   runExample "monadExample" monadExample
-  runExample "succeedExample" succeedExample
+  runExample "fromIOExample" fromIOExample
   runExample "attemptExample" attemptExample
   runExample "coercionExample" coercionExample
   runExample "asyncExample" asyncExample

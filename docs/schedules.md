@@ -159,17 +159,17 @@ The available forms are `whileInput`, `untilInput`, `whileOutput`, and
 wants to continue. A false predicate changes the decision to stop but keeps
 the current schedule output.
 
-The `ZIO` forms use an effectful predicate:
+The `M` forms use an effectful predicate:
 
 ```lean
 def configuredRetries : Schedule RetryConfig RequestError Nat :=
-  (Schedule.forever).whileOutputZIO fun retries =>
+  (Schedule.forever).whileOutputM fun retries =>
     Z.serviceWith fun config : RetryConfig =>
       retries < config.maximumRetries
 ```
 
-The available forms are `checkZIO`, `whileInputZIO`, `untilInputZIO`,
-`whileOutputZIO`, and `untilOutputZIO`. A predicate has type
+The available forms are `checkM`, `whileInputM`, `untilInputM`,
+`whileOutputM`, and `untilOutputM`. A predicate has type
 `Z R Empty Bool`, so it can use services and run effects but cannot produce a
 typed failure. Zenith combines the schedule and predicate environments with
 `Environment.Meet`. It does not run the predicate after the underlying
@@ -189,7 +189,7 @@ The fold adds outputs only when the underlying schedule decides to continue.
 It does not add the terminal output. For example, the policy above returns
 `[0, 1, 2]` after its three permitted retries.
 
-`Schedule.foldZIO` accepts an effectful accumulator of type
+`Schedule.foldM` accepts an effectful accumulator of type
 `Accumulator -> Output -> Z R Empty Accumulator`. It can use services and run
 effects, but it cannot produce a typed failure. Zenith combines its environment
 with the underlying schedule environment.

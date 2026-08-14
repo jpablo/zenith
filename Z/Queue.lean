@@ -161,7 +161,7 @@ private def shutdownQueue
     | .open _ _ _ takers offerers => ((takers, offerers), .shutdown)
 
 private def make (capacity : Option Nat) : UIO (Queue A) :=
-  Z.succeed (do
+  Z.fromIO (do
     pure {
       state := ← IO.mkRef (.open capacity Std.Queue.empty 0 [] [])
       nextWaiterId := ← IO.mkRef 0
@@ -193,14 +193,14 @@ def take (self : Queue A) : UIO A :=
 
 /-- Take a value if one is immediately available. -/
 def poll (self : Queue A) : UIO (Option A) :=
-  Z.succeed (self.pollValue) |>.withLabel "Queue.poll"
+  Z.fromIO (self.pollValue) |>.withLabel "Queue.poll"
 
 /--
 Shut down the queue. This discards queued values, interrupts pending takers,
 and makes pending and future offers return `false`.
 -/
 def shutdown (self : Queue A) : UIO Unit :=
-  Z.succeed (do
+  Z.fromIO (do
     let (takers, offerers) ← self.shutdownQueue
     for taker in takers do
       notify taker.observer (.failure .interrupt)
@@ -209,7 +209,7 @@ def shutdown (self : Queue A) : UIO Unit :=
 
 /-- Report whether the queue has been shut down. -/
 def isShutdown (self : Queue A) : UIO Bool :=
-  Z.succeed (do
+  Z.fromIO (do
     match ← self.state.get with
     | .shutdown => pure true
     | .open .. => pure false) |>.withLabel "Queue.isShutdown"

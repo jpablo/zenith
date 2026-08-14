@@ -7,7 +7,7 @@ Use ordinary `do` when all actions already have one environment and error
 type. Use `zdo` when Zenith must infer and combine different requirements.
 -/
 
-open Console (consoleLive)
+open Console (live)
 
 structure Person where
   name : String
@@ -19,29 +19,29 @@ instance : ToString Person where
 
 /-! Creating and combining effects. -/
 
-def succeedNowExample : Z Unit Empty String :=
-  Z.succeedNow "hello from Z.succeedNow"
+def succeedExample : Z Unit Empty String :=
+  Z.succeed "hello from Z.succeed"
 
 def zipExample : Z Unit Empty (Nat × String) :=
-  (Z.succeedNow 8).zip (Z.succeedNow "LO")
+  (Z.succeed 8).zip (Z.succeed "LO")
 
 /-- Run both effects in child fibers and keep left-to-right result order. -/
 def zipParExample : Z Unit Empty (Nat × String) :=
-  (Z.sleep 10 *> Z.succeedNow 8).zipPar
-    (Z.sleep 10 *> Z.succeedNow "LO")
+  (Z.sleep 10 *> Z.succeed 8).zipPar
+    (Z.sleep 10 *> Z.succeed "LO")
 
 /-- Return the first successful effect and stop the losing effect. -/
 def raceExample : Z Unit Empty String :=
-  (Z.sleep 20 *> Z.succeedNow "slow").race
-    (Z.sleep 10 *> Z.succeedNow "fast")
+  (Z.sleep 20 *> Z.succeed "slow").race
+    (Z.sleep 10 *> Z.succeed "fast")
 
 /-- Return `none` if the effect does not finish within 10 milliseconds. -/
 def timeoutExample : Z Unit Empty (Option String) :=
-  (Z.sleep 20 *> Z.succeedNow "too slow").timeout 10
+  (Z.sleep 20 *> Z.succeed "too slow").timeout 10
 
 /-- Run once, then repeat three more times and return the recurrence count. -/
 def repeatExample : Z Unit Empty Nat :=
-  (Z.succeedNow "tick").repeat (Schedule.recurs 3)
+  (Z.succeed "tick").repeat (Schedule.recurs 3)
 
 /-- Retry a typed failure at most three times. -/
 def retryExample : Z Unit String Nat :=
@@ -70,7 +70,7 @@ def temporaryRetry : Schedule Unit String Nat :=
 
 /-- Read the retry limit from the schedule environment. -/
 def configuredRetry : Schedule Nat String Nat :=
-  (Schedule.forever).whileOutputZIO fun retries =>
+  (Schedule.forever).whileOutputM fun retries =>
     Z.serviceWith fun limit : Nat => retries < limit
 
 /-- Collect the outputs that caused the schedule to continue. -/
@@ -84,12 +84,12 @@ def allRetryOutputs : Schedule Unit String (List Nat) :=
 /-- Recover with the last error and final schedule output. -/
 def retryOrElseExample : Z Unit Empty Nat :=
   (Z.fail "not ready" : Z Unit String Nat).retryOrElse
-    (Schedule.recurs 3) fun _ retries => Z.succeedNow retries
+    (Schedule.recurs 3) fun _ retries => Z.succeed retries
 
 /-- The same operation as `zipExample`, written with `do`. -/
 def zipExample2 : Z Unit Empty (Nat × String) := do
-  let number <- Z.succeedNow 8
-  let text <- Z.succeedNow "LO"
+  let number <- Z.succeed 8
+  let text <- Z.succeed "LO"
   pure (number, text)
 
 def mapExample : Z Unit Empty String :=
@@ -100,12 +100,12 @@ def mapExample : Z Unit Empty String :=
 
 def monadExample : Z Unit Empty Unit := do
   let (number, text) <- zipExample
-  consoleLive.printLine s!"Got a tuple: ({number}, {text})"
+  live.printLine s!"Got a tuple: ({number}, {text})"
 
 /-! Lift synchronous `IO` into Zenith. -/
 
-def succeedExample : Z Unit Empty Unit :=
-  Z.succeed <| IO.println "hello from IO"
+def fromIOExample : Z Unit Empty Unit :=
+  Z.fromIO <| IO.println "hello from IO"
 
 def attemptExample : Z Unit IO.Error Unit :=
   Z.attempt <| IO.println "hello from IO"
@@ -130,25 +130,25 @@ def asyncExample : Z Unit Empty Nat :=
 
 def forkExample : Z Unit Empty Unit := do
   let left :=
-    Z.repeatN 3 (consoleLive.printLine "- left" *> Z.sleep 20)
+    Z.repeatN 3 (live.printLine "- left" *> Z.sleep 20)
   let right :=
-    Z.repeatN 3 (consoleLive.printLine "+ right" *> Z.sleep 20)
+    Z.repeatN 3 (live.printLine "+ right" *> Z.sleep 20)
   let leftFiber <- left.fork "left"
   let rightFiber <- right.fork "right"
   leftFiber.join
   rightFiber.join
-  consoleLive.printLine "both fibers finished"
+  live.printLine "both fibers finished"
 
 /-- A long sequence is represented by the executable `ZCore` tree. -/
 def stackSafetyExample : Z Unit Empty Unit :=
-  Z.repeatN 20 <| consoleLive.printLine "Howdy!"
+  Z.repeatN 20 <| live.printLine "Howdy!"
 
 /-! Finalization and interruption. -/
 
 def ensuringExample : Z Unit Empty Unit :=
-  (consoleLive.printLine "work" *> Z.sleep 10)
+  (live.printLine "work" *> Z.sleep 10)
     |>.repeatN 1
-    |>.ensuring (consoleLive.printLine "finalizer")
+    |>.ensuring (live.printLine "finalizer")
 
 def uninterruptibleExample : Z Unit Empty Unit :=
   Z.sleep 10 |>.uninterruptible
@@ -209,7 +209,7 @@ def uninterruptibleExample2 : Z Unit Empty Unit := do
 def envExample1 := zdo[Empty]
   let number <- Z.environment Nat
   let text <- Z.environment String
-  consoleLive.printLine s!"environment: ({number}, {text})"
+  live.printLine s!"environment: ({number}, {text})"
 
 example : Z (Nat × String) Empty Unit := envExample1
 
@@ -224,7 +224,7 @@ def envExample2 : Z Console Empty Unit :=
   Console.printLineZ "hello from Console.printLineZ"
 
 def envExample2ready : Z Unit Empty Unit :=
-  envExample2.provideEnvironment Console.consoleLive
+  envExample2.provideEnvironment Console.live
 
 /-- `zdo` infers the `Console` environment and the `IO.Error` channel. -/
 def interactiveConsoleExample := zdo

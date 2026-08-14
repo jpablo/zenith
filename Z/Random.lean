@@ -7,7 +7,7 @@ structure Random where
 namespace Random
 
   /--
-  Generator state for `randomLive`.
+  Generator state for `live`.
 
   `IO.rand` reads, advances, and writes the process-global `IO.stdGenRef` in
   three separate steps, so concurrent fibers can draw the same value and lose
@@ -19,8 +19,8 @@ namespace Random
   private def nextNatLive (lo hi : Nat) : IO Nat :=
     generator.modifyGet fun state => randNat state lo hi
 
-  def randomLive : Random where
-    nextNat lo hi := Z.succeed (nextNatLive lo hi) |>.withLabel "nextNat"
+  def live : Random where
+    nextNat lo hi := Z.fromIO (nextNatLive lo hi) |>.withLabel "nextNat"
 
   def nextNatZ (lo hi : Nat) : Z Random Empty Nat :=
     Z.serviceWithZ fun random => random.nextNat lo hi
