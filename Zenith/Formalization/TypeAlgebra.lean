@@ -1,7 +1,7 @@
 import Init.Data.List.Sort.Lemmas
 
 /-!
-Abstract requirement and error-channel algebra for `intersection-types.md`.
+Abstract requirement and error-channel algebra for `core-type-algebra.md`.
 
 This optional module proves the core profile without depending on Zenith's
 runtime representation or public API.

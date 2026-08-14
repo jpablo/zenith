@@ -2,7 +2,7 @@ import Z
 
 /-!
 Compile-time regression cases for the product-environment and error-channel
-encodings described in `docs/intersection-types.md`.
+encodings described in `docs/core-type-algebra.md`.
 -/
 
 namespace Tests.IntersectionTypes

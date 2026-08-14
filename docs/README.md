@@ -12,7 +12,7 @@ The Markdown files explain the current implementation:
   effect semantics.
 * `deferred.md`, `queues.md`, and `streams.md` describe concurrent APIs.
 * `http.md` and `debugging.md` describe optional integrations.
-* `Problems.md`, `variance.md`, and `intersection-types.md` record design
+* `Problems.md`, `variance.md`, and `core-type-algebra.md` record design
   questions and link to their checked Lean artifacts.
 
 Checked formalizations are in `Zenith/Formalization`; compile-time regression

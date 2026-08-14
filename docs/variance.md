@@ -216,7 +216,7 @@ reach the conversion function.
 
 Environment combination remains a separate problem. The complete property
 catalogue and encoding analysis are in
-[`intersection-types.md`](intersection-types.md).
+[`core-type-algebra.md`](core-type-algebra.md).
 
 In Scala, a contravariant environment parameter lets the compiler infer an
 intersection such as `Int & String`. In Zenith, products represent combined

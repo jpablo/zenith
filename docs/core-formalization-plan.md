@@ -2,7 +2,7 @@
 
 This document defines the next formalization steps for the Zenith core type
 algebra. The source specification is in
-[`intersection-types.md`](intersection-types.md).
+[`core-type-algebra.md`](core-type-algebra.md).
 
 ## Goal
 
@@ -61,7 +61,7 @@ Scala and Lean use the same runtime representation.
 | `Zenith/Formalization/SequentialCore.lean` | Pure sequential interpreter model and evaluation laws |
 | `Zenith/Formalization/SequentialMachine.lean` | Pure typed stack machine and model-to-machine proof |
 | `Zenith/Formalization/SequentialRuntimeStack.lean` | Pure-to-production stack correspondence |
-| `docs/intersection-types.md` | User-facing specification and final status |
+| `docs/core-type-algebra.md` | User-facing specification and final status |
 
 Keep the abstract model in the optional `ZenithFormalization` library. Do not
 add it to `Z.lean` during the first milestone.
@@ -282,7 +282,7 @@ the same inferred types.
 
 After the proofs pass:
 
-1. Update the proof-obligation list in `intersection-types.md`.
+1. Update the proof-obligation list in `core-type-algebra.md`.
 2. Mark each obligation as abstract, production-connected, or deferred.
 3. State the selected error representation and its limit.
 4. Add links from each specification claim to its Lean theorem.
@@ -334,7 +334,7 @@ Phases 1 through 7 are complete.
    ordering, and duplicate removal for representative `zdo` programs.
 5. `VarianceLaws.lean` checks `Z.adapt`, `Z.widen`, all focused `CoeTC`
    directions, the combined coercion, and `Z.flatMapMeetJoin`.
-6. `intersection-types.md` records which claims are kernel-proved,
+6. `core-type-algebra.md` records which claims are kernel-proved,
    production-connected, or fixture-checked.
 
 The remaining limitation is intentional: an arbitrary Lean `Type` has no

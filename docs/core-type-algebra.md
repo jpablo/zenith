@@ -1,8 +1,9 @@
-# Scala Intersection Types and Lean
+# Zenith Core Type Algebra and Scala Intersection Types
 
-This document catalogues the properties that an encoding of Scala
-intersection types can need. It then separates the complete problem from the
-smaller environment-combination problem in Zenith.
+This document specifies Zenith's core type algebra. It begins with the
+properties that an encoding of Scala intersection types can need, then
+defines the smaller requirement, error, variance, and service-row model that
+Zenith uses.
 
 The abstract formalization is in
 [`Zenith/Formalization/TypeAlgebra.lean`](../Zenith/Formalization/TypeAlgebra.lean).
