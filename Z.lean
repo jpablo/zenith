@@ -14,6 +14,7 @@ import Z.KeyedLayerMake
 
 namespace Fiber
   
+  /-- Wait for the final successful value or typed failure from `self`. -/
   def join  (self: Fiber E A): Z Unit E A := 
     Z.async self.awaitAsync |>.withLabel s!"⌛ ⑂ Fiber.join ({self.fiberId})"
 

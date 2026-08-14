@@ -13,6 +13,7 @@ the typed error channel. `asyncInterrupt` connects the signal to active work,
 and `ensuring` masks the signal while its finalizer runs.
 -/
 
+/-- The low-level runtime representation of an `HEIO` result. -/
 inductive HEIO.Out.{ue, ua}
     (E : Type ue)
     (A : Type ua) : Type (max ue ua) where
@@ -20,6 +21,7 @@ inductive HEIO.Out.{ue, ua}
   | error : E -> Void IO.RealWorld -> HEIO.Out E A
   | interrupted : Void IO.RealWorld -> HEIO.Out E A
 
+/-- A world-free completed result from an `HEIO` action. -/
 inductive HEIO.Result.{ue, ua}
     (E : Type ue)
     (A : Type ua) : Type (max ue ua) where
@@ -27,16 +29,19 @@ inductive HEIO.Result.{ue, ua}
   | error : E -> HEIO.Result E A
   | interrupted : HEIO.Result E A
 
+/-- A shared interruption request and its registered cancellation actions. -/
 structure HEIO.Interruption where
   private mk ::
   interrupted : IO.Ref Bool
   nextHandlerId : IO.Ref Nat
   handlers : IO.Ref (List (Nat × IO Unit))
 
+/-- Runtime context that controls interruption for an `HEIO` action. -/
 structure HEIO.Runtime where
   interruption : Option HEIO.Interruption := none
   interruptible : Bool := true
 
+/-- An effect whose error and successful value may live in separate universes. -/
 def HEIO.{ue, ua}
     (E : Type ue)
     (A : Type ua) : Type (max ue ua) :=
@@ -47,11 +52,13 @@ namespace HEIO
 private def Interruption.newBase : BaseIO Interruption := do
   return .mk (← IO.mkRef false) (← IO.mkRef 0) (← IO.mkRef [])
 
+/-- Allocate a new interruption signal. -/
 def Interruption.new : IO Interruption :=
   fun world =>
     match Interruption.newBase world with
     | .mk interruption world => .ok interruption world
 
+/-- Report whether interruption has been requested. -/
 def Interruption.isRequested (self : Interruption) : BaseIO Bool :=
   self.interrupted.get
 
@@ -81,6 +88,7 @@ private def Interruption.requestBase (self : Interruption) : BaseIO Unit := do
       let _ ← IO.wait task
       pure ()
 
+/-- Request interruption and run each registered cancellation action once. -/
 def Interruption.request (self : Interruption) : IO Unit :=
   fun world =>
     match self.requestBase world with
@@ -240,18 +248,22 @@ def fork
 def wait (task : Task A) : HEIO E A :=
   liftHST (Prim.wait task)
 
+/-- Create a successful `HEIO` action. -/
 def pure (value : A) : HEIO E A :=
   fun _ world => .ok value world
 
+/-- End an `HEIO` action with interruption. -/
 def interrupt : HEIO E A :=
   fun _ world => .interrupted world
 
+/-- End with interruption when the current runtime has a pending request. -/
 def checkInterrupted : HEIO E Unit :=
   fun runtime world =>
     match runtime.shouldInterrupt world with
     | .mk true world => .interrupted world
     | .mk false world => .ok () world
 
+/-- Run `next` after a successful result. -/
 def bind
     (self : HEIO E A)
     (next : A -> HEIO E B) : HEIO E B :=
@@ -261,14 +273,17 @@ def bind
     | .error error world => .error error world
     | .interrupted world => .interrupted world
 
+/-- Transform a successful result. -/
 def map
     (f : A -> B)
     (self : HEIO E A) : HEIO E B :=
   bind self fun value => pure (f value)
 
+/-- End an `HEIO` action with a typed error. -/
 def throw (error : E) : HEIO E A :=
   fun _ world => .error error world
 
+/-- Recover from a typed error while preserving interruption. -/
 def tryCatch
     (self : HEIO E A)
     (handler : E -> HEIO E A) : HEIO E A :=
@@ -278,6 +293,7 @@ def tryCatch
     | .error error world => handler error runtime world
     | .interrupted world => .interrupted world
 
+/-- Transform typed errors while preserving success and interruption. -/
 def mapError
     (f : E -> E₁)
     (self : HEIO E A) : HEIO E₁ A :=

@@ -234,6 +234,7 @@ def canMerge (left : List Entry) : List Entry -> Bool
   | head :: tail =>
       isFresh head.key left && canMerge left tail
 
+/-- State that two rows have no matching stable service keys. -/
 def Disjoint (left right : List Entry) : Prop :=
   canMerge left right = true
 
@@ -387,6 +388,7 @@ class CanProvide
 
 namespace CanProvide
 
+/-- Project the required row from an available row using this evidence. -/
 def provide
     (self : CanProvide available required)
     (environment : Environment available) :
@@ -446,9 +448,11 @@ structure Builder.{u} (entries : List Entry.{u}) where
 
 namespace Builder
 
+/-- Start a builder for an empty keyed service environment. -/
 def empty : Builder [] :=
   ⟨Environment.empty⟩
 
+/-- Add a service whose key is not yet present in the builder. -/
 def addFresh
     (builder : Builder entries)
     (entry : Entry)
@@ -465,6 +469,7 @@ def addExisting
     (_value : entry.Service) : Builder entries :=
   builder
 
+/-- Convert the completed builder into a closed layer. -/
 def toLayer (builder : Builder entries) :
     Layer Unit Empty (Environment entries) :=
   Layer.succeed builder.environment
@@ -716,6 +721,7 @@ def andThenKeepFreshMeetJoin
     adaptedRight.map fun rightEnvironment =>
       Environment.merge leftEnvironment rightEnvironment⟩
 
+/-- View a keyed layer as an ordinary layer that provides its full row. -/
 def toLayer (layer : KeyedLayer R E entries) :
     Layer R E (Environment entries) :=
   layer.layer

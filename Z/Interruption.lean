@@ -8,11 +8,13 @@ structure Interruption where
   interruptDelivered : IO.Ref Bool
   interruptHandler : IO.Ref (IO Unit)
 
+/-- Render the current interruption state for diagnostics. -/
 def Interruption.toString (self : Interruption) : IO String := do
   let interrupted ← self.interrupted.get
   let isInterruptible ← self.isInterruptible.get
   pure s!"Interruption (interrupted: {interrupted}, isInterruptible: {isInterruptible}, isInterrupting: {self.isInterrupting})"
 
+/-- Report whether the interpreter must now deliver interruption. -/
 def Interruption.shouldInterrupt (self : Interruption) : IO Bool := do
   if self.isInterrupting then
     pure false

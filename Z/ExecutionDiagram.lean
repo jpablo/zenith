@@ -1,6 +1,7 @@
 import Z.Util
 import Z.Interruption
 
+/-- Hooks that receive events from the Zenith interpreter. -/
 structure ExecutionDiagram (A : Type) where
   /-- Whether the interpreter must prepare and record diagram data. -/
   enabled : Bool
@@ -29,6 +30,7 @@ def newNodeId (fiberId : FiberId) : IO NodeId := do
   let time ← IO.monoNanosNow.toIO
   pure s!"{fiberId}-{time}"
 
+/-- A disabled diagram that ignores every interpreter event. -/
 def empty : ExecutionDiagram (IO Unit) where
   enabled := false
   color _ := ""

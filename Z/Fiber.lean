@@ -4,7 +4,7 @@ import Init.System.Promise
 
 open IO (userError)
 
-/-- Keeps track of a computation in progress and listeners -/
+/-- The lifecycle state of a running computation and its listeners. -/
 inductive FiberState (E A: Type): Type
   | created
 
@@ -15,6 +15,7 @@ inductive FiberState (E A: Type): Type
   | done (result: Exit E A)
 
 
+/-- Report whether the fiber has not yet completed. -/
 def FiberState.isRunning (self: FiberState E A) : IO Bool := do 
   match self with
   | .created        => return true
@@ -22,7 +23,7 @@ def FiberState.isRunning (self: FiberState E A) : IO Bool := do
   | .done _         => return false
     
 
-/-- A `Fiber` is the immutable handle to the mutable FiberState -/
+/-- A handle for observing, joining, and interrupting one running computation. -/
 structure Fiber (E A: Type) where
   fiberId    : FiberId
   state      : IO.Ref (FiberState E A)
@@ -61,6 +62,7 @@ namespace Fiber
       | .running _ observers => .running task observers
       | .done result => .done result
 
+  /-- Render mutable fiber state for diagnostics. -/
   def showState: IO String := do
     match (<- self.state.get) with
       | .created => return s!"Fiber: (fiberId: {self.fiberId}) (interrupted: {<- self.interrupted.get}) (state: .created)"
@@ -74,6 +76,7 @@ namespace Fiber
     | none => throw (userError
         s!"Internal defect: completion promise was dropped for fiber {self.fiberId}")
 
+  /-- Wait until the underlying runtime task is available and completes. -/
   partial def awaitTask (self : Fiber E A) : IO Unit := do
     match <- self.task.get with
       | none => IO.sleep 1 *> awaitTask self
@@ -81,6 +84,7 @@ namespace Fiber
         let _ <- IO.wait task
         return ()
 
+  /-- Request interruption of this fiber. -/
   def requestInterrupt : IO Unit := do
     self.interruptDelivered.set false
     self.interrupted.set true
@@ -130,13 +134,14 @@ namespace Fiber
             catch _ => pure ()
 
 
-  /-- Contains some data needed to interact with Fibers without exposing the types `E`, `A`  -/
+  /-- Type-erased operations for observing and interrupting a fiber. -/
   structure FiberInfo where
     fiberId    : FiberId
     interrupt  : IO Unit
     interrupted: IO Bool
     await      : IO Unit
 
+  /-- Convert this typed fiber handle to its type-erased diagnostic form. -/
   def toFiberInfo: FiberInfo where 
     fiberId     := self.fiberId
     interrupt   := self.requestInterrupt
@@ -146,6 +151,7 @@ namespace Fiber
       return ()
   
 
+  /-- Build the interpreter interruption state that belongs to this fiber. -/
   def toInterruption : IO Interruption := do
     return Interruption.mk
       (interrupted := self.interrupted)

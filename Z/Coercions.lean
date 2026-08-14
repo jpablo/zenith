@@ -5,6 +5,7 @@ class CanConvert (A : Type u) (B : Type v) : Type (max u v) where
 
 infixl:65 " <: " => CanConvert
 
+/-- Eliminate an impossible `Empty` value. -/
 def impossible {T : Empty -> Type _} (e) : T e :=
   Empty.rec T e
 

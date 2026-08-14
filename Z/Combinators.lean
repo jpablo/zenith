@@ -69,6 +69,7 @@ namespace Z
 
   variable (self : Z R E A)
 
+  /-- Fail with the complete structured cause. -/
   def failCause (cause : Cause E) : Z R E Empty :=
     Z.internal.done <| Exit.failure cause
 
@@ -80,12 +81,15 @@ namespace Z
 
   end internal
 
+  /-- Fail with one typed error. -/
   def fail [ToString E] (userError : E): Z Unit E Empty :=
     internal.fail userError
 
+  /-- Terminate with an untyped `IO.Error` defect. -/
   def die (ioe : IO.Error) : Z R Empty Empty :=
     failCause (Cause.die ioe)
 
+  /-- Lift a typed-error handler so it preserves defects and interruption. -/
   def errorHandlerCause
       (errorHandler : E -> Z R E₁ A₁)
       (cause : Cause E) : Z R E₁ A₁ :=
@@ -93,6 +97,7 @@ namespace Z
     | .inl error => errorHandler error
     | .inr unhandled => internal.done <| .failure unhandled
 
+  /-- Handle a typed failure or a successful value with effectful handlers. -/
   def foldM (errorHandler : E -> Z R E₁ A₁) (next : A -> Z R E₁ A₁) : Z R E₁ A₁ :=
     (self.foldCauseM (errorHandlerCause errorHandler) next).withLabel "foldM"
 
@@ -135,19 +140,23 @@ namespace Z
   --       ) 
   --       pure
 
+  /-- A successful effect whose result is `Unit`. -/
   def unit : Z R E Unit :=
     pure ()
 
+  /-- Handle a typed failure or successful value with pure functions. -/
   def fold (errorHandler : E -> A₁) (next : A -> A₁) : Z R E A₁ :=
     self.foldM (errorHandler ∘> pure) (next ∘> pure)
 
+  /-- Handle a complete cause or successful value with pure functions. -/
   def foldCause (errorHandler : Cause E -> A₁) (next : A -> A₁) : Z R Empty A₁ :=
     self.foldCauseM (errorHandler ∘> pure) (next ∘> pure)
 
+  /-- Capture the final success or failure as an `Exit` value. -/
   def exit : Z R Empty (Exit E A) :=
     self.foldCause Exit.failure Exit.success |>.withLabel "exit"
 
-  /-- aka flatMapFailure  -/
+  /-- Handle a typed failure with an effect while preserving defects and interruption. -/
   def catchAll [conversion : A <: A₁]
       (errorHandler : E -> Z R E₁ A₁) : Z R E₁ A₁ :=
     self.foldM errorHandler (pure <| conversion.coe ·) |>.withLabel "catchAll"
@@ -175,21 +184,27 @@ namespace Z
               impossible)
       (fun value => pure (conversion.coe value))
 
+  /-- Run two effects in sequence and combine their successful values. -/
   def zipWith (other : Z R E A₁) (f : A -> A₁ -> A₃) : Z R E A₃ := do
     return f (<- self) (<- other)
 
+  /-- Run two effects in sequence and return both successful values. -/
   def zip (other : Z R E A₁) : Z R E (A × A₁) := do
     self.zipWith other (·, ·) |>.withLabel "zip"
 
+  /-- Expose every failure, defect, and interruption as a typed `Cause`. -/
   def sandbox [ToString E]: Z R (Cause E) A :=
     self.foldCauseM (fun e => fail e) pure
 
+  /-- Convert typed failures into defects with `f`. -/
   def orDieWith (f : E -> IO.Error) : Z R Empty A :=
     self.foldM (fun e => die (R := R) <| f e) pure
 
+  /-- Convert `IO.Error` typed failures into defects. -/
   def orDie (self : Z R IO.Error A): Z R Empty A :=
     self.orDieWith id |>.withLabel "orDie"
 
+  /-- Run `self` once and then repeat it `n` additional times. -/
   def repeatN (n : Nat) (self : Z R E A): Z R E Unit :=
     .withLabel (label := s!"repeatN : {n}") $
     self.flatMap fun _ =>
@@ -198,6 +213,7 @@ namespace Z
       else
         Z.unit
 
+  /-- Convert `some value` to success and `none` to an `IO.Error` failure. -/
   def fromOption (v : Option A): Z Unit IO.Error A :=
     match v with
     | some a => Z.succeed a
@@ -215,6 +231,7 @@ namespace Z
       | .inr a => Z.internal.succeedNow a
       | .inl e => Z.internal.fail (R := R) e
 
+  /-- Lift `IO` and expose an `IO.Error` as a typed failure. -/
   def attempt (io : IO A) (md := mempty): Z Unit IO.Error A :=
     internal.attempt io md
 
@@ -269,18 +286,23 @@ namespace Z
       pure (task, sleeper.stop)).orDie
       |>.withLabel s!"😴 sleep : {toString ms}ms"
 
+  /-- Run an effectful operation with the required service. -/
   def serviceWithM (operation : S -> Z Unit E A) : Z S E A :=
     Z.fromCore fun service => (operation service).close ()
 
+  /-- Compute a pure result from the required service. -/
   def serviceWith (operation : S -> A) : Z S E A :=
     Z.fromCore fun service => ZCore.succeedNow' (operation service)
 
+  /-- Read a low-universe service as the successful value. -/
   def service (A) : Z A Empty A :=
     serviceWith id
 
+  /-- Run `self` repeatedly until it fails, dies, or is interrupted. -/
   partial def forever : Z R E A :=
     self *> forever
 
+  /-- Run `finalizer` after `self`, whatever its final exit. -/
   def ensuring (finalizer : Z R Empty A₀): Z R E A :=
     Z.fromCore fun environment =>
       (self.close environment).ensuring (finalizer.close environment)
@@ -313,9 +335,11 @@ namespace Z
               impossible)
           (fun _ => Z.internal.succeedNow value))
 
+  /-- Make `self` interruptible while it runs. -/
   def interruptible : Z R E A :=
     self.setInterruptStatus .interruptible |>.withLabel "🛡 ↓ interruptible"
 
+  /-- Defer interruption while `self` runs. -/
   def uninterruptible : Z R E A :=
     self.setInterruptStatus .uninterruptible |>.withLabel "🛡 ↑ uninterruptible"
 

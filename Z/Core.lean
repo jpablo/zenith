@@ -13,6 +13,7 @@ unchanged.
 environment closes a `Z` value into a `ZCore Unit` tree.
 -/
 
+/-- The low-level executable instruction tree for a closed Zenith effect. -/
 inductive ZCore : Type -> Type -> Type -> Type 1 where
   | private internal.done
       (exit : Exit E A)
@@ -66,6 +67,7 @@ inductive ZCore : Type -> Type -> Type -> Type 1 where
 
 namespace ZCore
 
+/-- Transform the metadata stored on the outer instruction. -/
 def updateMetadata
     (f : Metadata -> Metadata)
     (self : ZCore R E A) : ZCore R E A :=
@@ -85,6 +87,7 @@ def updateMetadata
   | internal.provideEnvironment e r md =>
       internal.provideEnvironment e r (f md)
 
+/-- Return the name of the outer instruction for diagnostics. -/
 def showHead : ZCore R E A -> String
   | internal.done _ _ => "done"
   | internal.sync _ _ => "sync"
@@ -98,6 +101,7 @@ def showHead : ZCore R E A -> String
   | internal.currentEnvironment _ => "currentEnvironment"
   | internal.provideEnvironment _ _ _ => "provideEnvironment"
 
+/-- Return the metadata stored on the outer instruction. -/
 def metadata : ZCore R E A -> Metadata
   | internal.done _ md => md
   | internal.sync _ md => md
@@ -111,33 +115,40 @@ def metadata : ZCore R E A -> Metadata
   | internal.currentEnvironment md => md
   | internal.provideEnvironment _ _ md => md
 
+/-- Replace the execution label stored on the outer instruction. -/
 def withLabel (self : ZCore R E A) (label : String) : ZCore R E A :=
   self.updateMetadata fun md => { md with label := label }
 
+/-- Create a completed success with any selected environment and error types. -/
 def succeedNow'
     (value : A)
     (md := Metadata.withLabel "succeedNow") : ZCore R E A :=
   internal.done (.success value) md
 
+/-- Transform the successful value of an instruction tree. -/
 def map (f : A -> B) (self : ZCore R E A) : ZCore R E B :=
   internal.onSuccess self (f ∘> succeedNow') |>.withLabel "map"
 
+/-- Adapt the environment required by an instruction tree. -/
 def contramap
     (f : R₀ -> R₁)
     (effect : ZCore R₁ E A)
     (md := mempty) : ZCore R₀ E A :=
   internal.contramap f effect md
 
+/-- Create a completed result with any selected environment type. -/
 def done'
     (exit : Exit E A)
     (md := mempty) : ZCore R E A :=
   internal.done exit md
 
+/-- Create a completed result that needs no environment. -/
 def done
     (exit : Exit E A)
     (md := mempty) : ZCore Unit E A :=
   done' exit md
 
+/-- Transform each typed failure in an instruction tree. -/
 def mapFailure
     (f : E₀ -> E)
     (self : ZCore R E₀ A) : ZCore R E A :=
@@ -146,11 +157,13 @@ def mapFailure
     (.success ∘> done')
     mempty
 
+/-- Lift raw `IO` into an instruction tree with selected type parameters. -/
 def succeed'
     (io : IO A)
     (md := Metadata.withLabel "succeed") : ZCore R E A :=
   internal.sync io md
 
+/-- Start an instruction tree in a child fiber. -/
 @[match_pattern]
 def fork
     (effect : ZCore R E A)
@@ -158,6 +171,7 @@ def fork
     (md := mempty) : ZCore R Empty (Fiber E A) :=
   internal.fork effect name md
 
+/-- Create an instruction tree from callback registration. -/
 def async
     (registerCallback : Observer E A -> IO Unit)
     (md := mempty) : ZCore R E A :=
@@ -169,18 +183,21 @@ def asyncInterrupt
     (md := mempty) : ZCore R E A :=
   internal.asyncInterrupt registerCallback md
 
+/-- Continue with `next` after a successful instruction result. -/
 def flatMap
     (effect : ZCore R E A)
     (next : A -> ZCore R E A₁)
     (md := Metadata.withLabel "flatMap") : ZCore R E A₁ :=
   internal.onSuccess effect next md
 
+/-- Run an instruction tree with the selected interruption status. -/
 def setInterruptStatus
     (effect : ZCore R E A)
     (interruptStatus : InterruptStatus)
     (md := mempty) : ZCore R E A :=
   internal.setInterruptStatus effect interruptStatus md
 
+/-- Handle either a complete failure cause or a successful value. -/
 def foldCauseM
     (effect : ZCore R E A)
     (errorHandler : Cause E -> ZCore R E₁ A₁)
@@ -188,12 +205,14 @@ def foldCauseM
     (md := Metadata.withLabel "foldCauseM") : ZCore R E₁ A₁ :=
   internal.onSuccessAndFailure effect errorHandler next md
 
+/-- Read the current low-universe instruction environment. -/
 def environment
     (R : Type)
     (md := Metadata.withLabel "environment") :
     ZCore R Empty (Environment R) :=
   internal.currentEnvironment md
 
+/-- Supply the complete environment required by an instruction tree. -/
 def provideEnvironment
     (effect : ZCore R E A)
     (env : Environment R)
@@ -221,6 +240,7 @@ def ZTask (A : Type) : Type 1 := Z Unit IO.Error A
 /-- An effect that cannot fail. -/
 def URIO (R : Type u) (A : Type) : Type (max 1 u) := Z R Empty A
 
+/-- An effect with no dependencies and no typed failures. -/
 def UIO (A : Type) : Type 1 := Z Unit Empty A
 
 namespace Z
@@ -230,11 +250,13 @@ def fromCore
     (close : R -> ZCore Unit E A) : Z R E A :=
   ⟨close⟩
 
+/-- Transform the execution metadata attached to `self`. -/
 def updateMetadata
     (f : Metadata -> Metadata)
     (self : Z R E A) : Z R E A :=
   ⟨fun environment => (self.close environment).updateMetadata f⟩
 
+/-- Replace the execution label attached to `self`. -/
 def withLabel (self : Z R E A) (label : String) : Z R E A :=
   self.updateMetadata fun md => { md with label := label }
 
@@ -248,12 +270,15 @@ def succeedNow
 
 end internal
 
+/-- Create a pure successful effect. -/
 def succeed (value : A) : Z Unit Empty A :=
   internal.succeedNow value
 
+/-- Transform the successful value of `self`. -/
 def map (f : A -> B) (self : Z R E A) : Z R E B :=
   ⟨fun environment => (self.close environment).map f⟩
 
+/-- Adapt an effect to a larger or differently shaped environment. -/
 def contramap
     (f : R₀ -> R₁)
     (effect : Z R₁ E A)
@@ -271,11 +296,13 @@ def done
 
 end internal
 
+/-- Create an already-completed effect from an `Exit` value. -/
 def done
     (exit : Exit E A)
     (md := mempty) : Z Unit E A :=
   internal.done exit md
 
+/-- Transform every typed failure stored in the cause of `self`. -/
 def mapFailure
     (f : E₀ -> E)
     (self : Z R E₀ A) : Z R E A :=
@@ -291,17 +318,25 @@ def succeed
 
 end internal
 
+/--
+Lift raw `IO` into Zenith without a typed error channel.
+
+An `IO.Error` stays a defect. Use `Z.attempt` to expose it as `IO.Error` in
+the typed error channel.
+-/
 def fromIO
     (io : IO A)
     (md := Metadata.withLabel "fromIO") : Z Unit Empty A :=
   internal.succeed io md
 
+/-- Start `effect` in a child fiber and return its handle. -/
 def fork
     (effect : Z R E A)
     (name : String)
     (md := mempty) : Z R Empty (Fiber E A) :=
   ⟨fun environment => ZCore.fork (effect.close environment) name md⟩
 
+/-- Create an effect from a callback registration function. -/
 def async
     (registerCallback : Observer E A -> IO Unit)
     (md := mempty) : Z R E A :=
@@ -313,6 +348,7 @@ def asyncInterrupt
     (md := mempty) : Z R E A :=
   ⟨fun _ => ZCore.asyncInterrupt registerCallback md⟩
 
+/-- Run `next` after a successful result from `effect`. -/
 def flatMap
     (effect : Z R E A)
     (next : A -> Z R E A₁)
@@ -362,6 +398,7 @@ def flatMapMeetJoin
   (effect.contramap meet.left).mapFailure join.left |>.flatMap fun value =>
     (next value).contramap meet.right |>.mapFailure join.right
 
+/-- Run `effect` with the selected interruption status. -/
 def setInterruptStatus
     (effect : Z R E A)
     (interruptStatus : InterruptStatus)
@@ -372,6 +409,7 @@ def setInterruptStatus
       interruptStatus
       md⟩
 
+/-- Handle success and the complete structured failure cause of an effect. -/
 def foldCauseM
     (effect : Z R E A)
     (errorHandler : Cause E -> Z R E₁ A₁)
@@ -395,12 +433,14 @@ def environment
   ⟨fun environment =>
     ZCore.map (fun _ => environment) (ZCore.environment Unit md)⟩
 
+/-- Supply the complete environment required by `effect`. -/
 def provideEnvironment
     (effect : Z R E A)
     (environment : Environment R)
     (md := mempty) : Z Unit E A :=
   ⟨fun _ => ZCore.provideEnvironment (effect.close environment) () md⟩
 
+/-- Run raw `IO`, then select the next Zenith effect from its value. -/
 def flatMapIO
     (io : IO A)
     (f : A -> Z R E B) : Z R E B :=
@@ -449,6 +489,7 @@ instance (priority := low)
     CoeTC (Z R₁ E₀ A₀) (Z R₀ E₁ A₁) :=
   ⟨adapt environment.provide error.coe success.coe⟩
 
+/-- Widen the impossible error channel of `self` to `E`. -/
 def widenError (self : Z R Empty A) : Z R E A :=
   self.mapFailure impossible
 

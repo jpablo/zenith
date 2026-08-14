@@ -2,7 +2,7 @@
 
 deriving instance BEq for IO.Error
 
-/-- Cause of error -/
+/-- A typed failure, defect, interruption, or composition of such failures. -/
 inductive Cause (E: Type)
   | fail (userError: E)
   | die (ioError: IO.Error)
@@ -11,6 +11,7 @@ inductive Cause (E: Type)
   | parallel (left right : Cause E)
   deriving BEq
 
+/-- Render a cause for diagnostics. -/
 def Cause.show [ToString E] : Cause E -> String
   | fail e => s!"Cause.fail ({toString e})"
   | die ioe => s!"Cause.die ({toString ioe})"
@@ -24,6 +25,7 @@ instance [ToString E] : ToString (Cause E) :=
   ⟨Cause.show⟩ 
  
 
+/-- Transform typed failures while preserving defects and interruption. -/
 def Cause.map (f: E -> E₁) : Cause E -> Cause E₁
   | fail e => fail (f e)
   | die ioe => die ioe
@@ -32,6 +34,7 @@ def Cause.map (f: E -> E₁) : Cause E -> Cause E₁
   | parallel left right => parallel (left.map f) (right.map f)
 
 
+/-- Return the first typed failure contained in a cause, if any. -/
 def Cause.failureOption: Cause E -> Option E
   | fail e => some e
   | die _ | interrupt => none
@@ -40,6 +43,7 @@ def Cause.failureOption: Cause E -> Option E
       | some error => some error
       | none => right.failureOption
 
+/-- Return a typed failure, or the remaining cause when no typed failure exists. -/
 def Cause.failureOrCause: Cause E -> E ⊕ (Cause R)
   | fail e => .inl e
   | die ioe => .inr (die ioe)

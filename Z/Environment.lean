@@ -32,6 +32,7 @@ infixl:65 " ∣ " => IsComponent
 
 namespace IsComponent
 
+  /-- Derive a component projection by mapping an existing component. -/
   def contramap [component: A ∣ B] (f: A -> C): C ∣ B :=
     ⟨get ∘> f⟩
 
@@ -157,25 +158,33 @@ namespace Environment
 
   end Meet
 
+  /-- The empty ordinary environment. -/
   def EmptyEnv: Type := Environment Unit
   
+  /-- Construct the empty ordinary environment. -/
   def empty: EmptyEnv := 
     ()
 
+  /-- Add the first service to an empty environment. -/
   def EmptyEnv.add (self: EmptyEnv) (a: A) : Environment A := a
 
+  /-- Prepend one service to an ordinary product environment. -/
   def add (self: Environment T) (a: A) : Environment (A × T) := 
     ⟨a, self⟩ 
 
+  /-- Prefix `self` with the services in `ea`. -/
   def concat (self: Environment T) (ea: Environment A) : Environment (A × T) := 
     ⟨ea, self⟩ 
 
+  /-- Project one required component from an ordinary environment. -/
   def get (self: Environment T) (A) [component: A ∣ T] : A :=
     component.get self
 
+  /-- Construct an ordinary environment with one service. -/
   def of (a: A) : Environment A := 
     empty.add a
 
+  /-- Transform the runtime representation of an environment. -/
   def map (f: A -> B): Environment A -> Environment B := f
 
   /--

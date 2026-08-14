@@ -1,5 +1,6 @@
 import Z.Combinators
 
+/-- Random-number operations required by programs that need generated values. -/
 structure Random where
   nextNat (lo hi : Nat) : UIO Nat
 
@@ -19,9 +20,11 @@ namespace Random
   private def nextNatLive (lo hi : Nat) : IO Nat :=
     generator.modifyGet fun state => randNat state lo hi
 
+  /-- The live random-number implementation with synchronized generator state. -/
   def live : Random where
     nextNat lo hi := Z.fromIO (nextNatLive lo hi) |>.withLabel "nextNat"
 
+  /-- Draw a natural number through the required `Random` service. -/
   def nextNatM (lo hi : Nat) : Z Random Empty Nat :=
     Z.serviceWithM fun random => random.nextNat lo hi
 

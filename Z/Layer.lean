@@ -7,12 +7,14 @@ A layer builds a scoped service inside `HEIO`. The input and output can live
 in any universe. Layer failures retain the complete `Cause E` value.
 -/
 
+/-- A built layer output together with its release action. -/
 structure Layer.Resource.{u}
     (E : Type)
     (A : Type u) : Type u where
   value : A
   release : HEIO (Cause E) Unit
 
+/-- A scoped constructor from an input environment to one output service. -/
 structure Layer.{uin, uout}
     (RIn : Type uin)
     (E : Type)
@@ -23,18 +25,21 @@ namespace Layer
 
 namespace Resource
 
+/-- Pair a value with a release action. -/
 def make
     (value : A)
     (release : HEIO (Cause E) Unit := HEIO.pure ()) :
     Resource E A :=
   { value, release }
 
+/-- Transform the resource value without changing its release action. -/
 def map
     (f : A -> B)
     (self : Resource E A) : Resource E B :=
   { value := f self.value
     release := self.release }
 
+/-- Translate typed failures in the resource release action. -/
 def mapError
     (f : E -> E₁)
     (self : Resource E A) : Resource E₁ A :=
@@ -100,6 +105,7 @@ private def releaseMemoized
       | .ready resource => resource.release
       | .empty | .failed _ => HEIO.pure ()
 
+/-- Build a layer from an `HEIO` action with no custom release action. -/
 def fromBuild
     (build : RIn -> HEIO (Cause E) ROut) :
     Layer RIn E ROut :=
@@ -135,16 +141,20 @@ def memoize
         HEIO.pure <|
           Resource.make shared (releaseMemoized mutex.down cache)⟩
 
+/-- Create a closed layer that provides `value`. -/
 def succeed (value : A) : Layer Unit Empty A :=
   fromBuild fun _ => HEIO.pure value
 
+/-- Create a layer that fails with `cause` when built. -/
 def failCause (cause : Cause E) : Layer R E A :=
   fromBuild fun _ => HEIO.throw cause
 
+/-- Delay evaluation of `layer` until this layer is built. -/
 def suspend
     (layer : Thunk (Layer R E A)) : Layer R E A :=
   ⟨fun environment => layer.get.build environment⟩
 
+/-- Adapt the input environment required to build a layer. -/
 def contramap
     (f : R₀ -> R)
     (self : Layer R E A) : Layer R₀ E A :=
@@ -154,6 +164,7 @@ instance [conversion : R₀ <: R] :
     CoeTC (Layer R E A) (Layer R₀ E A) :=
   ⟨contramap conversion.coe⟩
 
+/-- Transform typed failures from layer acquisition and release. -/
 def mapError
     (f : E -> E₁)
     (self : Layer R E A) : Layer R E₁ A :=
@@ -165,6 +176,7 @@ instance [conversion : E <: E₁] :
     CoeTC (Layer R E A) (Layer R E₁ A) :=
   ⟨mapError conversion.coe⟩
 
+/-- Build `self`, then build the next layer from its output. -/
 def flatMap
     (self : Layer R E A)
     (next : A -> Layer R E B) : Layer R E B :=
@@ -178,6 +190,7 @@ def share
     (use : Layer R E A -> Layer R E B) : Layer R E B :=
   self.memoize.flatMap use
 
+/-- Transform a layer output without changing its lifetime. -/
 def map
     (self : Layer R E A)
     (f : A -> B) : Layer R E B :=
@@ -355,6 +368,7 @@ def zipWithPar
                     HEIO.bind (HEIO.wait rightTask) fun rightResult =>
                       finishParallel first leftResult rightResult f⟩
 
+/-- Build a pure, infallible layer from its input environment. -/
 def fromFunction (f : R -> A) : Layer R Empty A :=
   fromBuild fun environment => HEIO.pure (f environment)
 
@@ -390,6 +404,7 @@ def acquireReleaseEffect
       (runZ "layer-release" (release value) environment).mapError
         (Cause.map impossible))
 
+/-- Build a low-universe service environment with a Zenith effect. -/
 def fromEnvironment
     (effect : Z R E (Environment A)) : Layer R E A :=
   fromEffect effect
