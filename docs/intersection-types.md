@@ -579,7 +579,7 @@ It now defines the two syntax sorts and proves their preorder, equivalence,
 GLB, and LUB laws. The next step is normalization, followed by connections to
 production service rows and the error representation. The ordered
 implementation plan is in
-[`intersection-formalization-plan.md`](intersection-formalization-plan.md).
+[`core-formalization-plan.md`](core-formalization-plan.md).
 
 The issue-sync case combines stable environments, normalized errors, ordered
 catch chains, and automatic layer composition in a larger program.

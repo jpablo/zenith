@@ -1,4 +1,4 @@
-# Zenith Core Type Algebra Formalization Plan
+# Zenith Core Formalization Plan
 
 This document defines the next formalization steps for the Zenith core type
 algebra. The source specification is in
