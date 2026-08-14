@@ -241,15 +241,32 @@ to runtime values.
 
 ### Checked status
 
-The companion Lean file now proves obligations 1 through 4 for the abstract
-`Requirement` and `ErrorType` syntax. In particular, it proves the two
-subtyping preorders, equivalence from mutual subtyping, requirement
-intersection as a greatest lower bound, and error union as a least upper
-bound.
+The checked work is split into three kinds of evidence. This distinction is
+important because Lean cannot give arbitrary error types a stable public key.
 
-These are semantic proofs over abstract leaves. They do not yet prove that
-production service rows, nested `Sum` error types, or `Z` adaptations implement
-the same relations. Those obligations remain separate work.
+| Obligation | Status | Evidence |
+|---|---|---|
+| 1. Preorders and equivalence | Kernel-proved | [`TypeAlgebra.lean`](../Zenith/Formalization/TypeAlgebra.lean) proves both relations and their equivalences. |
+| 2. Requirement GLB | Kernel-proved | `Requirement.and_isGreatestLowerBound` proves the three GLB rules. |
+| 3. Error LUB | Kernel-proved | `ErrorType.or_isLeastUpperBound` proves the dual LUB rules. |
+| 4. Algebraic identities | Kernel-proved | The same file proves associativity, commutativity, idempotence, and identities up to semantic equivalence. |
+| 5. Normalization | Kernel-proved for ordered leaves | `Canonical.normalize`, `Requirement.normalForm`, and `ErrorType.normalForm` prove semantic preservation, ordered unique output, and idempotence. |
+| 6. Equal normal forms | Kernel-proved for ordered leaves | `Requirement.normalForm_eq_of_equivalent` and `ErrorType.normalForm_eq_of_equivalent` prove exact equality. |
+| 7. Production projection and injection | Production-connected; error canonicalization fixture-checked | [`ServiceRowConnection.lean`](../Zenith/Formalization/ServiceRowConnection.lean) proves the row connection. [`ErrorShape.lean`](../Zenith/Formalization/ErrorShape.lean) proves the nested-`Sum` branch injections. |
+| 8. `Z` variance and composition | Production signature-checked | [`VarianceLaws.lean`](../Zenith/Formalization/VarianceLaws.lean) checks `adapt`, `widen`, coercions, and `flatMapMeetJoin`. |
+
+`ServiceRows.canProvide_nonempty_of_provides` shows that abstract key
+provision plus combined-row coherence has a typed projection. Its selector is
+noncomputable because a proposition about keys does not contain a runtime row
+position. Zenith applications use the existing structural `CanProvide`
+instances, which carry that position directly.
+
+Zenith selects Choice A for errors: public errors remain nested `Sum` values.
+`ErrorShape.Shape` maps those values to the abstract `ErrorType` model.
+`Tests/Variance.lean` has compile-time fixtures for reordered, nested, and
+repeated error sums under `zdo`. The elaborator's order over arbitrary Lean
+type expressions is not a kernel theorem. Stable error keys would be needed
+to make that last property fully kernel-proved.
 
 ### Mapping to the current Zenith implementation
 

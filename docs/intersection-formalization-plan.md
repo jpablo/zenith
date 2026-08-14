@@ -55,7 +55,9 @@ Scala and Lean use the same runtime representation.
 |---|---|
 | `Zenith/Formalization/TypeAlgebra.lean` | Abstract syntax, semantics, and proofs |
 | `Zenith/Formalization/ServiceKeyLaws.lean` | Existing production service-row laws |
-| `Z/ErrorChannelLaws.lean` | New production error-channel laws, if the selected representation permits them |
+| `Zenith/Formalization/ServiceRowConnection.lean` | Connection from keyed rows to abstract requirements |
+| `Zenith/Formalization/ErrorShape.lean` | Checked nested-`Sum` error syntax and interpretation |
+| `Zenith/Formalization/VarianceLaws.lean` | Production `Z` variance and composition signatures |
 | `docs/intersection-types.md` | User-facing specification and final status |
 
 Keep the abstract model in the optional `ZenithFormalization` library. Do not
@@ -312,13 +314,33 @@ Use one reviewable commit for each completed proof boundary:
 
 ## Current status
 
-Phases 1 and 2 are complete in `Zenith/Formalization/TypeAlgebra.lean`. The
-file now
-defines the two abstract syntax trees and proves their preorder, equivalence,
-GLB, and LUB laws. This work is independent of the production runtime.
+Phases 1 through 7 are complete.
 
-## Immediate next change
+1. `TypeAlgebra.lean` defines the abstract requirement and error syntax and
+   proves their preorders, equivalence, GLB, and LUB laws.
+2. The same file provides a shared sorted, duplicate-free list normal form.
+   It proves membership preservation, ordered and unique output, exact
+   normal-form equality for semantically equivalent expressions, and exact
+   merge laws.
+3. `ServiceRowConnection.lean` maps stable service rows to requirements. It
+   proves that typed projections imply abstract provision, and that provision
+   plus combined-row coherence gives nonempty typed projection evidence.
+4. The selected production error representation is Choice A, nested `Sum`.
+   `ErrorShape.lean` gives it checked syntax, an interpretation, and branch
+   injection witnesses. `Tests/Variance.lean` checks elaborator flattening,
+   ordering, and duplicate removal for representative `zdo` programs.
+5. `VarianceLaws.lean` checks `Z.adapt`, `Z.widen`, all focused `CoeTC`
+   directions, the combined coercion, and `Z.flatMapMeetJoin`.
+6. `intersection-types.md` records which claims are kernel-proved,
+   production-connected, or fixture-checked.
 
-Start Phase 3 in `Zenith/Formalization/TypeAlgebra.lean`: add canonical normal forms
-for both syntax trees. This phase needs a lawful total order for leaves, but
-it does not require a production representation decision.
+The remaining limitation is intentional: an arbitrary Lean `Type` has no
+stable public error key. Therefore, the elaborator's canonical nested-`Sum`
+order is checked by compile-time fixtures rather than proved for all Lean
+types in the kernel.
+
+## Next formalization boundary
+
+The next independent boundary is an interpreter-correctness model. It should
+state a small-step or denotational semantics for a pure `ZCore` subset before
+it attempts to relate that model to the executable interpreter.

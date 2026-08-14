@@ -276,6 +276,15 @@ def inferredNormalizedErrorSum := zdo
 
 example : Z Unit (IO.Error ⊕ String) Nat := inferredNormalizedErrorSum
 
+/-- `zdo` flattens a nested error sum and removes a repeated error leaf. -/
+def repeatedNestedError : Z Unit ((String ⊕ IO.Error) ⊕ String) Nat :=
+  Z.succeed 1
+
+def inferredFlattenedErrorSum := zdo
+  repeatedNestedError
+
+example : Z Unit (IO.Error ⊕ String) Nat := inferredFlattenedErrorSum
+
 def inferredAllBranches (useString : Bool) := zdo
   if useString then
     stringAction

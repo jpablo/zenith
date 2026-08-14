@@ -1,3 +1,5 @@
+import Init.Data.List.Sort.Lemmas
+
 /-!
 Abstract requirement and error-channel algebra for `intersection-types.md`.
 
@@ -76,6 +78,287 @@ theorem lubCommutative
   aboveRight := isLub.aboveLeft
   least candidate aboveRight aboveLeft :=
     isLub.least candidate aboveLeft aboveRight
+
+/-! ## Canonical finite normal forms -/
+
+namespace Canonical
+
+variable {Atom : Type u}
+
+/-- The non-strict comparison used to sort normal-form atoms. -/
+def le [Ord Atom] (left right : Atom) : Bool :=
+  (compare left right).isLE
+
+/-- A canonical normal form stores its atoms as an ordered unique list. -/
+abbrev NormalForm (Atom : Type u) := List Atom
+
+/-- Remove duplicate atoms while preserving the remaining list order. -/
+def deduplicate [DecidableEq Atom] : List Atom -> List Atom
+  | [] => []
+  | head :: tail =>
+      let normalizedTail := deduplicate tail
+      if head ∈ normalizedTail then normalizedTail else head :: normalizedTail
+
+/-- Sort and deduplicate a finite collection of atoms. -/
+def normalize [DecidableEq Atom] [Ord Atom] (atoms : List Atom) :
+    NormalForm Atom :=
+  List.mergeSort (deduplicate atoms) le
+
+/-- Combine two normal forms and normalize the result. -/
+def merge [DecidableEq Atom] [Ord Atom]
+    (left right : NormalForm Atom) : NormalForm Atom :=
+  normalize (left ++ right)
+
+/-- The order invariant of a normal form. -/
+def Ordered [Ord Atom] (atoms : NormalForm Atom) : Prop :=
+  atoms.Pairwise fun left right => le left right = true
+
+/-- The uniqueness invariant of a normal form. -/
+def Unique (atoms : NormalForm Atom) : Prop :=
+  atoms.Nodup
+
+private theorem mem_deduplicate
+    [DecidableEq Atom]
+    {atom : Atom}
+    (atoms : List Atom) :
+    atom ∈ deduplicate atoms ↔ atom ∈ atoms := by
+  induction atoms with
+  | nil => simp [deduplicate]
+  | cons head tail inductionHypothesis =>
+      simp only [deduplicate]
+      split
+      · next present =>
+          constructor
+          · intro membership
+            exact List.mem_cons.mpr (.inr (inductionHypothesis.mp membership))
+          · intro membership
+            rcases List.mem_cons.mp membership with equality | membership
+            · subst atom
+              exact present
+            · exact inductionHypothesis.mpr membership
+      · next _ =>
+          constructor
+          · intro membership
+            rcases List.mem_cons.mp membership with equality | membership
+            · exact List.mem_cons.mpr (Or.inl equality)
+            · exact List.mem_cons.mpr
+                (Or.inr (inductionHypothesis.mp membership))
+          · intro membership
+            rcases List.mem_cons.mp membership with equality | membership
+            · exact List.mem_cons.mpr (Or.inl equality)
+            · exact List.mem_cons.mpr
+                (Or.inr (inductionHypothesis.mpr membership))
+
+private theorem nodup_deduplicate
+    [DecidableEq Atom]
+    (atoms : List Atom) :
+    (deduplicate atoms).Nodup := by
+  induction atoms with
+  | nil => simp [deduplicate]
+  | cons head tail inductionHypothesis =>
+      simp only [deduplicate]
+      split
+      · exact inductionHypothesis
+      · next absent =>
+          exact List.nodup_cons.mpr ⟨absent, inductionHypothesis⟩
+
+/-- Normalization preserves atom membership. -/
+@[simp]
+theorem mem_normalize
+    [DecidableEq Atom]
+    [Ord Atom]
+    {atom : Atom}
+    {atoms : List Atom} :
+    atom ∈ normalize atoms ↔ atom ∈ atoms := by
+  simp [normalize, mem_deduplicate]
+
+/-- Normalization returns a duplicate-free list. -/
+theorem unique_normalize
+    [DecidableEq Atom]
+    [Ord Atom]
+    (atoms : List Atom) :
+    Unique (normalize atoms) :=
+  (List.mergeSort_perm (deduplicate atoms) le).symm.nodup
+    (nodup_deduplicate atoms)
+
+private theorem le_transitive
+    [Ord Atom]
+    [Std.TransOrd Atom]
+    (left middle right : Atom) :
+    le left middle = true → le middle right = true → le left right = true :=
+  Std.TransOrd.isLE_trans
+
+private theorem le_total
+    [Ord Atom]
+    [Std.TransOrd Atom]
+    (left right : Atom) :
+    le left right || le right left := by
+  cases comparison : compare left right with
+  | lt => simp [le, comparison]
+  | eq => simp [le, comparison]
+  | gt =>
+      have reverse : compare right left = .lt :=
+        Std.OrientedCmp.lt_of_gt comparison
+      simp [le, comparison, reverse]
+
+/-- Normalization returns a list ordered by the selected atom comparison. -/
+theorem ordered_normalize
+    [DecidableEq Atom]
+    [Ord Atom]
+    [Std.TransOrd Atom]
+    (atoms : List Atom) :
+    Ordered (normalize atoms) :=
+  List.pairwise_mergeSort le_transitive le_total (deduplicate atoms)
+
+private theorem perm_of_unique_same_members
+    [DecidableEq Atom]
+    [BEq Atom]
+    [LawfulBEq Atom]
+    {left right : List Atom}
+    (leftUnique : left.Nodup)
+    (rightUnique : right.Nodup)
+    (sameMembers : ∀ atom, atom ∈ left ↔ atom ∈ right) :
+    List.Perm left right := by
+  rw [List.perm_iff_count]
+  intro atom
+  rw [leftUnique.count, rightUnique.count]
+  by_cases leftMembership : atom ∈ left
+  · have rightMembership := (sameMembers atom).mp leftMembership
+    simp [leftMembership, rightMembership]
+  · have rightNonMembership : atom ∉ right :=
+      fun rightMembership => leftMembership ((sameMembers atom).mpr rightMembership)
+    simp [leftMembership, rightNonMembership]
+
+private theorem le_antisymmetric
+    [Ord Atom]
+    [Std.TransOrd Atom]
+    [Std.LawfulEqOrd Atom]
+    {left right : Atom} :
+    le left right = true → le right left = true → left = right := by
+  intro leftBelowRight rightBelowLeft
+  apply Std.LawfulEqOrd.eq_of_compare
+  exact Std.OrientedCmp.isLE_antisymm leftBelowRight rightBelowLeft
+
+/-- Ordered unique lists with the same atoms are exactly equal. -/
+theorem eq_of_ordered_unique_same_members
+    [DecidableEq Atom]
+    [BEq Atom]
+    [LawfulBEq Atom]
+    [Ord Atom]
+    [Std.TransOrd Atom]
+    [Std.LawfulEqOrd Atom]
+    {left right : NormalForm Atom}
+    (leftOrdered : Ordered left)
+    (rightOrdered : Ordered right)
+    (leftUnique : Unique left)
+    (rightUnique : Unique right)
+    (sameMembers : ∀ atom, atom ∈ left ↔ atom ∈ right) :
+    left = right :=
+  List.Perm.eq_of_pairwise
+    (fun _ _ _ _ => le_antisymmetric)
+    leftOrdered rightOrdered
+    (perm_of_unique_same_members leftUnique rightUnique sameMembers)
+
+/-- Normalization is exactly idempotent. -/
+theorem normalize_idempotent
+    [DecidableEq Atom]
+    [BEq Atom]
+    [LawfulBEq Atom]
+    [Ord Atom]
+    [Std.TransOrd Atom]
+    [Std.LawfulEqOrd Atom]
+    (atoms : List Atom) :
+    normalize (normalize atoms) = normalize atoms :=
+  eq_of_ordered_unique_same_members
+    (ordered_normalize _)
+    (ordered_normalize _)
+    (unique_normalize _)
+    (unique_normalize _)
+    (fun _ => by simp)
+
+/-- Equal atom membership gives exactly equal canonical normal forms. -/
+theorem normalize_eq_of_same_members
+    [DecidableEq Atom]
+    [BEq Atom]
+    [LawfulBEq Atom]
+    [Ord Atom]
+    [Std.TransOrd Atom]
+    [Std.LawfulEqOrd Atom]
+    {left right : List Atom}
+    (sameMembers : ∀ atom, atom ∈ left ↔ atom ∈ right) :
+    normalize left = normalize right :=
+  eq_of_ordered_unique_same_members
+    (ordered_normalize _)
+    (ordered_normalize _)
+    (unique_normalize _)
+    (unique_normalize _)
+    (fun atom => (mem_normalize.trans <| (sameMembers atom).trans
+      mem_normalize.symm))
+
+/-- Normal-form merge is exactly associative. -/
+theorem merge_assoc
+    [DecidableEq Atom]
+    [BEq Atom]
+    [LawfulBEq Atom]
+    [Ord Atom]
+    [Std.TransOrd Atom]
+    [Std.LawfulEqOrd Atom]
+    (first second third : NormalForm Atom) :
+    merge (merge first second) third = merge first (merge second third) :=
+  normalize_eq_of_same_members fun atom => by
+    simp [merge, List.mem_append, or_assoc]
+
+/-- Normal-form merge is exactly commutative. -/
+theorem merge_comm
+    [DecidableEq Atom]
+    [BEq Atom]
+    [LawfulBEq Atom]
+    [Ord Atom]
+    [Std.TransOrd Atom]
+    [Std.LawfulEqOrd Atom]
+    (left right : NormalForm Atom) :
+    merge left right = merge right left :=
+  normalize_eq_of_same_members fun atom => by
+    simp [List.mem_append, or_comm]
+
+/-- Normal-form merge is exactly idempotent. -/
+theorem merge_idempotent
+    [DecidableEq Atom]
+    [BEq Atom]
+    [LawfulBEq Atom]
+    [Ord Atom]
+    [Std.TransOrd Atom]
+    [Std.LawfulEqOrd Atom]
+    (atoms : NormalForm Atom) :
+    merge atoms atoms = normalize atoms :=
+  normalize_eq_of_same_members fun atom => by
+    simp [List.mem_append]
+
+/-- The empty normal form is the exact merge identity. -/
+theorem merge_empty_right
+    [DecidableEq Atom]
+    [BEq Atom]
+    [LawfulBEq Atom]
+    [Ord Atom]
+    [Std.TransOrd Atom]
+    [Std.LawfulEqOrd Atom]
+    (atoms : NormalForm Atom) :
+    merge atoms [] = normalize atoms := by
+  simp [merge]
+
+/-- The empty normal form is the exact merge identity. -/
+theorem merge_empty_left
+    [DecidableEq Atom]
+    [BEq Atom]
+    [LawfulBEq Atom]
+    [Ord Atom]
+    [Std.TransOrd Atom]
+    [Std.LawfulEqOrd Atom]
+    (atoms : NormalForm Atom) :
+    merge [] atoms = normalize atoms := by
+  simp [merge]
+
+end Canonical
 
 /-! ## Abstract Zenith core-profile algebra -/
 
@@ -221,6 +504,141 @@ theorem any_and (value : Requirement Service) :
       | .inl requiredByAny => False.elim requiredByAny
       | .inr requiredByValue => requiredByValue⟩
 
+/-- The service leaves of an abstract requirement. -/
+def atoms : Requirement Service -> List Service
+  | .any => []
+  | .service value => [value]
+  | .and left right => atoms left ++ atoms right
+
+/-- Rebuild a requirement from a finite list of service leaves. -/
+def ofAtoms : List Service -> Requirement Service
+  | [] => .any
+  | head :: tail => Requirement.and (.service head) (ofAtoms tail)
+
+/-- A canonical finite representation of a requirement. -/
+abbrev NormalForm (Service : Type u) := Canonical.NormalForm Service
+
+/-- Normalize a requirement into its sorted, duplicate-free service list. -/
+def normalForm [DecidableEq Service] [Ord Service]
+    (requirement : Requirement Service) : NormalForm Service :=
+  Canonical.normalize requirement.atoms
+
+/-- Rebuild a semantically equivalent requirement from its canonical form. -/
+def normalize [DecidableEq Service] [Ord Service]
+    (requirement : Requirement Service) : Requirement Service :=
+  ofAtoms requirement.normalForm
+
+/-- Requirement membership is exactly list membership in its leaves. -/
+@[simp]
+theorem mem_atoms
+    {service : Service}
+    {requirement : Requirement Service} :
+    service ∈ requirement.atoms ↔ Requires service requirement := by
+  induction requirement with
+  | any => simp [atoms, Requires]
+  | service value => simp [atoms, Requires]
+  | and left right leftHypothesis rightHypothesis =>
+      simp [atoms, Requires, leftHypothesis, rightHypothesis]
+
+/-- Rebuilding a requirement from atoms preserves membership. -/
+@[simp]
+theorem requires_ofAtoms
+    {service : Service}
+    {atoms : List Service} :
+    Requires service (ofAtoms atoms) ↔ service ∈ atoms := by
+  induction atoms with
+  | nil => simp [ofAtoms, Requires]
+  | cons head tail inductionHypothesis =>
+      simp [ofAtoms, Requires, inductionHypothesis]
+
+/-- Normalization preserves the semantic requirement relation. -/
+@[simp]
+theorem requires_normalize
+    [DecidableEq Service]
+    [Ord Service]
+    {service : Service}
+    {requirement : Requirement Service} :
+    Requires service (normalize requirement) ↔ Requires service requirement := by
+  simp [normalize, normalForm]
+
+/-- Normalization preserves requirement equivalence. -/
+theorem normalize_equivalent
+    [DecidableEq Service]
+    [Ord Service]
+    (requirement : Requirement Service) :
+    OrderEquivalent (normalize requirement) requirement :=
+  ⟨fun _ required => (requires_normalize.mpr required),
+    fun _ required => (requires_normalize.mp required)⟩
+
+/-- Equivalent requirements have exactly equal canonical normal forms. -/
+theorem normalForm_eq_of_equivalent
+    [DecidableEq Service]
+    [BEq Service]
+    [LawfulBEq Service]
+    [Ord Service]
+    [Std.TransOrd Service]
+    [Std.LawfulEqOrd Service]
+    {left right : Requirement Service}
+    (equivalent : OrderEquivalent left right) :
+    normalForm left = normalForm right := by
+  apply Canonical.normalize_eq_of_same_members
+  intro service
+  simp only [mem_atoms]
+  constructor
+  · exact equivalent.2 service
+  · exact equivalent.1 service
+
+/-- Requirement normalization is exactly idempotent at the normal-form boundary. -/
+theorem normalForm_idempotent
+    [DecidableEq Service]
+    [BEq Service]
+    [LawfulBEq Service]
+    [Ord Service]
+    [Std.TransOrd Service]
+    [Std.LawfulEqOrd Service]
+    (requirement : Requirement Service) :
+    normalForm (normalize requirement) = normalForm requirement :=
+  normalForm_eq_of_equivalent (normalize_equivalent requirement)
+
+/-- Normalizing a requirement twice gives an equivalent requirement. -/
+theorem normalize_idempotent
+    [DecidableEq Service]
+    [Ord Service]
+    (requirement : Requirement Service) :
+    OrderEquivalent (normalize (normalize requirement))
+      (normalize requirement) :=
+  equivalent_trans
+    (normalize_equivalent (normalize requirement))
+    (equivalent_refl (normalize requirement))
+
+/-- The normal form of an intersection is the exact normal-form merge. -/
+theorem normalForm_and
+    [DecidableEq Service]
+    [BEq Service]
+    [LawfulBEq Service]
+    [Ord Service]
+    [Std.TransOrd Service]
+    [Std.LawfulEqOrd Service]
+    (left right : Requirement Service) :
+    normalForm (Requirement.and left right) =
+      Canonical.merge (normalForm left) (normalForm right) := by
+  apply Canonical.normalize_eq_of_same_members
+  intro service
+  simp [normalForm, atoms, List.mem_append]
+
+/-- The canonical normal form removes the order of intersection operands. -/
+theorem normalForm_and_comm
+    [DecidableEq Service]
+    [BEq Service]
+    [LawfulBEq Service]
+    [Ord Service]
+    [Std.TransOrd Service]
+    [Std.LawfulEqOrd Service]
+    (left right : Requirement Service) :
+    normalForm (Requirement.and left right) =
+      normalForm (Requirement.and right left) :=
+  normalForm_eq_of_equivalent (and_comm left right)
+
 end Requirement
 
 /--
@@ -365,6 +783,140 @@ theorem nothing_or (value : ErrorType Failure) :
       | .inr allowedByValue => allowedByValue,
     fun _ allowedByValue => Or.inr allowedByValue⟩
 
+/-- The failure leaves of an abstract error channel. -/
+def atoms : ErrorType Failure -> List Failure
+  | .nothing => []
+  | .failure value => [value]
+  | .or left right => atoms left ++ atoms right
+
+/-- Rebuild an error channel from a finite list of failure leaves. -/
+def ofAtoms : List Failure -> ErrorType Failure
+  | [] => .nothing
+  | head :: tail => ErrorType.or (.failure head) (ofAtoms tail)
+
+/-- A canonical finite representation of an error channel. -/
+abbrev NormalForm (Failure : Type u) := Canonical.NormalForm Failure
+
+/-- Normalize an error channel into its sorted, duplicate-free failure list. -/
+def normalForm [DecidableEq Failure] [Ord Failure]
+    (error : ErrorType Failure) : NormalForm Failure :=
+  Canonical.normalize error.atoms
+
+/-- Rebuild a semantically equivalent error channel from its canonical form. -/
+def normalize [DecidableEq Failure] [Ord Failure]
+    (error : ErrorType Failure) : ErrorType Failure :=
+  ofAtoms error.normalForm
+
+/-- Error membership is exactly list membership in its leaves. -/
+@[simp]
+theorem mem_atoms
+    {failure : Failure}
+    {error : ErrorType Failure} :
+    failure ∈ error.atoms ↔ Allows failure error := by
+  induction error with
+  | nothing => simp [atoms, Allows]
+  | failure value => simp [atoms, Allows]
+  | or left right leftHypothesis rightHypothesis =>
+      simp [atoms, Allows, leftHypothesis, rightHypothesis]
+
+/-- Rebuilding an error channel from atoms preserves membership. -/
+@[simp]
+theorem allows_ofAtoms
+    {failure : Failure}
+    {atoms : List Failure} :
+    Allows failure (ofAtoms atoms) ↔ failure ∈ atoms := by
+  induction atoms with
+  | nil => simp [ofAtoms, Allows]
+  | cons head tail inductionHypothesis =>
+      simp [ofAtoms, Allows, inductionHypothesis]
+
+/-- Normalization preserves the semantic error relation. -/
+@[simp]
+theorem allows_normalize
+    [DecidableEq Failure]
+    [Ord Failure]
+    {failure : Failure}
+    {error : ErrorType Failure} :
+    Allows failure (normalize error) ↔ Allows failure error := by
+  simp [normalize, normalForm]
+
+/-- Normalization preserves error equivalence. -/
+theorem normalize_equivalent
+    [DecidableEq Failure]
+    [Ord Failure]
+    (error : ErrorType Failure) :
+    OrderEquivalent (normalize error) error :=
+  ⟨fun _ allowed => allows_normalize.mp allowed,
+    fun _ allowed => allows_normalize.mpr allowed⟩
+
+/-- Equivalent error channels have exactly equal canonical normal forms. -/
+theorem normalForm_eq_of_equivalent
+    [DecidableEq Failure]
+    [BEq Failure]
+    [LawfulBEq Failure]
+    [Ord Failure]
+    [Std.TransOrd Failure]
+    [Std.LawfulEqOrd Failure]
+    {left right : ErrorType Failure}
+    (equivalent : OrderEquivalent left right) :
+    normalForm left = normalForm right := by
+  apply Canonical.normalize_eq_of_same_members
+  intro failure
+  simp only [mem_atoms]
+  constructor
+  · exact equivalent.1 failure
+  · exact equivalent.2 failure
+
+/-- Error normalization is exactly idempotent at the normal-form boundary. -/
+theorem normalForm_idempotent
+    [DecidableEq Failure]
+    [BEq Failure]
+    [LawfulBEq Failure]
+    [Ord Failure]
+    [Std.TransOrd Failure]
+    [Std.LawfulEqOrd Failure]
+    (error : ErrorType Failure) :
+    normalForm (normalize error) = normalForm error :=
+  normalForm_eq_of_equivalent (normalize_equivalent error)
+
+/-- Normalizing an error twice gives an equivalent error channel. -/
+theorem normalize_idempotent
+    [DecidableEq Failure]
+    [Ord Failure]
+    (error : ErrorType Failure) :
+    OrderEquivalent (normalize (normalize error)) (normalize error) :=
+  equivalent_trans
+    (normalize_equivalent (normalize error))
+    (equivalent_refl (normalize error))
+
+/-- The normal form of a union is the exact normal-form merge. -/
+theorem normalForm_or
+    [DecidableEq Failure]
+    [BEq Failure]
+    [LawfulBEq Failure]
+    [Ord Failure]
+    [Std.TransOrd Failure]
+    [Std.LawfulEqOrd Failure]
+    (left right : ErrorType Failure) :
+    normalForm (ErrorType.or left right) =
+      Canonical.merge (normalForm left) (normalForm right) := by
+  apply Canonical.normalize_eq_of_same_members
+  intro failure
+  simp [normalForm, atoms, List.mem_append]
+
+/-- The canonical normal form removes the order of union operands. -/
+theorem normalForm_or_comm
+    [DecidableEq Failure]
+    [BEq Failure]
+    [LawfulBEq Failure]
+    [Ord Failure]
+    [Std.TransOrd Failure]
+    [Std.LawfulEqOrd Failure]
+    (left right : ErrorType Failure) :
+    normalForm (ErrorType.or left right) =
+      normalForm (ErrorType.or right left) :=
+  normalForm_eq_of_equivalent (or_comm left right)
+
 end ErrorType
 
 /-- A service leaf belongs to an intersection that contains that leaf. -/
@@ -378,5 +930,29 @@ example (failure : Failure) :
     ErrorType.Allows failure
       (ErrorType.or (ErrorType.failure failure) .nothing) :=
   Or.inl rfl
+
+/-- Requirement operand order does not change its canonical normal form. -/
+example (left right : Requirement Nat) :
+    Requirement.normalForm (Requirement.and left right) =
+      Requirement.normalForm (Requirement.and right left) :=
+  Requirement.normalForm_eq_of_equivalent (Requirement.and_comm left right)
+
+/-- Error operand order does not change its canonical normal form. -/
+example (left right : ErrorType Nat) :
+    ErrorType.normalForm (ErrorType.or left right) =
+      ErrorType.normalForm (ErrorType.or right left) :=
+  ErrorType.normalForm_eq_of_equivalent (ErrorType.or_comm left right)
+
+/-- Repeated requirement leaves have one canonical normal form. -/
+example (requirement : Requirement Nat) :
+    Requirement.normalForm (Requirement.and requirement requirement) =
+      Requirement.normalForm requirement :=
+  Requirement.normalForm_eq_of_equivalent
+    (Requirement.and_idempotent requirement)
+
+/-- Repeated error leaves have one canonical normal form. -/
+example (error : ErrorType Nat) :
+    ErrorType.normalForm (ErrorType.or error error) = ErrorType.normalForm error :=
+  ErrorType.normalForm_eq_of_equivalent (ErrorType.or_idempotent error)
 
 end Zenith.Formalization.TypeAlgebra

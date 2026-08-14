@@ -64,7 +64,10 @@ lean_lib ZenithFormalization where
   roots := #[
     `Zenith.Formalization.CoreLaws,
     `Zenith.Formalization.ServiceKeyLaws,
-    `Zenith.Formalization.TypeAlgebra
+    `Zenith.Formalization.TypeAlgebra,
+    `Zenith.Formalization.ServiceRowConnection,
+    `Zenith.Formalization.ErrorShape,
+    `Zenith.Formalization.VarianceLaws
   ]
 
 -- Helpers and regression cases for the `tests` executable.
