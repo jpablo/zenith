@@ -260,7 +260,7 @@ Connect each premise to production evidence:
 | `E1 <: E2` | `ErrorChannel.CanInject E1 E2` or selected error evidence |
 | `A1 <: A2` | `CanConvert A1 A2` |
 
-Verify that `Z.adapt`, `Z.into`, and the focused `CoeTC` instances implement
+Verify that `Z.adapt`, `Z.widen`, and the focused `CoeTC` instances implement
 this direction. Add compile-time examples for each single axis and for all
 three axes together.
 

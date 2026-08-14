@@ -85,7 +85,7 @@ def businessLogicLayer :=
   KeyedLayer.derive makeBusinessLogic
 
 def program : Z (Services[BusinessLogic]) HttpError Unit :=
-  Z.serviceWithZ[BusinessLogic] fun businessLogic =>
+  Z.serviceWithM[BusinessLogic] fun businessLogic =>
     businessLogic.run
 
 /-- Compose the complete dependency graph from its layer candidates. -/

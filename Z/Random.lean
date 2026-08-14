@@ -22,7 +22,7 @@ namespace Random
   def live : Random where
     nextNat lo hi := Z.fromIO (nextNatLive lo hi) |>.withLabel "nextNat"
 
-  def nextNatZ (lo hi : Nat) : Z Random Empty Nat :=
-    Z.serviceWithZ fun random => random.nextNat lo hi
+  def nextNatM (lo hi : Nat) : Z Random Empty Nat :=
+    Z.serviceWithM fun random => random.nextNat lo hi
 
 end Random

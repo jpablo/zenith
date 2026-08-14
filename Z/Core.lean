@@ -181,11 +181,11 @@ def setInterruptStatus
     (md := mempty) : ZCore R E A :=
   internal.setInterruptStatus effect interruptStatus md
 
-def foldCauseZ
+def foldCauseM
     (effect : ZCore R E A)
     (errorHandler : Cause E -> ZCore R E₁ A₁)
     (next : A -> ZCore R E₁ A₁)
-    (md := Metadata.withLabel "foldCauseZ") : ZCore R E₁ A₁ :=
+    (md := Metadata.withLabel "foldCauseM") : ZCore R E₁ A₁ :=
   internal.onSuccessAndFailure effect errorHandler next md
 
 def environment
@@ -372,13 +372,13 @@ def setInterruptStatus
       interruptStatus
       md⟩
 
-def foldCauseZ
+def foldCauseM
     (effect : Z R E A)
     (errorHandler : Cause E -> Z R E₁ A₁)
     (next : A -> Z R E₁ A₁)
-    (md := Metadata.withLabel "foldCauseZ") : Z R E₁ A₁ :=
+    (md := Metadata.withLabel "foldCauseM") : Z R E₁ A₁ :=
   ⟨fun environment =>
-    ZCore.foldCauseZ
+    ZCore.foldCauseM
       (effect.close environment)
       (fun cause => (errorHandler cause).close environment)
       (fun value => (next value).close environment)
@@ -386,7 +386,7 @@ def foldCauseZ
 
 /--
 Read a low-universe environment as a result. High-universe services should use
-`serviceWith` or `serviceWithZ`, which do not return the service from a fiber.
+`serviceWith` or `serviceWithM`, which do not return the service from a fiber.
 -/
 def environment
     (R : Type)
@@ -417,14 +417,14 @@ def adapt
     |>.map success
 
 /-- Widen an action to an explicitly selected environment and error type. -/
-def into
+def widen
     [environment : Environment.CanProvide R R₁]
     [error : E₀ <: E]
     (self : Z R₁ E₀ A) : Z R E A :=
   (self.contramap environment.provide).mapFailure error.coe
 
 /-- Widen an action into a normalized joined error channel. -/
-def intoJoined
+def widenWithErrorInjection
     [environment : Environment.CanProvide R R₁]
     [error : ErrorChannel.CanInject E₀ E]
     (self : Z R₁ E₀ A) : Z R E A :=
@@ -454,7 +454,7 @@ def widenError (self : Z R Empty A) : Z R E A :=
 
 /--
 A raw `IO` action has no typed errors: a throw becomes a defect that the
-`foldZ` family never observes. It therefore only satisfies the defect-only
+`foldM` family never observes. It therefore only satisfies the defect-only
 channel, and `Z.attempt` exposes an `IO.Error` as a typed failure.
 -/
 instance : CoeTC (IO A) (Z R Empty A) :=

@@ -15,11 +15,11 @@ namespace Console
 
   /-! Environment accessors. -/
 
-  def printLineZ {A : Type} [ToString A]
+  def printLineM {A : Type} [ToString A]
       (line : A) : Z Console Empty Unit :=
-    Z.serviceWithZ fun console => console.printLine line
+    Z.serviceWithM fun console => console.printLine line
 
-  def readLineZ : Z Console IO.Error String :=
-    Z.serviceWithZ fun console => console.readLine
+  def readLineM : Z Console IO.Error String :=
+    Z.serviceWithM fun console => console.readLine
         
 end Console

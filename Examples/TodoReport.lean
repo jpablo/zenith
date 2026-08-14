@@ -292,7 +292,7 @@ def configLayer :
       (Services[Arguments])
       ConfigError
       (ServiceRow[AppConfig]) :=
-  KeyedLayer.fromLayer (Layer.fromHEIO fun environment =>
+  KeyedLayer.fromLayer (Layer.fromBuild fun environment =>
     let arguments := Services.get[Arguments] environment
     match parseConfig arguments.values with
     | .ok config => HEIO.pure config
@@ -344,7 +344,7 @@ def appLayer :
 
 def program :
     Z (Services[TodoApp]) FileError ScanResult :=
-  Z.serviceWithZ[TodoApp] fun app => app.run
+  Z.serviceWithM[TodoApp] fun app => app.run
 
 def application
     (arguments : Arguments)

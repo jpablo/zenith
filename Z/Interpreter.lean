@@ -385,7 +385,7 @@ mutual
               state.initialTime newFiberBoxId
           state.fiberInfos.modify (fiber.toFiberInfo :: ·)
           continueOrComplete fiber state
-        | .foldCauseZ effect errorHandler next _, validEnv' => do
+        | .foldCauseM effect errorHandler next _, validEnv' => do
           let effectNodeId ← freshDiagramNodeId diagram state
           let effect := prepareDiagramNode diagram effect effectNodeId
           if diagram.enabled then

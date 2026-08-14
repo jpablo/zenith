@@ -4,7 +4,7 @@ import Z
 Regression guard for the `IO` to `Z` coercion.
 
 A raw `IO` action carries no typed errors, only defects: a throw becomes
-`Cause.die`, which `catchAll`/`foldZ`/`tryCatch` never observe. Lifting one
+`Cause.die`, which `catchAll`/`foldM`/`tryCatch` never observe. Lifting one
 into a typed `IO.Error` channel therefore promises recovery that cannot
 happen, so that coercion has to be rejected and `Z.attempt` used instead.
 

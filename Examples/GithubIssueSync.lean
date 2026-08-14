@@ -79,24 +79,24 @@ abbrev RawServices := Services[ConfigService, GithubService, IssueStore]
 abbrev Services := Services[Audit, ConfigService, GithubService, IssueStore]
 
 def loadConfig : Z (Services[ConfigService]) ConfigError SyncConfig :=
-  Z.serviceWithZ[ConfigService] fun service => service.load
+  Z.serviceWithM[ConfigService] fun service => service.load
 
 def getOpenIssues
     (organization : String) :
     Z (Services[GithubService]) GithubError (List Issue) :=
-  Z.serviceWithZ[GithubService] fun service =>
+  Z.serviceWithM[GithubService] fun service =>
     service.openIssues organization
 
 def saveIssue
     (issue : Issue) : Z (Services[IssueStore]) StoreError Unit :=
-  Z.serviceWithZ[IssueStore] fun service => service.save issue
+  Z.serviceWithM[IssueStore] fun service => service.save issue
 
 def recordFailure
     (message : String) : Z (Services[Audit]) AuditError Unit :=
-  Z.serviceWithZ[Audit] fun service => service.recordFailure message
+  Z.serviceWithM[Audit] fun service => service.recordFailure message
 
 def finishAudit : Z (Services[Audit]) Empty Unit :=
-  Z.serviceWithZ[Audit] fun service => service.finish
+  Z.serviceWithM[Audit] fun service => service.finish
 
 def describeSourceError : SourceErrors -> String
   | .inl .unavailable => "configuration unavailable"

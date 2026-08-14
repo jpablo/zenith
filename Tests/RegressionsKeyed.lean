@@ -72,7 +72,7 @@ def sharedProviderGraph :
   KeyedLayer.make [reportFromLabelAndNote, labelAndNoteFromNothing]
 
 def reportProgram : Z (Environment [reportEntry]) Empty String :=
-  Z.serviceWithZ[Report] fun reporter => reporter.render
+  Z.serviceWithM[Report] fun reporter => reporter.render
 
 def runGraph
     (graph : KeyedLayer (Services[Label]) Empty [reportEntry])
@@ -187,7 +187,7 @@ example :
   boxedConfigLayer
 
 def program : Z (Services[Application]) Empty String :=
-  Z.serviceWithZ[Application] fun application => application.run
+  Z.serviceWithM[Application] fun application => application.run
 
 def provided : Z (Services[]) Empty String :=
   Z.provide program [

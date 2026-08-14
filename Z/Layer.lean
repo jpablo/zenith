@@ -100,7 +100,7 @@ private def releaseMemoized
       | .ready resource => resource.release
       | .empty | .failed _ => HEIO.pure ()
 
-def fromHEIO
+def fromBuild
     (build : RIn -> HEIO (Cause E) ROut) :
     Layer RIn E ROut :=
   ⟨fun environment =>
@@ -136,10 +136,10 @@ def memoize
           Resource.make shared (releaseMemoized mutex.down cache)⟩
 
 def succeed (value : A) : Layer Unit Empty A :=
-  fromHEIO fun _ => HEIO.pure value
+  fromBuild fun _ => HEIO.pure value
 
 def failCause (cause : Cause E) : Layer R E A :=
-  fromHEIO fun _ => HEIO.throw cause
+  fromBuild fun _ => HEIO.throw cause
 
 def suspend
     (layer : Thunk (Layer R E A)) : Layer R E A :=
@@ -356,7 +356,7 @@ def zipWithPar
                       finishParallel first leftResult rightResult f⟩
 
 def fromFunction (f : R -> A) : Layer R Empty A :=
-  fromHEIO fun environment => HEIO.pure (f environment)
+  fromBuild fun environment => HEIO.pure (f environment)
 
 private def runZ
     (fiberId : FiberId)
@@ -373,15 +373,15 @@ private def runZ
         | .failure cause => HEIO.throw cause
 
 /-- Build a low-universe layer output with a normal Zenith effect. -/
-def fromZ
+def fromEffect
     (effect : Z R E A) : Layer R E A :=
-  fromHEIO fun environment => runZ "layer" effect environment
+  fromBuild fun environment => runZ "layer" effect environment
 
 /--
 Acquire a low-universe service with `Z` and release it when the layer scope
 closes. The release effect cannot have a typed failure.
 -/
-def acquireReleaseZ
+def acquireReleaseEffect
     (acquire : Z R E A)
     (release : A -> Z R Empty Unit) : Layer R E A :=
   acquireRelease
@@ -392,7 +392,7 @@ def acquireReleaseZ
 
 def fromEnvironment
     (effect : Z R E (Environment A)) : Layer R E A :=
-  fromZ effect
+  fromEffect effect
 
 /--
 Build a layer, supply its service to a program, and send execution events to

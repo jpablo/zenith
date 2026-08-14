@@ -48,7 +48,7 @@ def repositoryLayer :=
 
 The result requires `Database` and `AppConfig` and provides `Repository`.
 `KeyedLayer.derive[Service]` is a shorthand that uses a structure constructor.
-Use `Layer.fromZ` or `Layer.acquireReleaseZ` when construction is effectful or
+Use `Layer.fromEffect` or `Layer.acquireReleaseEffect` when construction is effectful or
 owns a resource.
 
 ## Building and running examples

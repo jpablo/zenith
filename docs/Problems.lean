@@ -14,11 +14,11 @@ structure Github : Type 1 where
 #check Z Github IO.Error Unit
 
 def program : Z Github IO.Error (List Issue) :=
-  Z.serviceWithZ fun github =>
+  Z.serviceWithM fun github =>
     github.getIssues "lean"
 
 def githubLayer : Layer Unit IO.Error Github :=
-  Layer.fromHEIO fun _ =>
+  Layer.fromBuild fun _ =>
     pure {
       getIssues := fun _ => Z.succeed ([] : List Issue)
     }

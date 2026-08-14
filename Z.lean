@@ -26,7 +26,7 @@ namespace Fiber
   -/
   def interrupt (self: Fiber E A): Z Unit Empty (Exit E A) := do
     Z.fromIO self.requestInterrupt |>.withLabel s!"⌛ 🛑 Fiber.interrupted ← true ({self.fiberId})"
-    self.join.foldCauseZ
+    self.join.foldCauseM
       (fun cause => Z.flatMapIO self.state.get fun
         | .done exit => Z.internal.succeedNow exit
         | _ =>

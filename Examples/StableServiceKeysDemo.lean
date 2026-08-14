@@ -288,7 +288,7 @@ example : KeyedLayer Unit Empty (ServiceRow[Repository User]) :=
 def parameterizedProgram := zdo
   let name <- Z.serviceWith[Repository User]
     (fun repository => repository.value.name)
-  let number <- Z.serviceWithZ[Repository Issue]
+  let number <- Z.serviceWithM[Repository Issue]
     (fun repository => Z.succeed repository.value.number)
   pure s!"{name}:{number}"
 
@@ -344,7 +344,7 @@ example : Bool → Z
 
 def scopedParameterizedProgram := zdo
   try
-    Z.serviceWithZ[Repository User] fun repository =>
+    Z.serviceWithM[Repository User] fun repository =>
       (Z.succeed repository.value.name : Z Unit String String)
   catch _ =>
     let number <- Z.serviceWith[Repository Issue]
@@ -366,10 +366,10 @@ example : Z
   scopedParameterizedProgram
 
 def parameterizedProgramWithErrors := zdo
-  let name <- Z.serviceWithZ[Repository User]
+  let name <- Z.serviceWithM[Repository User]
     (fun repository =>
       (Z.succeed repository.value.name : Z Unit String String))
-  let number <- Z.serviceWithZ[Repository Issue]
+  let number <- Z.serviceWithM[Repository Issue]
     (fun repository => Z.attempt (pure repository.value.number))
   pure s!"{name}:{number}"
 
@@ -466,7 +466,7 @@ def servicesWithDuplicate : Builder Services :=
 def program := zdo
   let organization <- Z.serviceWith[Config]
     (fun config => config.organization)
-  let count <- Z.serviceWithZ[Github]
+  let count <- Z.serviceWithM[Github]
     (fun github => github.issueCount organization)
   let label <- Z.serviceWith[Store]
     (fun store => store.label)
@@ -499,7 +499,7 @@ def trackedServiceLayer
 def failingServiceLayer
     (events : IO.Ref (List String))
     (name : String) : Layer Unit String A :=
-  Layer.fromHEIO fun _ =>
+  Layer.fromBuild fun _ =>
     HEIO.bind (recordLayerEvent events s!"acquire-{name}") fun _ =>
       HEIO.throw (.fail s!"{name} acquisition failed")
 
@@ -686,7 +686,7 @@ def failingOtherConfigFromStoreLayer
       (Services[Store])
       OtherConfigBuildError
       (ServiceRow[OtherLibrary.Config]) :=
-  KeyedLayer.fromLayer (Layer.fromHEIO fun _ =>
+  KeyedLayer.fromLayer (Layer.fromBuild fun _ =>
       HEIO.bind
         (recordLayerEvent events "acquire-other-config-from-store") fun _ =>
           HEIO.throw (.fail .unavailable))
@@ -726,7 +726,7 @@ def failingHeterogeneousKeyedServices
     (by decide)
 
 def heterogeneousProgram := zdo
-  let count <- Z.serviceWithZ[Github]
+  let count <- Z.serviceWithM[Github]
     (fun github => github.issueCount "lean")
   let organization <- Z.serviceWith[OtherLibrary.Config]
     (fun otherConfig => otherConfig.organization)
@@ -823,7 +823,7 @@ def failingReporterFromGithubAndStoreLayer
       (Environment ReporterInputs)
       ReporterBuildError
       ReporterOutputs :=
-  KeyedLayer.fromLayer (Layer.fromHEIO fun _ =>
+  KeyedLayer.fromLayer (Layer.fromBuild fun _ =>
       HEIO.bind (recordLayerEvent events "acquire-reporter") fun _ =>
         HEIO.throw (.fail .unavailable))
 
@@ -848,7 +848,7 @@ def failingVerticalKeyedServices
     (by rfl)
 
 def reporterProgram :=
-  Z.serviceWithZ[Reporter] (fun reporter => reporter.report)
+  Z.serviceWithM[Reporter] (fun reporter => reporter.report)
 
 example : Z (Services[Reporter]) Empty String :=
   reporterProgram
@@ -926,9 +926,9 @@ def failingPassThroughKeyedServices
     (by decide)
 
 def passThroughProgram := zdo
-  let report <- Z.serviceWithZ[Reporter]
+  let report <- Z.serviceWithM[Reporter]
     (fun reporter => reporter.report)
-  let count <- Z.serviceWithZ[Github]
+  let count <- Z.serviceWithM[Github]
     (fun github => github.issueCount "lean")
   pure s!"{report}:{count}"
 
@@ -1008,7 +1008,7 @@ def slowMetricsFromGithubLayer
       (Environment MetricsInputs)
       MetricsBuildError
       MetricsOutputs :=
-  KeyedLayer.fromLayer (Layer.fromHEIO fun environment =>
+  KeyedLayer.fromLayer (Layer.fromBuild fun environment =>
       HEIO.bind (recordLayerEvent events "acquire-slow-metrics") fun _ =>
         HEIO.bind
           (HEIO.liftIO.{0} Cause.die (started.set true)) fun _ =>
@@ -1028,7 +1028,7 @@ def failingMetricsFromGithubLayer
       (Environment MetricsInputs)
       MetricsBuildError
       MetricsOutputs :=
-  KeyedLayer.fromLayer (Layer.fromHEIO fun _ =>
+  KeyedLayer.fromLayer (Layer.fromBuild fun _ =>
       HEIO.bind (recordLayerEvent events "acquire-metrics") fun _ =>
         HEIO.throw (.fail .unavailable))
 
@@ -1109,7 +1109,7 @@ def parallelMetricsFromGithubLayer
       (Services[Github])
       MetricsBuildError
       (ServiceRow[Metrics]) :=
-  KeyedLayer.fromLayer (Layer.fromHEIO fun _ =>
+  KeyedLayer.fromLayer (Layer.fromBuild fun _ =>
       HEIO.bind
         (HEIO.liftIO.{0} Cause.die
           (observeAutomaticParallelStart counter barrier))
@@ -1124,7 +1124,7 @@ def parallelReporterFromGithubLayer
       (Services[Github])
       ReporterBuildError
       (ServiceRow[Reporter]) :=
-  KeyedLayer.fromLayer (Layer.fromHEIO fun _ =>
+  KeyedLayer.fromLayer (Layer.fromBuild fun _ =>
       HEIO.bind
         (HEIO.liftIO.{0} Cause.die
           (observeAutomaticParallelStart counter barrier))
@@ -1146,9 +1146,9 @@ def automaticParallelDependencyGraph
 ]
 
 def sharedGraphProgram := zdo
-  let report <- Z.serviceWithZ[Reporter]
+  let report <- Z.serviceWithM[Reporter]
     (fun reporter => reporter.report)
-  let count <- Z.serviceWithZ[Metrics]
+  let count <- Z.serviceWithM[Metrics]
     (fun metrics => metrics.count)
   pure s!"{report}:{count}"
 
@@ -1159,9 +1159,9 @@ def sharedGraphUnitProgram : Z (Services[Metrics, Reporter]) Empty Unit :=
   Z.succeed ()
 
 def parallelGraphProgram := zdo
-  let count ← Z.serviceWithZ[Metrics]
+  let count ← Z.serviceWithM[Metrics]
     (fun metrics => metrics.count)
-  let report ← Z.serviceWithZ[Reporter]
+  let report ← Z.serviceWithM[Reporter]
     (fun reporter => reporter.report)
   pure (count, report)
 

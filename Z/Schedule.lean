@@ -401,7 +401,7 @@ def jittered
           let lower := min minimumPercent maximumPercent
           let upper := max minimumPercent maximumPercent
           let percentage : Z R Empty Nat :=
-            (Random.nextNatZ lower upper).contramap meet.right
+            (Random.nextNatM lower upper).contramap meet.right
           percentage.map fun selected =>
             (nextState, output, .continue (scaleDelay delay selected))
 
@@ -542,7 +542,7 @@ private partial def retryLoop
     (effect : Z R E A)
     (policy : Schedule R E Output)
     (state : policy.State) : Z R E A :=
-  effect.foldCauseZ
+  effect.foldCauseM
     (fun cause =>
       match cause with
       | .fail error =>
@@ -590,7 +590,7 @@ private partial def retryOrElseEitherLoop
     (policy : Schedule R E Output)
     (orElse : E -> Output -> Z R E₁ B)
     (state : policy.State) : Z R E₁ (Sum B A) :=
-  effect.foldCauseZ
+  effect.foldCauseM
     (fun cause =>
       match residualCause cause with
       | some unhandled =>
@@ -653,7 +653,7 @@ private partial def repeatLoop
     (effect : Z R E A)
     (policy : Schedule R A Output)
     (state : policy.State) : Z R E Output :=
-  effect.foldCauseZ
+  effect.foldCauseM
     (fun cause => (Z.failCause (R := R) cause).map impossible)
     (fun value =>
       scheduleStep policy value state |>.flatMap fun

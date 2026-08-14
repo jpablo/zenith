@@ -686,7 +686,7 @@ def elabZProvide : TermElab := fun stx expectedType? => do
     (show KeyedLayer $inputSyntax $errorSyntax $outputSyntax from
       $layer)
     (show Z $programEnvironmentSyntax $errorSyntax $successSyntax from
-      Z.intoJoined $program))
+      Z.widenWithErrorInjection $program))
   let expression ← Term.elabTerm generated resultType
   match expectedType? with
   | some expectedType => Term.ensureHasType expectedType expression

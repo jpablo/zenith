@@ -512,7 +512,7 @@ application ... : Z (Services[]) Empty Nat
 ```
 
 `RawServices` and `Services` are normalized, reified service rows. The service
-operations use `Z.serviceWith[Service]` and `Z.serviceWithZ[Service]`.
+operations use `Z.serviceWith[Service]` and `Z.serviceWithM[Service]`.
 
 `requirementsForward` and `requirementsReverse` request the same four
 services and four errors in opposite orders. They infer the same normalized
@@ -594,7 +594,7 @@ def issueRepositoryLayer :=
 def program := zdo
   let name <- Z.serviceWith[Repository User]
     (fun repository => repository.value.name)
-  let number <- Z.serviceWithZ[Repository Issue]
+  let number <- Z.serviceWithM[Repository Issue]
     (fun repository => Z.succeed repository.value.number)
   pure s!"{name}:{number}"
 
@@ -614,9 +614,9 @@ are its dependencies, `KeyedLayer.derive[Service]` selects `Service.mk`
 automatically. Record-based service interfaces normally use the explicit
 constructor form because their fields are operations rather than dependencies.
 Derivation is pure. Effectful and resourceful construction continues to use
-`KeyedLayer.fromLayer`, `Layer.fromZ`, or `Layer.acquireReleaseZ`.
+`KeyedLayer.fromLayer`, `Layer.fromEffect`, or `Layer.acquireReleaseEffect`.
 `Z.serviceWith[Service]` selects a value from a service.
-`Z.serviceWithZ[Service]` runs an effect that uses a service. The callback
+`Z.serviceWithM[Service]` runs an effect that uses a service. The callback
 forms are necessary because a fiber result cannot contain a `Type 1` service.
 Custom layer functions can read an input with
 `Services.get[Service] environment`. Application code does not use an entry
@@ -740,7 +740,7 @@ The public implementation provides these checked properties:
   entry.
 - `Services[Repository User, Repository Issue]` creates the same normalized
   environment type as the equivalent explicit entry row.
-- `Z.serviceWith[Service]` and `Z.serviceWithZ[Service]` infer an internal
+- `Z.serviceWith[Service]` and `Z.serviceWithM[Service]` infer an internal
   singleton entry from a concrete service type.
 - Plain `zdo` combines these singleton entries into one normalized keyed
   environment. Access order and repeated access do not change the inferred

@@ -826,12 +826,12 @@ def withService
     operation (Contains.get environment)
 
 /-- Select a high-universe service without returning it as a fiber result. -/
-def withServiceZ
+def withServiceM
     (entry : Entry)
     [Contains entry entries]
     (operation : entry.Service -> Z Unit E A) :
     Z (Environment entries) E A :=
-  Z.serviceWithZ fun environment =>
+  Z.serviceWithM fun environment =>
     operation (Contains.get environment)
 
 /-- Select a low-universe result from one inferred service entry. -/
@@ -842,11 +842,11 @@ def withServiceEntry
   withService (entries := [entry]) entry operation
 
 /-- Run an effect with one inferred high-universe service entry. -/
-def withServiceZEntry
+def withServiceMEntry
     (entry : Entry)
     (operation : entry.Service -> Z Unit E A) :
     Z (Environment [entry]) E A :=
-  withServiceZ (entries := [entry]) entry operation
+  withServiceM (entries := [entry]) entry operation
 
 /-!
 `service_key entryName : ServiceType` resolves `ServiceType` and uses the full
@@ -883,8 +883,8 @@ syntax (name := keyedLayerDeriveConstructor)
 syntax (name := keyedServiceWithType)
   "Z.serviceWithType" "(" term ")" term:arg : term
 
-syntax (name := keyedServiceWithZType)
-  "Z.serviceWithZType" "(" term ")" term:arg : term
+syntax (name := keyedServiceWithMType)
+  "Z.serviceWithMType" "(" term ")" term:arg : term
 
 syntax (name := servicesGetType)
   "Services.get" "[" term "]" term:arg : term
@@ -892,8 +892,8 @@ syntax (name := servicesGetType)
 macro_rules
   | `(Z.serviceWith[$serviceType] $operation) =>
       `(Z.serviceWithType ($serviceType) $operation)
-  | `(Z.serviceWithZ[$serviceType] $operation) =>
-      `(Z.serviceWithZType ($serviceType) $operation)
+  | `(Z.serviceWithM[$serviceType] $operation) =>
+      `(Z.serviceWithMType ($serviceType) $operation)
 
 private partial def keySyntaxForType
     (reference : Syntax)
@@ -1255,12 +1255,12 @@ def elabKeyedServiceWithType : TermElab := fun stx expectedType? => do
         Term.elabTerm generated expectedType?
   | none => Term.elabTerm generated none
 
-@[term_elab keyedServiceWithZType]
-def elabKeyedServiceWithZType : TermElab := fun stx expectedType? => do
-  let `(Z.serviceWithZType ($serviceType) $operation) := stx |
+@[term_elab keyedServiceWithMType]
+def elabKeyedServiceWithMType : TermElab := fun stx expectedType? => do
+  let `(Z.serviceWithMType ($serviceType) $operation) := stx |
     throwUnsupportedSyntax
   let entry ← entrySyntaxForType serviceType serviceType
-  let generated ← `(withServiceZEntry $entry $operation)
+  let generated ← `(withServiceMEntry $entry $operation)
   match expectedType? with
   | some expectedType =>
       if ← hasAssignableMVar expectedType then

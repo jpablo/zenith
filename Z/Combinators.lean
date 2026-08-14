@@ -36,15 +36,15 @@ namespace ZCore
       (finalizer : _root_.ZCore R Empty A₀) : _root_.ZCore R E A :=
     let finalizer := finalizer.withLabel "🏁 finalizer"
     .withLabel (label := "👮‍♀️ ensuring") <|
-      self.foldCauseZ
+      self.foldCauseM
         (fun cause =>
-          finalizer.foldCauseZ
+          finalizer.foldCauseM
             (fun finalizerCause =>
               ZCore.failCause <|
                 .sequential cause (finalizerCause.map impossible))
             (fun _ => .failCause cause))
         (fun value =>
-          finalizer.foldCauseZ
+          finalizer.foldCauseM
             (fun finalizerCause =>
               ZCore.failCause (finalizerCause.map impossible))
             (fun _ => .succeedNow' value))
@@ -93,8 +93,8 @@ namespace Z
     | .inl error => errorHandler error
     | .inr unhandled => internal.done <| .failure unhandled
 
-  def foldZ (errorHandler : E -> Z R E₁ A₁) (next : A -> Z R E₁ A₁) : Z R E₁ A₁ :=
-    (self.foldCauseZ (errorHandlerCause errorHandler) next).withLabel "foldZ"
+  def foldM (errorHandler : E -> Z R E₁ A₁) (next : A -> Z R E₁ A₁) : Z R E₁ A₁ :=
+    (self.foldCauseM (errorHandlerCause errorHandler) next).withLabel "foldM"
 
   /- ---- Monad instances ------------ -/
 
@@ -111,12 +111,12 @@ namespace Z
 
   instance : MonadExceptOf E (Z R E) where
     throw    := fun e => Z.failCause (R := R) <| .fail e
-    tryCatch := fun z errorHandler => Z.foldZ z errorHandler pure
+    tryCatch := fun z errorHandler => Z.foldM z errorHandler pure
 
   instance : MonadExceptOf IO.Error (Z R Empty) where
     throw    := fun ioe => Z.die (R := R) ioe
     tryCatch := fun z errorHandler =>
-      z.foldCauseZ
+      z.foldCauseM
         (fun cause =>
           match cause with
           | .die ioe => errorHandler ioe
@@ -128,7 +128,7 @@ namespace Z
   -- instance : MonadExceptOf IO.Error (Z R (Cause E)) where
   --   throw    := fun ioe => Z.die ioe
   --   tryCatch := fun z errorHandler => 
-  --     z.foldZ 
+  --     z.foldM
   --       (fun
   --         | .die ioe => errorHandler ioe
   --         | _ => z
@@ -139,10 +139,10 @@ namespace Z
     pure ()
 
   def fold (errorHandler : E -> A₁) (next : A -> A₁) : Z R E A₁ :=
-    self.foldZ (errorHandler ∘> pure) (next ∘> pure)
+    self.foldM (errorHandler ∘> pure) (next ∘> pure)
 
   def foldCause (errorHandler : Cause E -> A₁) (next : A -> A₁) : Z R Empty A₁ :=
-    self.foldCauseZ (errorHandler ∘> pure) (next ∘> pure)
+    self.foldCauseM (errorHandler ∘> pure) (next ∘> pure)
 
   def exit : Z R Empty (Exit E A) :=
     self.foldCause Exit.failure Exit.success |>.withLabel "exit"
@@ -150,7 +150,7 @@ namespace Z
   /-- aka flatMapFailure  -/
   def catchAll [conversion : A <: A₁]
       (errorHandler : E -> Z R E₁ A₁) : Z R E₁ A₁ :=
-    self.foldZ errorHandler (pure <| conversion.coe ·) |>.withLabel "catchAll"
+    self.foldM errorHandler (pure <| conversion.coe ·) |>.withLabel "catchAll"
 
   /-- Handle an error with an effect that has a different environment. -/
   def catchAllMeet
@@ -166,7 +166,7 @@ namespace Z
       [meet : Environment.Meet R R₁ R₂]
       [conversion : A <: A₁]
       (errorHandler : IO.Error -> Z R₁ E₁ A₁) : Z R₂ E₁ A₁ :=
-    (self.contramap meet.left).foldCauseZ
+    (self.contramap meet.left).foldCauseM
       (fun cause =>
         match cause with
         | .die error => (errorHandler error).contramap meet.right
@@ -182,10 +182,10 @@ namespace Z
     self.zipWith other (·, ·) |>.withLabel "zip"
 
   def sandbox [ToString E]: Z R (Cause E) A :=
-    self.foldCauseZ (fun e => fail e) pure
+    self.foldCauseM (fun e => fail e) pure
 
   def orDieWith (f : E -> IO.Error) : Z R Empty A :=
-    self.foldZ (fun e => die (R := R) <| f e) pure
+    self.foldM (fun e => die (R := R) <| f e) pure
 
   def orDie (self : Z R IO.Error A): Z R Empty A :=
     self.orDieWith id |>.withLabel "orDie"
@@ -198,7 +198,7 @@ namespace Z
       else
         Z.unit
 
-  def getOrFail (v : Option A): Z Unit IO.Error A := 
+  def fromOption (v : Option A): Z Unit IO.Error A :=
     match v with
     | some a => Z.succeed a
     | none => Z.fail <| IO.userError "none found!"
@@ -269,7 +269,7 @@ namespace Z
       pure (task, sleeper.stop)).orDie
       |>.withLabel s!"😴 sleep : {toString ms}ms"
 
-  def serviceWithZ (operation : S -> Z Unit E A) : Z S E A :=
+  def serviceWithM (operation : S -> Z Unit E A) : Z S E A :=
     Z.fromCore fun service => (operation service).close ()
 
   def serviceWith (operation : S -> A) : Z S E A :=
@@ -297,9 +297,9 @@ namespace Z
       (finalizer : Z R₁ E₁ A₀) : Z R₂ E₂ A :=
     let effect := self.contramap meet.left
     let finalizer := finalizer.contramap meet.right
-    effect.foldCauseZ
+    effect.foldCauseM
       (fun cause =>
-        finalizer.foldCauseZ
+        finalizer.foldCauseM
           (fun finalizerCause =>
             (Z.failCause (R := R₂) <| .sequential
               (cause.map join.left)
@@ -307,7 +307,7 @@ namespace Z
           (fun _ =>
             (Z.failCause (R := R₂) (cause.map join.left)).map impossible))
       (fun value =>
-        finalizer.foldCauseZ
+        finalizer.foldCauseM
           (fun finalizerCause =>
             (Z.failCause (R := R₂) (finalizerCause.map join.right)).map
               impossible)

@@ -142,7 +142,7 @@ private def elabZDoCollectAction : TermElab := fun stx expectedType? => do
     (mkConst ``ErrorChannel.CanInject [.zero, .zero]) sourceError targetError
   let environmentInstance ← Term.mkInstMVar environmentInstanceType
   let errorInstance ← Term.mkInstMVar errorInstanceType
-  let adapted := mkAppN (mkConst ``Z.intoJoined [targetLevel, sourceLevel]) #[
+  let adapted := mkAppN (mkConst ``Z.widenWithErrorInjection [targetLevel, sourceLevel]) #[
     targetEnvironment,
     sourceEnvironment,
     sourceError,
@@ -749,7 +749,7 @@ private def elabZDoScopedTry : DoElab := fun stx continuation => do
   let environmentInstance ← Term.mkInstMVar environmentInstanceType
   let errorInstance ← Term.mkInstMVar errorInstanceType
   let adapted := mkAppN
-    (mkConst ``Z.intoJoined [targetLevel, combinedLevel]) #[
+    (mkConst ``Z.widenWithErrorInjection [targetLevel, combinedLevel]) #[
       targetEnvironment,
       combinedEnvironment,
       handlerError,

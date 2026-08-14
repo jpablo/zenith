@@ -15,9 +15,9 @@ instance : ToString ExampleError where
 def typedFailure : Z Unit ExampleError Unit :=
   Z.fail ExampleError.failed
 
-/-- Recover from a typed error with the direct `foldZ` combinator. -/
+/-- Recover from a typed error with the direct `foldM` combinator. -/
 def errorHandling1a : Z Unit Empty Unit :=
-  typedFailure.foldZ
+  typedFailure.foldM
     (fun error =>
       live.printLine s!"Recovered from an error: {error}")
     (fun _ => live.printLine "The action succeeded.")

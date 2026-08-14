@@ -119,7 +119,7 @@ The current `sandbox` uses the precise public `fail` constructor:
 
 ```lean
 def Z.sandbox (self : Z R E A) [ToString E] : Z R (Cause E) A :=
-  self.foldCauseZ (fun cause => Z.fail cause) pure
+  self.foldCauseM (fun cause => Z.fail cause) pure
 ```
 
 ## Simulated `Z` variance
@@ -166,7 +166,7 @@ this handler:
 
 ```lean
 example (self : Z R E A) [ToString E] : Z R (Cause E) A :=
-  self.foldCauseZ (fun cause => Z.fail cause) pure
+  self.foldCauseM (fun cause => Z.fail cause) pure
 ```
 
 For code that must control the conversion, `Z.adapt` accepts the three
@@ -180,7 +180,7 @@ def Z.adapt
     (self : Z R₁ E₀ A₀) : Z R₀ E₁ A₁
 ```
 
-`Z.into` is a shorter explicit operation when only the environment and error
+`Z.widen` is a shorter explicit operation when only the environment and error
 types must change. The result annotation selects both target types:
 
 ```lean
@@ -188,7 +188,7 @@ example (selectNat : Bool) : Z (Nat × String) Empty String := do
   if selectNat then
     pure "nat"
   else
-    Z.into (R := Nat × String) (E := Empty) (Z.environment String)
+    Z.widen (R := Nat × String) (E := Empty) (Z.environment String)
 ```
 
 `Layer` has the same three one-axis coercions, the same low-priority combined

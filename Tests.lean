@@ -1358,7 +1358,7 @@ def testHEIOAsyncInterruption : IO Unit := do
 def testPreInterruptedLayerBuild : IO Unit := do
   let acquired ← IO.mkRef false
   let layer : Layer Unit IO.Error Unit :=
-    Layer.fromHEIO fun _ =>
+    Layer.fromBuild fun _ =>
       HEIO.bind
         (HEIO.liftIO.{0} Cause.die (acquired.set true))
         fun _ => HEIO.pure ()
@@ -1382,7 +1382,7 @@ def testParallelLayerInterruption : IO Unit := do
   let pendingLayer
       (started : IO.Ref Bool)
       (cancelled : IO.Ref Bool) : Layer Unit IO.Error Unit :=
-    Layer.fromHEIO fun _ =>
+    Layer.fromBuild fun _ =>
       let pending : HEIO (Cause IO.Error) (ULift.{0} Unit) :=
         HEIO.asyncInterrupt Cause.die fun _ => do
           started.set true
@@ -1497,14 +1497,14 @@ def highGithubSeed : IO Nat :=
   pure 42
 
 def highGithubLayer : Layer Unit IO.Error HighGithub :=
-  Layer.fromHEIO fun _ => do
+  Layer.fromBuild fun _ => do
     let seed <- HEIO.liftIO.{1} Cause.die highGithubSeed
     pure {
       getIssues := fun _ => Z.succeed [seed.down]
     }
 
 def highGithubProgram : Z HighGithub IO.Error Nat := do
-  let issues <- Z.serviceWithZ fun github =>
+  let issues <- Z.serviceWithM fun github =>
     github.getIssues "lean"
   pure issues.length
 
@@ -1558,7 +1558,7 @@ def testHighUniverseRetryOrElse : IO Unit := do
     getIssues := fun _ => Z.succeed [1, 2]
   }
   let effect : Z HighGithub String Nat :=
-    Z.serviceWithZ fun _ => (Z.fail "failed").map impossible
+    Z.serviceWithM fun _ => (Z.fail "failed").map impossible
   let program :=
     (effect.retryOrElse (Schedule.stop) fun _ _ => Z.succeed 7)
       |>.provideEnvironment service
@@ -1633,7 +1633,7 @@ def testHighUniverseLayerFailure : IO Unit := do
   | _ => failTest "the high-universe layer failure was not preserved"
 
 def stringLayer : Layer Nat IO.Error String :=
-  Layer.fromZ <| Z.serviceWith fun value : Nat => toString value
+  Layer.fromEffect <| Z.serviceWith fun value : Nat => toString value
 
 def stringProgram : Z String IO.Error String :=
   Z.serviceWith id
@@ -1641,7 +1641,7 @@ def stringProgram : Z String IO.Error String :=
 def testLayerFromZ : IO Unit := do
   match <- stringLayer.run 42 stringProgram "layer-from-z" with
   | .success "42" => pure ()
-  | _ => failTest "Layer.fromZ did not build and provide its output"
+  | _ => failTest "Layer.fromEffect did not build and provide its output"
 
 def recordLayerEvent
     (events : IO.Ref (List String))
@@ -1692,7 +1692,7 @@ def testLayerReleaseAfterProgramFailure : IO Unit := do
 def testLayerCleanupAfterAcquisitionFailure : IO Unit := do
   let events <- IO.mkRef []
   let failingRight : Layer Unit IO.Error String :=
-    Layer.fromHEIO fun _ =>
+    Layer.fromBuild fun _ =>
       HEIO.bind (recordLayerEvent events "acquire-right") fun _ =>
         HEIO.throw (.fail (IO.userError "right acquisition failed"))
   let layer := (trackedLayer events "left").zipWith failingRight (·, ·)
@@ -1779,11 +1779,11 @@ def testHighUniverseLayerSharing : IO Unit := do
 
 def testHighUniverseParallelLayers : IO Unit := do
   let left : Layer Unit IO.Error HighGithub :=
-    Layer.fromHEIO fun _ => HEIO.pure {
+    Layer.fromBuild fun _ => HEIO.pure {
       getIssues := fun _ => Z.succeed [1]
     }
   let right : Layer Unit IO.Error HighGithub :=
-    Layer.fromHEIO fun _ => HEIO.pure {
+    Layer.fromBuild fun _ => HEIO.pure {
       getIssues := fun _ => Z.succeed [2]
     }
   let combined := left.zipWithPar right fun first _ => first
@@ -1799,7 +1799,7 @@ def observeParallelStart (counter : Std.Mutex Nat) : IO Nat := do
 def testParallelLayerOverlap : IO Unit := do
   let counter <- Std.Mutex.new 0
   let branch : Layer Unit IO.Error Nat :=
-    Layer.fromHEIO fun _ =>
+    Layer.fromBuild fun _ =>
       HEIO.bind
         (HEIO.liftIO.{0} Cause.die (observeParallelStart counter))
         fun value => HEIO.pure value.down
@@ -1833,7 +1833,7 @@ def testParallelLayerFailureCancelsSibling : IO Unit := do
   let leftStarted ← IO.mkRef false
   let leftCancelled ← IO.mkRef false
   let left : Layer Unit IO.Error String :=
-    Layer.fromHEIO fun _ =>
+    Layer.fromBuild fun _ =>
       let pending : HEIO (Cause IO.Error) (ULift.{0} Unit) :=
         HEIO.asyncInterrupt Cause.die fun callback => do
           leftStarted.set true
@@ -1843,7 +1843,7 @@ def testParallelLayerFailureCancelsSibling : IO Unit := do
           pure (leftCancelled.set true)
       HEIO.bind pending fun _ => HEIO.pure "left"
   let right : Layer Unit IO.Error String :=
-    Layer.fromHEIO fun _ =>
+    Layer.fromBuild fun _ =>
       HEIO.bind
         (HEIO.liftIO.{0} Cause.die
           (waitForFlag "pending parallel sibling" leftStarted))
@@ -1866,7 +1866,7 @@ def testParallelLayerCombinesFailures : IO Unit := do
       (ownReady otherReady : IO.Ref Bool)
       (name : String)
       (error : IO.Error) : Layer Unit IO.Error String :=
-    Layer.fromHEIO fun _ =>
+    Layer.fromBuild fun _ =>
       HEIO.bind
         (HEIO.liftIO.{0} Cause.die do
           ownReady.set true
@@ -1891,13 +1891,13 @@ def testAcquireReleaseZLayer : IO Unit := do
       pure "service"
   let release (_ : String) : Z Unit Empty Unit :=
     Z.fromIO <| events.modify fun current => current ++ ["release-z"]
-  let layer := Layer.acquireReleaseZ acquire release
+  let layer := Layer.acquireReleaseEffect acquire release
   let program : Z String IO.Error Unit :=
     Z.serviceWith fun _ => ()
   match <- layer.run () program "layer-acquire-release-z" with
   | .success () => pure ()
-  | _ => failTest "the acquireReleaseZ layer did not run"
-  assertTrue "acquireReleaseZ did not release its resource"
+  | _ => failTest "the acquireReleaseEffect layer did not run"
+  assertTrue "acquireReleaseEffect did not release its resource"
     ((<- events.get) == ["acquire-z", "release-z"])
 
 structure IssueSyncScenario where
@@ -2114,7 +2114,7 @@ def testZDoInferredEnvironment : IO Unit := do
     getIssues := fun _ => Z.succeed [1, 2]
   }
   let highProgram := zdo[IO.Error]
-    let issues <- Z.serviceWithZ fun github : HighGithub =>
+    let issues <- Z.serviceWithM fun github : HighGithub =>
       github.getIssues "lean"
     let suffix <- Z.environment String
     pure (issues.length + suffix.length)

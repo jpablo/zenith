@@ -23,7 +23,7 @@ The interpreter is defined in several mutually recursive, partial functions:
 * `continueOrComplete`
 * `runWithInterruption`
 
-The interpreter uses a stack to hold both `next` / `errorHandler` continuations coming from `foldCauseZ` and `flatMap`.
+The interpreter uses a stack to hold both `next` / `errorHandler` continuations coming from `foldCauseM` and `flatMap`.
 
 ```coq
 inductive Stack: Type -> Type -> Type -> Type -> Type 1 where
@@ -55,5 +55,4 @@ structure RunState (Rfiber) (E A E₁ A₁: Type) where
 ```
 
 Every fiber has a `RunState`  is associated with a single fiber (via `FiberId`).
-
 

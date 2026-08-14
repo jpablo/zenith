@@ -38,15 +38,15 @@ valid:
 #check Z Github IO.Error Unit
 ```
 
-Business logic selects an effectful method with `serviceWithZ`:
+Business logic selects an effectful method with `serviceWithM`:
 
 ```lean
 def program : Z Github IO.Error (List Issue) :=
-  Z.serviceWithZ fun github =>
+  Z.serviceWithM fun github =>
     github.getIssues "lean"
 ```
 
-The service does not become a fiber result. `serviceWithZ` closes the
+The service does not become a fiber result. `serviceWithM` closes the
 environment and produces the existing deep `ZCore Unit` instruction tree. The
 current interpreter then runs that tree without a new service-call fiber.
 
@@ -56,7 +56,7 @@ current interpreter then runs that tree without a new service-call fiber.
 
 ```lean
 def githubLayer : Layer Unit IO.Error Github :=
-  Layer.fromHEIO fun _ =>
+  Layer.fromBuild fun _ =>
     pure {
       getIssues := fun _ => Z.succeed ([] : List Issue)
     }
@@ -71,7 +71,7 @@ def runProgram : IO (Exit IO.Error (List Issue)) :=
 ```
 
 Layers can own resources. `acquireRelease` accepts high-universe `HEIO`
-actions. `acquireReleaseZ` is the simpler constructor for low-universe `Z`
+actions. `acquireReleaseEffect` is the simpler constructor for low-universe `Z`
 values. Release actions run in reverse acquisition order, including after a
 program failure or a later acquisition failure.
 

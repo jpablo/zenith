@@ -221,15 +221,15 @@ def envExample1ready : Z Unit Empty Unit :=
 standard `IO` result type is restricted to `Type`.
 -/
 def envExample2 : Z Console Empty Unit :=
-  Console.printLineZ "hello from Console.printLineZ"
+  Console.printLineM "hello from Console.printLineM"
 
 def envExample2ready : Z Unit Empty Unit :=
   envExample2.provideEnvironment Console.live
 
 /-- `zdo` infers the `Console` environment and the `IO.Error` channel. -/
 def interactiveConsoleExample := zdo
-  Console.printLineZ "What is your name?"
-  let name <- Console.readLineZ
-  Console.printLineZ s!"hello {name.trimAscii.toString}"
+  Console.printLineM "What is your name?"
+  let name <- Console.readLineM
+  Console.printLineM s!"hello {name.trimAscii.toString}"
 
 example : Z Console IO.Error Unit := interactiveConsoleExample

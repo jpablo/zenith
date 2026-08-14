@@ -144,7 +144,7 @@ private def bufferProducer
     (failure : FailureRef E) : Z R E Unit :=
   ((bufferSource source queue).flatMap fun _ =>
     (queueOffer queue none).map fun _ => ())
-    |>.foldCauseZ
+    |>.foldCauseM
       (fun cause =>
         recordFailure failure cause *>
           queueShutdown queue *>
@@ -155,7 +155,7 @@ private partial def drainQueue
     (queue : Queue (Option A))
     (failure : FailureRef E)
     (consume : A -> Z R E Unit) : Z R E Unit :=
-  (queueTake queue).foldCauseZ
+  (queueTake queue).foldCauseM
     (rethrowFailure failure)
     (fun
       | none => pure ()

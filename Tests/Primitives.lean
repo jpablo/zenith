@@ -184,13 +184,13 @@ def testConsoleAccessors : IO Unit := do
     readLine := Z.succeed "typed-input"
   }
   let program : Z Console IO.Error String := do
-    Console.printLineZ (42 : Nat)
-    Console.readLineZ
+    Console.printLineM (42 : Nat)
+    Console.readLineM
   match ← runProgram "console-accessors"
       (program.provideEnvironment console) with
   | .success "typed-input" => pure ()
   | _ => failTest "Console accessors did not use the provided service"
-  assertTrue "Console.printLineZ changed or dropped its value"
+  assertTrue "Console.printLineM changed or dropped its value"
     ((← output.get) == ["42"])
 
   let failedConsole : Console := {
@@ -200,9 +200,9 @@ def testConsoleAccessors : IO Unit := do
         |>.map impossible
   }
   match ← runProgram "console-read-failure"
-      (Console.readLineZ.provideEnvironment failedConsole) with
+      (Console.readLineM.provideEnvironment failedConsole) with
   | .failure (.fail _) => pure ()
-  | _ => failTest "Console.readLineZ lost the typed read failure"
+  | _ => failTest "Console.readLineM lost the typed read failure"
 
 def testRandomBoundariesAndAccessor : IO Unit := do
   let call ← IO.mkRef (none : Option (Nat × Nat))
@@ -212,10 +212,10 @@ def testRandomBoundariesAndAccessor : IO Unit := do
       pure 17
   }
   match ← runProgram "random-accessor"
-      ((Random.nextNatZ 3 9).provideEnvironment random) with
+      ((Random.nextNatM 3 9).provideEnvironment random) with
   | .success 17 => pure ()
-  | _ => failTest "Random.nextNatZ did not return the service result"
-  assertTrue "Random.nextNatZ changed the requested range"
+  | _ => failTest "Random.nextNatM did not return the service result"
+  assertTrue "Random.nextNatM changed the requested range"
     ((← call.get) == some (3, 9))
 
   match ← runProgram "random-single-value" (Random.live.nextNat 4 4) with

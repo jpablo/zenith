@@ -21,7 +21,7 @@ example : Z R IO.Error Nat := Z.succeed 1
 example : Z R IO.Error (List Nat) := Z.succeed ([] : List Nat)
 
 example (self : Z R E A) [ToString E] : Z R (Cause E) A :=
-  self.foldCauseZ (fun cause => Z.fail cause) pure
+  self.foldCauseM (fun cause => Z.fail cause) pure
 
 example (cause : Cause E) [ToString E] : Z R (Cause E) A :=
   Z.fail cause
@@ -209,7 +209,7 @@ example (selectNat : Bool) : Z (Nat × String) Empty String := do
   if selectNat then
     pure "nat"
   else
-    Z.into (R := Nat × String) (E := Empty) (Z.environment String)
+    Z.widen (R := Nat × String) (E := Empty) (Z.environment String)
 
 example (selection : Option Bool) : Z (Nat × String) Empty String := zdo
   match selection with
