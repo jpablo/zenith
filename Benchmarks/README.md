@@ -1,5 +1,9 @@
 # Interpreter benchmarks
 
+This folder contains repeatable performance measurements for the Zenith
+interpreter. `Interpreter.lean` defines the benchmark executable. The rest of
+this file records how to run it and the measured baselines.
+
 Build the benchmark once, and then run the executable directly:
 
 ```sh

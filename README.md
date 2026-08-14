@@ -9,6 +9,16 @@ The main goals are pedagogical:
 * Visualization of program execution
 * etc
 
+## Directory map
+
+* [`Z/`](Z/README.md) contains the core effect library.
+* [`Zenith/`](Zenith/README.md) contains optional libraries built on the core.
+* [`Examples/`](Examples/README.md) contains runnable programs.
+* [`Tests/`](Tests/README.md) contains the regression suite.
+* [`Benchmarks/`](Benchmarks/README.md) contains interpreter measurements.
+* [`docs/`](docs/README.md) contains design notes and formalization work.
+* [`diagrams/`](diagrams/README.md) contains Graphviz execution diagrams.
+
 ## Features
 
 * Dependency Injection
