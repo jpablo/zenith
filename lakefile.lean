@@ -57,6 +57,7 @@ lean_lib TestsLib where
     `Tests.HEIO,
     `Tests.Deferred,
     `Tests.Queue,
+    `Tests.Stream,
     `Tests.Primitives,
     `Tests.Scope,
     `Tests.NotationScope,

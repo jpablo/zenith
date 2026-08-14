@@ -5,7 +5,7 @@ A complete command-line application built with Zenith.
 
 The application scans a workspace for `TODO`, `FIXME`, and `HACK` markers and
 writes a Markdown report. It discovers paths in stable directory order and
-streams them through a bounded queue to four scoped workers. Findings are
+streams them through a bounded buffer to four parallel file reads. Findings are
 sorted before report generation, so worker completion order does not change
 output. Its dependency graph contains configuration, file system, scanner,
 writer, and console services. The live executable and the in-memory integration
@@ -174,65 +174,54 @@ private def sortedEntries (entries : List FileEntry) : List FileEntry :=
   entries.mergeSort fun left right =>
     left.path.toString <= right.path.toString
 
-private partial def produceSourceFiles
-    (fileSystem : FileSystem)
-    (config : AppConfig)
-    (queue : Z.Queue (Option FilePath))
-    (directory : FilePath) : Z Unit FileError Bool := zdo
-  let entries <- fileSystem.listDirectory directory
-  let mut accepting := true
-  for entry in sortedEntries entries do
-    if accepting && entry.isDirectory then
-      if !config.excludedDirectories.contains entry.name then
-        let nestedOpen <- produceSourceFiles fileSystem config queue entry.path
-        accepting := nestedOpen
-    else if accepting && entry.path.toString != config.output.toString &&
-        isSourceFile config entry.path then
-      accepting <- queue.offer (some entry.path)
-  pure accepting
+private inductive DiscoveryWork
+  | directory (path : FilePath)
+  | entries (entries : List FileEntry)
 
-private partial def scanWorkerLoop
-    (queue : Z.Queue (Option FilePath))
+private partial def nextSourcePath
     (fileSystem : FileSystem)
     (config : AppConfig)
-    (results : IO.Ref ScanResult) : Z Unit FileError Unit := zdo
-  let next <- queue.take
-  match next with
-  | none => pure ()
-  | some path =>
-      let content <- fileSystem.readFile path
-      let _ <- Z.internal.succeed <| results.modify fun current =>
-        current.combine {
-          filesScanned := 1
-          findings := scanContent config path content
-        }
-      scanWorkerLoop queue fileSystem config results
+    (work : List DiscoveryWork) : Z Unit FileError
+    (Option (FilePath × List DiscoveryWork)) :=
+  match work with
+  | [] => pure none
+  | .directory directory :: remaining =>
+      fileSystem.listDirectory directory |>.flatMap fun entries =>
+        nextSourcePath fileSystem config (.entries (sortedEntries entries) :: remaining)
+  | .entries [] :: remaining =>
+      nextSourcePath fileSystem config remaining
+  | .entries (entry :: pendingEntries) :: remaining =>
+      let pending := .entries pendingEntries :: remaining
+      if entry.isDirectory then
+        if config.excludedDirectories.contains entry.name then
+          nextSourcePath fileSystem config pending
+        else
+          nextSourcePath fileSystem config (.directory entry.path :: pending)
+      else if entry.path.toString != config.output.toString &&
+          isSourceFile config entry.path then
+        pure <| some (entry.path, pending)
+      else
+        nextSourcePath fileSystem config pending
 
-private def scanWorker
-    (queue : Z.Queue (Option FilePath))
+private def sourceFiles
     (fileSystem : FileSystem)
     (config : AppConfig)
-    (results : IO.Ref ScanResult)
-    (firstFailure : IO.Ref (Option FileError)) : Z Unit FileError Unit :=
-  (scanWorkerLoop queue fileSystem config results).foldCauseZ
-    (fun cause =>
-      match cause.failureOrCause with
-      | .inl error => zdo
-          let _ <- Z.succeed <| firstFailure.modify fun current =>
-            match current with
-            | none => some error
-            | some first => some first
-          let _ <- queue.shutdown
-          Z.fail error
-      | .inr unhandled =>
-          Z.withIO firstFailure.get fun
-            | some error => Z.fail error
-            | none => (Z.failCause (R := Unit) unhandled).map impossible)
-    pure
+    (directory : FilePath) : Z.Stream Unit FileError FilePath :=
+  Z.Stream.unfoldZ [.directory directory] <|
+    nextSourcePath fileSystem config
+
+private def scanFile
+    (fileSystem : FileSystem)
+    (config : AppConfig)
+    (path : FilePath) : Z Unit FileError ScanResult :=
+  fileSystem.readFile path |>.map fun content => {
+    filesScanned := 1
+    findings := scanContent config path content
+  }
 
 /--
 Stream a directory through a bounded queue and scan it with up to `workerCount`
-workers.
+parallel file reads.
 
 Directory traversal pauses when the queue has `capacity` entries. The result is
 normalized so worker completion order does not change it. A zero worker count
@@ -243,26 +232,10 @@ def scanDirectoryWithWorkers
     (config : AppConfig)
     (directory : FilePath)
     (workerCount capacity : Nat) : Z Unit FileError ScanResult :=
-  Z.scoped <| zdo
-    let workerCount := max workerCount 1
-    let queue <- Z.Queue.bounded capacity
-    let results <- Z.succeed <| IO.mkRef ({} : ScanResult)
-    let firstFailure <- Z.succeed <| IO.mkRef (none : Option FileError)
-    let workers <- (List.range workerCount).mapM fun index =>
-      (scanWorker queue fileSystem config results firstFailure).forkScoped
-        s!"todo-scanner-{index}"
-    let producer <- (produceSourceFiles fileSystem config queue directory).forkScoped
-      "todo-discovery"
-    let complete <- producer.join
-    if complete then
-      for _ in List.range workerCount do
-        let _ <- queue.offer none
-        pure ()
-    for worker in workers do
-      let _ <- worker.join
-      pure ()
-    let result <- Z.succeed results.get
-    pure result.normalize
+  let paths := Z.Stream.buffer (sourceFiles fileSystem config directory) capacity
+  let scans := Z.Stream.mapZPar paths workerCount (scanFile fileSystem config)
+  Z.Stream.runCollect scans |>.map fun results =>
+    (results.foldl ScanResult.combine {}).normalize
 
 private def defaultScannerWorkerCount : Nat := 4
 private def defaultScannerQueueCapacity : Nat := 32

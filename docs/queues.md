@@ -37,12 +37,11 @@ pool in `Examples/QueueWorkerPool.lean` uses `Option Job`: `some job` is work,
 and one `none` value stops one worker. Reserve `shutdown` for cancellation or
 other abnormal termination.
 
-`Examples/TodoReport.lean` uses a bounded queue with capacity 32 for file
-scanning. Directory traversal pauses when workers are busy, so it does not
-first retain every source path in memory. A typed file error ends the scoped
-scan and interrupts remaining workers.
+`Z.Stream.buffer` uses a bounded queue for the common producer-consumer
+pattern. `Examples/TodoReport.lean` uses it while it discovers and scans
+source files.
 
 ## Current boundary
 
-The queue has no bulk operations, priority mode, broadcast mode, or stream API
-yet. Add these only when a real program needs them.
+The queue has no bulk operations, priority mode, or broadcast mode yet. Add
+these only when a real program needs them.

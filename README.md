@@ -29,6 +29,7 @@ The main goals are pedagogical:
 * Retry and repeat schedules ✅
 * Interruption-aware deferred results ✅
 * Interruption-aware bounded and unbounded queues ✅
+* Buffered and bounded-parallel streams ✅
 
 Pure service constructors can become layers without manual environment
 projection:
@@ -143,4 +144,5 @@ This will (re)create a bunch of svg files under `diagrams/*`.
 * [Retry and repeat schedules](docs/schedules.md)
 * [Deferred results](docs/deferred.md)
 * [Queues](docs/queues.md)
+* [Streams](docs/streams.md)
 * [Execution tracing](docs/debugging.md)
