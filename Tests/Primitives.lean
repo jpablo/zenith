@@ -88,6 +88,25 @@ def testInterruptStatusUtilities : IO Unit := do
   assertTrue "uninterruptible status text changed"
     (toString InterruptStatus.uninterruptible == "uninterruptible")
 
+def testEnvironmentProvision : IO Unit := do
+  let environment : Environment (Char × String × Nat) := ('x', "value", 42)
+  let reordered : Nat × String :=
+    (inferInstance : Environment.CanProvide
+      (Char × String × Nat) (Nat × String)).provide environment
+  assertTrue "CanProvide did not project a reordered product environment"
+    (reordered == (42, "value"))
+
+  let duplicated : String × String :=
+    (inferInstance : Environment.CanProvide
+      (String × String × Nat) (String × String)).provide ("first", "second", 0)
+  assertTrue "CanProvide reused one product position for duplicate services"
+    (duplicated == ("first", "second"))
+
+  let natProvider : Environment.CanProvide (Char × Nat) Nat := inferInstance
+  let textProvider := natProvider.map toString
+  assertTrue "CanProvide.map did not derive a projected service"
+    (textProvider.provide ('x', 7) == "7")
+
 private def makeInterruption : IO Interruption := do
   pure {
     interrupted := ← IO.mkRef false
@@ -233,6 +252,7 @@ def primitiveTests : List (String × IO Unit) := [
   ("testCauseUtilities", testCauseUtilities),
   ("testExitUtilities", testExitUtilities),
   ("testInterruptStatusUtilities", testInterruptStatusUtilities),
+  ("testEnvironmentProvision", testEnvironmentProvision),
   ("testInterruptionState", testInterruptionState),
   ("testFiberStateUtilities", testFiberStateUtilities),
   ("testFiberInterruptionBridge", testFiberInterruptionBridge),

@@ -19,7 +19,7 @@ inductive Stack: (E: Type) -> (A: Type) -> (E₁: Type) -> (A₁: Type) -> Type 
       /- Used to link the parent node with this node -/
       (parentId      : Option NodeId)
       /- Evidence that `next` and `errorHandler` can be executed given the current environment in the fiber -/
-      (validEnv      : R ∣ Rfiber)
+      (validEnv      : Environment.CanProvide Rfiber R)
       /- Environment in the Fiber at the time the stack entry was created  -/
       (env           : Environment Rfiber)
     : Stack E A E₁ A₁

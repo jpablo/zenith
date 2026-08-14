@@ -31,9 +31,11 @@ example (layer : Layer Unit Empty Empty) : Layer R E A := layer
 example (layer : Layer Unit Empty Empty) : Layer R E A :=
   layer.adapt (fun _ => ()) impossible impossible
 
-def environmentPart (A : Type) [A ∣ R] : Z R Empty (Environment A) :=
-  (Z.environment A).contramap fun environment : Environment R =>
-    environment.get A
+def environmentPart
+    (A : Type)
+    [provider : Environment.CanProvide R A] :
+    Z R Empty (Environment A) :=
+  (Z.environment A).contramap provider.provide
 
 example : Z (Nat × String) Empty (Nat × String) := do
   let environment <- Z.environment (Nat × String)
@@ -50,7 +52,7 @@ example : Z (Nat × String) Empty (Nat × String) := do
   pure (nat, string)
 
 example : Z (Nat × String) Empty (Nat × String) :=
-  Z.flatMapIn (Z.environment Nat) fun nat =>
+  Z.flatMapMeet (Z.environment Nat) fun nat =>
     (Z.environment String).map fun string =>
       (nat, string)
 

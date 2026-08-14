@@ -130,7 +130,7 @@ mutual
   partial def unsafeRunFiber
       (self : ZCore R E A)
       (env : Environment Rfiber)
-      [R ∣ Rfiber]
+      [Environment.CanProvide Rfiber R]
       (parentFiberId : FiberId)
       (name : String)
       (startTime : Nat) : IO (Fiber E A) := do
@@ -165,7 +165,7 @@ mutual
   partial def unsafeRunInline
       (self : ZCore R E A)
       (env : Environment Rfiber)
-      [R ∣ Rfiber]
+      [Environment.CanProvide Rfiber R]
       (parentFiberId : FiberId)
       (name : String)
       (startTime : Nat) : IO (Exit E A) := do
@@ -210,7 +210,7 @@ mutual
   - `self`: effect evaluated by the current fiber.
   - `R`: environment required by `self`.
   - `Rfiber`: environment available to the current fiber.
-  - `validEnv`: proof that `R` is a component of `Rfiber`.
+  - `validEnv`: evidence that `Rfiber` can provide `R`.
   - `state`: execution stack and other bookkeeping data.
 
   The match patterns use public API names because the constructors are private
@@ -218,7 +218,7 @@ mutual
   -/
   private partial def runLoop
       (self : ZCore R E A)
-      [validEnv : R ∣ Rfiber]
+      [validEnv : Environment.CanProvide Rfiber R]
       (state : RunState Rfiber E A E₁ A₁) : IO Unit := do
     let selfNodeId ← freshDiagramNodeId diagram state
     let self := prepareDiagramNode diagram self selfNodeId
@@ -412,15 +412,15 @@ mutual
             diagram.setInterruptStatus self.nodeId effect.nodeId nextEffect.nodeId
           nextEffect.runLoop state
 
-        | .contramap f effect _, _ => do
+        | .contramap f effect _, validEnv' => do
           let effectNodeId ← freshDiagramNodeId diagram state
           let effect := prepareDiagramNode diagram effect effectNodeId
           if diagram.enabled then
             diagram.widenEnv self.nodeId effect.nodeId
-          effect.runLoop (validEnv := IsComponent.contramap f) state
+          effect.runLoop (validEnv := validEnv'.map f) state
 
         | .environment _ _ , validEnv' => do
-          continueOrComplete (validEnv'.get state.environment) state
+          continueOrComplete (validEnv'.provide state.environment) state
 
         | .provideEnvironment effect env _ , _ => do
           let effectNodeId ← freshDiagramNodeId diagram state
@@ -514,7 +514,7 @@ mutual
 
   private partial def runWithInterruption
       (self : ZCore R E A)
-      [validEnv : R ∣ Rfiber]
+      [validEnv : Environment.CanProvide Rfiber R]
       (startedAt : Nat)
       (state : RunState Rfiber E A E₁ A₁) : IO Unit := do
     -- The interrupted box is the current node, which is already in the graph.

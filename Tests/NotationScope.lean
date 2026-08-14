@@ -5,8 +5,8 @@ Regression guard for the `Environment` notations.
 
 `Environment T` is definitionally `T`, so a global `++` for `Environment.concat`
 competes with `HAppend` in every module that imports `Z`. This file only uses
-plain standard-library `++` and `∣`; it fails to elaborate while those
-notations are global, and elaborates once they are scoped to `Environment`.
+plain standard-library `++`; it fails to elaborate while that notation is
+global, and elaborates once it is scoped to `Environment`.
 
 It is not part of the runtime suite: the check is that this module compiles.
 -/
@@ -27,8 +27,5 @@ example : appendLists [1] [2] = [1, 2] := rfl
 def appendedText := "left" ++ "right"
 
 example : appendedText = "leftright" := rfl
-
-/-- Core divisibility notation must stay available. -/
-example : (2 : Nat) ∣ 4 := ⟨2, rfl⟩
 
 end NotationScope

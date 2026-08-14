@@ -4,98 +4,46 @@ import Z.Util
 /-- An environment has the runtime representation of its service type. -/
 abbrev Environment (R : Type u) := R
 
-/--
-`IsComponent A B` means that a permutation of `A` is part of `B`.
+namespace Environment
 
-Symbolic form: A ∣ B.
-
-For example if `A = A₁ × A₂` then 
-```
-A ∣ (B₁ × A₁ × B₂ × A₂)
-A ∣ (A₁ × B₁ × B₂ × A₂)
-A ∣ (A₁ × A₂ × B₁ × B₂)
-A ∣ (A₂ × A₁ × B₁ × B₂)
-... 
-```
-all are valid.
-
-`Unit` is assumed to be part of any product.
-
-- `get: B -> A` is the projection. 
+/-!
+`Extract Required Available Remaining` is private evidence used to build
+ordinary product-environment projections. It consumes each selected product
+position once, which prevents a duplicate requirement from reusing one value.
 -/
-class IsComponent (A : Type u) (B: Type v) where
-  get: B -> A
+private class Extract
+    (Required : Type u)
+    (Available : Type v)
+    (Remaining : outParam (Type w)) where
+  extract : Available -> Required × Remaining
 
- 
-infixl:65 " ∣ " => IsComponent
+namespace Extract
 
+private instance (priority := high) head : Extract A (A × T) T := ⟨id⟩
 
-namespace IsComponent
+private instance skip [tail : Extract A T R] : Extract A (H × T) (H × R) where
+  extract environment :=
+    match environment with
+    | (head, tailValue) =>
+        match tail.extract tailValue with
+        | (value, remaining) => (value, (head, remaining))
 
-  /-- Derive a component projection by mapping an existing component. -/
-  def contramap [component: A ∣ B] (f: A -> C): C ∣ B :=
-    ⟨get ∘> f⟩
+private instance (priority := low) last : Extract A A Unit := ⟨(·, ())⟩
 
+private instance (priority := low) unit : Extract Unit Available Available :=
+  ⟨fun available => ((), available)⟩
 
-  /--
-  `Extract A B R` finds one occurrence of `A` inside `B` and reports the
-  components `R` that are still unclaimed once that occurrence is consumed.
+/-- Select a product requirement by consuming its two parts in sequence. -/
+private instance pair
+    [left : Extract A Available Remaining]
+    [right : Extract B Remaining Final] :
+    Extract (A × B) Available Final where
+  extract available :=
+    let (leftValue, remaining) := left.extract available
+    let (rightValue, final) := right.extract remaining
+    ((leftValue, rightValue), final)
 
-  The first occurrence wins, so `Extract Char (Char × String × Char)` leaves
-  `String × Char`.
-  -/
-  class Extract (A : Type u) (B : Type v) (R : outParam (Type w)) where
-    extract : B -> A × R
-
-  namespace Extract
-
-    /-- `A` is the head, so the whole tail stays unclaimed. -/
-    instance (priority := high) here : Extract A (A × T) T := ⟨id⟩
-
-    /-- `A` sits further down, so the head stays unclaimed. -/
-    instance skip [tail : Extract A T R] : Extract A (H × T) (H × R) where
-      extract | (h, t) => match tail.extract t with
-        | (a, r) => (a, (h, r))
-
-    /-- `A` is the last component, so nothing is left. -/
-    instance (priority := low) last : Extract A A Unit := ⟨(·, ())⟩
-
-    /-- `Unit` occupies no position, so everything stays unclaimed. -/
-    instance (priority := low) unit : Extract Unit B B := ⟨((), ·)⟩
-
-  end Extract
-
-  /--
-  This will detect permutations of `A × B` in `H × T`.
-
-  If we reach this case then we know that `A ≠ H` (as this is covered by `rule4`).
-
-  So we need to things:
-  - `A` is at one position of `H × T`
-  - `B` is in whatever that position leaves behind
-
-  Resolving `B` against the remainder is what stops both halves of the
-  requirement from landing on the same element.
-  -/
-  instance rule5 [extraction : Extract A (H × T) R] [B ∣ R] : (A × B) ∣ (H × T) where
-    get e := match extraction.extract e with
-      | (a, r) => (a, get r)
-
-  /-- Same heads and different tails but one tail is a component of the other -/
-  instance rule4 [B ∣ T] : (A × B) ∣ (A × T) where 
-    get | (a, t) => (a, get t)
-
-  /- Either A is in the head or the tail -/
-  instance rule3 [A ∣ T] : A ∣ (H × T) := ⟨fun (_, t) => get t⟩
-  instance rule2         : A ∣ (A × T) := ⟨fun (a, _) => a⟩
-
-  /-- A few base cases  -/
-  instance rule1 :    L ∣ L := ⟨id⟩
-  instance rule0 : Unit ∣ L := ⟨fun _ => ()⟩
-
-end IsComponent
-
-namespace Environment 
+end Extract
 
   /--
   `CanProvide Available Required` supplies a required environment from the
@@ -106,9 +54,16 @@ namespace Environment
 
   namespace CanProvide
 
-    instance (priority := high) [component : Required ∣ Available] :
+    /-- Derive a provided environment by mapping the current required value. -/
+    @[reducible] def map
+        (self : CanProvide Available Required)
+        (f : Required -> Provided) : CanProvide Available Provided :=
+      ⟨fun available => f (self.provide available)⟩
+
+    instance (priority := high)
+        [projection : Extract Required Available Remaining] :
         CanProvide Available Required :=
-      ⟨component.get⟩
+      ⟨fun available => (projection.extract available).1⟩
 
     instance (priority := low) [conversion : Available <: Required] :
         CanProvide Available Required :=
@@ -166,7 +121,7 @@ namespace Environment
     ()
 
   /-- Add the first service to an empty environment. -/
-  def EmptyEnv.add (self: EmptyEnv) (a: A) : Environment A := a
+  def EmptyEnv.add (_ : EmptyEnv) (a: A) : Environment A := a
 
   /-- Prepend one service to an ordinary product environment. -/
   def add (self: Environment T) (a: A) : Environment (A × T) := 
@@ -176,9 +131,9 @@ namespace Environment
   def concat (self: Environment T) (ea: Environment A) : Environment (A × T) := 
     ⟨ea, self⟩ 
 
-  /-- Project one required component from an ordinary environment. -/
-  def get (self: Environment T) (A) [component: A ∣ T] : A :=
-    component.get self
+  /-- Project one required environment from an available environment. -/
+  def get (self: Environment T) (A) [provider: CanProvide T A] : A :=
+    provider.provide self
 
   /-- Construct an ordinary environment with one service. -/
   def of (a: A) : Environment A := 
@@ -224,7 +179,10 @@ namespace EnvExamples
 
   -- Make it a Type 1 on purpose to verify that an Environment can hold types on different universes
 
-  structure Point: Type 1 := (x y: Nat) deriving Repr, BEq
+  structure Point : Type 1 where
+    x : Nat
+    y : Nat
+    deriving Repr, BEq
 
   def p := Point.mk 1 2
 
