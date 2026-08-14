@@ -61,7 +61,10 @@ lean_lib ZenithServices where
   roots := #[`Zenith.Services]
 
 lean_lib ZenithFormalization where
-  roots := #[`Zenith.Formalization.ServiceKeyLaws]
+  roots := #[
+    `Zenith.Formalization.CoreLaws,
+    `Zenith.Formalization.ServiceKeyLaws
+  ]
 
 -- Helpers and regression cases for the `tests` executable.
 -- `Tests.NotationScope` and `Tests.CoercionScope` carry no runtime tests: they

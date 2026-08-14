@@ -1,111 +1,12 @@
 import Tests.Support
+import Zenith.Formalization.CoreLaws
 
-/-! Direct tests for small public values, runtime state, and default services. -/
+/-!
+Direct runtime tests for public values, runtime state, and default services.
 
-def testCauseUtilities : IO Unit := do
-  let mappedFailure : Cause Nat := Cause.map String.length (.fail "error")
-  assertTrue "Cause.map did not map a typed failure"
-    (mappedFailure == .fail 5)
-
-  let defect := IO.userError "defect"
-  let mappedDefect : Cause Nat :=
-    Cause.map String.length (.die defect : Cause String)
-  assertTrue "Cause.map changed a defect" (mappedDefect == .die defect)
-
-  let mappedInterrupt : Cause Nat :=
-    Cause.map String.length (.interrupt : Cause String)
-  assertTrue "Cause.map changed interruption"
-    (mappedInterrupt == .interrupt)
-
-  assertTrue "Cause.failureOption lost a typed failure"
-    ((.fail "error" : Cause String).failureOption == some "error")
-  assertTrue "Cause.failureOption returned a defect"
-    ((.die defect : Cause String).failureOption == none)
-  assertTrue "Cause.failureOption returned an interruption"
-    ((.interrupt : Cause String).failureOption == none)
-
-  let failureOrCause : String ⊕ Cause Nat :=
-    (.fail "error" : Cause String).failureOrCause
-  assertTrue "Cause.failureOrCause did not return the typed failure"
-    (failureOrCause == .inl "error")
-  let interruptOrCause : String ⊕ Cause Nat :=
-    (.interrupt : Cause String).failureOrCause
-  assertTrue "Cause.failureOrCause changed interruption"
-    (interruptOrCause == .inr .interrupt)
-  assertTrue "Cause.show changed its stable interruption text"
-    (toString (.interrupt : Cause String) == "Cause.interrupt")
-
-  let sequential : Cause String :=
-    .sequential (.fail "first") (.die defect)
-  let mappedSequential : Cause Nat := sequential.map String.length
-  assertTrue "Cause.map did not preserve sequential composition"
-    (mappedSequential == .sequential (.fail 5) (.die defect))
-  assertTrue "Cause.failureOption did not find the first sequential failure"
-    (sequential.failureOption == some "first")
-  let sequentialFailureOrCause : String ⊕ Cause Nat :=
-    sequential.failureOrCause
-  assertTrue "Cause.failureOrCause did not find a composed typed failure"
-    (sequentialFailureOrCause == .inl "first")
-  assertTrue "Cause.show did not show sequential structure"
-    (toString sequential ==
-      "Cause.sequential (Cause.fail (first), Cause.die (defect))")
-
-  let parallel : Cause String :=
-    .parallel (.die defect) .interrupt
-  let mappedParallel : Cause Nat := parallel.map String.length
-  assertTrue "Cause.map did not preserve parallel composition"
-    (mappedParallel == .parallel (.die defect) .interrupt)
-  assertTrue "Cause.failureOption returned a failure from a defect-only cause"
-    (parallel.failureOption == none)
-  let parallelFailureOrCause : String ⊕ Cause Nat :=
-    parallel.failureOrCause
-  assertTrue "Cause.failureOrCause did not preserve defect-only structure"
-    (parallelFailureOrCause ==
-      .inr (.parallel (.die defect) .interrupt))
-  assertTrue "Cause.show did not show parallel structure"
-    (toString parallel ==
-      "Cause.parallel (Cause.die (defect), Cause.interrupt)")
-
-def testExitUtilities : IO Unit := do
-  let success : Exit String Nat := .success 42
-  let failure : Exit String Nat := .failure (.fail "bad")
-  assertTrue "Exit.show changed its success text"
-    (toString success == "Exit.success (...)")
-  assertTrue "Exit.show changed its failure text"
-    (toString failure == "Exit.failure (Cause.fail (bad))")
-  assertTrue "different successful exits compared as equal"
-    (success != .success 7)
-  assertTrue "different exit variants compared as equal"
-    (success != failure)
-
-def testInterruptStatusUtilities : IO Unit := do
-  assertTrue "interruptible status did not convert to true"
-    InterruptStatus.interruptible.toBool
-  assertTrue "uninterruptible status did not convert to false"
-    !InterruptStatus.uninterruptible.toBool
-  assertTrue "interruptible status text changed"
-    (toString InterruptStatus.interruptible == "interruptible")
-  assertTrue "uninterruptible status text changed"
-    (toString InterruptStatus.uninterruptible == "uninterruptible")
-
-def testEnvironmentProvision : IO Unit := do
-  let environment : Environment (Char × String × Nat) := ('x', "value", 42)
-  let reordered : Nat × String :=
-    (inferInstance : Environment.CanProvide
-      (Char × String × Nat) (Nat × String)).provide environment
-  assertTrue "CanProvide did not project a reordered product environment"
-    (reordered == (42, "value"))
-
-  let duplicated : String × String :=
-    (inferInstance : Environment.CanProvide
-      (String × String × Nat) (String × String)).provide ("first", "second", 0)
-  assertTrue "CanProvide reused one product position for duplicate services"
-    (duplicated == ("first", "second"))
-
-  let natProvider : Environment.CanProvide (Char × Nat) Nat := inferInstance
-  let textProvider := natProvider.map toString
-  assertTrue "CanProvide.map did not derive a projected service"
-    (textProvider.provide ('x', 7) == "7")
+Pure laws for `Cause`, `Exit`, `InterruptStatus`, and ordinary `Environment`
+projection are proved in `Zenith.Formalization.CoreLaws`.
+-/
 
 private def makeInterruption : IO Interruption := do
   pure {
@@ -279,10 +180,6 @@ def testAttemptIsLazyAndRepeatable : IO Unit := do
   | exit => failTest s!"the second Z.attempt run returned {exit}"
 
 def primitiveTests : List (String × IO Unit) := [
-  ("testCauseUtilities", testCauseUtilities),
-  ("testExitUtilities", testExitUtilities),
-  ("testInterruptStatusUtilities", testInterruptStatusUtilities),
-  ("testEnvironmentProvision", testEnvironmentProvision),
   ("testInterruptionState", testInterruptionState),
   ("testFiberStateUtilities", testFiberStateUtilities),
   ("testFiberInterruptionBridge", testFiberInterruptionBridge),
