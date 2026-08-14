@@ -1,5 +1,5 @@
 import Z.Util
-import Z.Interruption
+import Z.Runtime.Interruption
 
 /-- Hooks that receive events from the Zenith interpreter. -/
 structure ExecutionDiagram (A : Type) where

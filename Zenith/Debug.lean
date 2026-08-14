@@ -1,5 +1,5 @@
 import Z
-import Z.Debug.Graphviz
+import Zenith.Debug.Graphviz
 
 open System
 open IO
@@ -7,11 +7,11 @@ open IO
 /-!
 Optional debugging and visualization support for Zenith.
 
-Importing `Z` does not load Graphviz output support. Import `Z.Debug` when a
+Importing `Z` does not load Graphviz output support. Import `Zenith.Debug` when a
 program must write an execution diagram.
 -/
 
-namespace Z.Debug
+namespace Zenith.Debug
 
 /-- Run an effect and write its execution diagram in Graphviz DOT format. -/
 def runWithGraphviz
@@ -23,4 +23,4 @@ def runWithGraphviz
   handle.flush
   pure exit
 
-end Z.Debug
+end Zenith.Debug

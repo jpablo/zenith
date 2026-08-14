@@ -85,12 +85,12 @@ lake exe z
 #### Write execution diagrams
 
 Execution diagrams are optional. A program that needs them must import
-`Z.Debug` and run through its Graphviz helper:
+`Zenith.Debug` and run through its Graphviz helper:
 
 ```lean
-import Z.Debug
+import Zenith.Debug
 
-let exit ← Z.Debug.runWithGraphviz program "diagrams/program.dot" "program"
+let exit ← Zenith.Debug.runWithGraphviz program "diagrams/program.dot" "program"
 ```
 
 Normal `import Z` programs do not load the Graphviz writer or its color table.

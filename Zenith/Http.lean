@@ -1,5 +1,5 @@
 import Std.Http
-import Z.Scope
+import Z.Resource.Scope
 
 /-!
 Thin integration with Lean's `Std.Http.Server`.

@@ -1,5 +1,6 @@
 import Z.Util
-import Z.Interruption
+import Z.Exit
+import Z.Runtime.Interruption
 import Init.System.Promise
 
 open IO (userError)

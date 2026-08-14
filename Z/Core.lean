@@ -1,8 +1,8 @@
 import Z.Coercions
-import Z.Fiber
-import Z.InterruptStatus
+import Z.Runtime.Fiber
+import Z.Runtime.InterruptStatus
 import Z.Environment
-import Z.Metadata
+import Z.Runtime.Metadata
 
 /-!
 `ZCore` is the executable instruction tree. Its type parameters stay in

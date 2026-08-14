@@ -1,10 +1,10 @@
-import Z.ExecutionDiagram
-import Z.Debug.Colors
+import Z.Runtime.Trace
+import Zenith.Debug.Colors
 
 open System
 open IO
 
-namespace Z.Debug.GraphViz
+namespace Zenith.Debug.GraphViz
 
   def escapeHtml (value: String) : String :=
     value.replace "&" "&amp;"
@@ -120,4 +120,4 @@ def graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
 
   diagram
 
-end Z.Debug.GraphViz
+end Zenith.Debug.GraphViz

@@ -1,5 +1,4 @@
 import Z.Coercions
-import Z.Util
 
 /-- An environment has the runtime representation of its service type. -/
 abbrev Environment (R : Type u) := R

@@ -1,4 +1,5 @@
 import Tests.Support
+import Zenith.Services
 
 /-!
 Regression tests for `KeyedLayer.provide`.

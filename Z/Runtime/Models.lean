@@ -1,6 +1,6 @@
 -- import Z.Environment
 import Z.Combinators
-import Z.ExecutionDiagram
+import Z.Runtime.Trace
 
 open Fiber
 

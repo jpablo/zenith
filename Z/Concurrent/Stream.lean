@@ -1,5 +1,5 @@
-import Z.Queue
-import Z.Do
+import Z.Concurrent.Queue
+import Z.Syntax.Do
 
 /-!
 A small continuation-based stream API for Zenith.

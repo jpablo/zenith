@@ -1,4 +1,5 @@
 import Z
+import Zenith.Services
 
 /-!
 A complete command-line application built with Zenith.

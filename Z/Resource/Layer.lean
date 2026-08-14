@@ -1,5 +1,5 @@
-import Z.Interpreter
-import Z.HEIO
+import Z.Runtime.Interpreter
+import Z.Resource.Internal.HEIO
 import Std.Sync.Mutex
 
 /-!

@@ -1,5 +1,5 @@
 
-namespace Z.Debug.Colors
+namespace Zenith.Debug.Colors
 
   def Color := String deriving Inhabited
 
@@ -207,4 +207,4 @@ namespace Z.Debug.Colors
     let i := base.hash % all.size
     all[i.toNat]!
 
-end Z.Debug.Colors
+end Zenith.Debug.Colors

@@ -1,5 +1,5 @@
-import Z.KeyedLayerMake
-import Z.ServiceKeyLaws
+import Zenith.Services
+import Zenith.Formalization.ServiceKeyLaws
 
 /-!
 Checks for the public stable, normalized service rows with type-derived keys.

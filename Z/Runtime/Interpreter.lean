@@ -1,6 +1,6 @@
 import Z.Combinators
-import Z.ExecutionDiagram
-import Z.InterpreterModels
+import Z.Runtime.Trace
+import Z.Runtime.Models
 import Init.System.Promise
 
 open IO (userError)
@@ -559,7 +559,7 @@ namespace Z
 /--
 Run a closed Zenith effect with an explicit execution observer.
 
-The default runner uses `ExecutionDiagram.empty`. Import `Z.Debug` to use
+The default runner uses `ExecutionDiagram.empty`. Import `Zenith.Debug` to use
 the Graphviz observer.
 -/
 def unsafeRunSyncWithDiagram

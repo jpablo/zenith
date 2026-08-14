@@ -17,7 +17,7 @@ An environment type can use `[zdo_row_environment normalize]` to register one
 explicit list argument as a row. The collector combines and normalizes all
 requirements for that environment type before it applies `Environment.Meet`.
 The package that owns the environment supplies its normalizer and projection
-instances. `Z.Do` does not depend on that package.
+instances. `Z.Syntax.Do` does not depend on that package.
 
 Without a complete expected type, plain `zdo` also collects, normalizes, and
 joins action errors.

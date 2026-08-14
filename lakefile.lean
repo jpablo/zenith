@@ -54,6 +54,15 @@ lean_lib Examples
 lean_lib ZenithHttp where
   roots := #[`Zenith.Http]
 
+lean_lib ZenithDebug where
+  roots := #[`Zenith.Debug]
+
+lean_lib ZenithServices where
+  roots := #[`Zenith.Services]
+
+lean_lib ZenithFormalization where
+  roots := #[`Zenith.Formalization.ServiceKeyLaws]
+
 -- Helpers and regression cases for the `tests` executable.
 -- `Tests.NotationScope` and `Tests.CoercionScope` carry no runtime tests: they
 -- assert what must and must not elaborate, so building them is the check.

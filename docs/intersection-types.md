@@ -461,7 +461,7 @@ operations. The [`DoOps` source][lean-do-ops] exposes this interface. The
 [Lean 4.31 release notes][lean-do-release] describe the new elaborator as
 extensible.
 
-Zenith uses this integration point in `Z/Do.lean`. The `zdo` elaborator reuses
+Zenith uses this integration point in `Z/Syntax/Do.lean`. The `zdo` elaborator reuses
 Lean's `do` parser and control-flow elaboration. It infers a fresh environment
 and error type for each action, then widens the action to the expected block
 type before `bind`.
@@ -538,7 +538,8 @@ names and no manual product-layer construction.
 ## Work status and next step
 
 The Zenith core profile above now defines the first target fragment. The
-checked keyed environment and layer API form part of the public `Z` library.
+checked keyed environment and layer API form the optional `Zenith.Services`
+library.
 Promotion did not add a proof-carrying wrapper. Public row syntax rejects
 key-to-service conflicts, and every normalized row has a checked
 `Row.Coherent` proof.
@@ -557,11 +558,13 @@ catch chains, and automatic layer composition in a larger program.
 ## Stable service-key API
 
 The reusable implementation is in
-[`Z/ServiceKeys.lean`](../Z/ServiceKeys.lean).
+[`Zenith/Services/Model.lean`](../Zenith/Services/Model.lean),
+[`Zenith/Services/Environment.lean`](../Zenith/Services/Environment.lean), and
+[`Zenith/Services/Layer.lean`](../Zenith/Services/Layer.lean).
 The checked row laws are in
-[`Z/ServiceKeyLaws.lean`](../Z/ServiceKeyLaws.lean).
+[`Zenith/Formalization/ServiceKeyLaws.lean`](../Zenith/Formalization/ServiceKeyLaws.lean).
 The automatic graph elaborator is in
-[`Z/KeyedLayerMake.lean`](../Z/KeyedLayerMake.lean).
+[`Zenith/Services/Derive.lean`](../Zenith/Services/Derive.lean).
 The native checked example is
 [`Examples/StableServiceKeysDemo.lean`](../Examples/StableServiceKeysDemo.lean).
 Its compile-time diagnostic checks are in
@@ -685,7 +688,7 @@ of `program` infers this type without an annotation:
 Z (Services[Repository User, Repository Issue]) Empty String
 ```
 
-The registration mechanism is in `Z.Do`. It does not refer to stable service
+The registration mechanism is in `Z.Syntax.Do`. It does not refer to stable service
 keys. Other row-environment packages can register their own list normalizer.
 The package must also supply `Environment.CanProvide` instances that project a
 complete row to each requested row. Stable service keys supply these instances

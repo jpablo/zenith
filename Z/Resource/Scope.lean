@@ -1,4 +1,4 @@
-import Z.Interpreter
+import Z.Runtime.Interpreter
 
 /-!
 Dynamic resource scopes.

@@ -1,6 +1,3 @@
-import Z.Exit
-
-
 /-- Interpreter logging is disabled unless a program enables it explicitly. -/
 def ENABLE_LOG := false
 

@@ -1,15 +1,14 @@
-import Z.Interpreter
-import Z.Parallel
+import Z.Runtime.Interpreter
+import Z.Concurrent.Parallel
 import Z.Schedule
-import Z.Scope
-import Z.Deferred
-import Z.Queue
-import Z.Stream
+import Z.Resource.Scope
+import Z.Concurrent.Deferred
+import Z.Concurrent.Queue
+import Z.Concurrent.Stream
 import Z.Console
 import Z.Random
-import Z.Layer
-import Z.Do
-import Z.KeyedLayerMake
+import Z.Resource.Layer
+import Z.Syntax.Do
 
 
 namespace Fiber

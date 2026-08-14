@@ -54,7 +54,7 @@ Scala and Lean use the same runtime representation.
 | File | Purpose |
 |---|---|
 | `docs/intersection-types.lean` | Abstract syntax, semantics, and proofs |
-| `Z/ServiceKeyLaws.lean` | Existing production service-row laws |
+| `Zenith/Formalization/ServiceKeyLaws.lean` | Existing production service-row laws |
 | `Z/ErrorChannelLaws.lean` | New production error-channel laws, if the selected representation permits them |
 | `docs/intersection-types.md` | User-facing specification and final status |
 
