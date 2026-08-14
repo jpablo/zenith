@@ -7,6 +7,7 @@ import Z.Queue
 import Z.Stream
 import Z.Console
 import Z.Random
+import Z.Http
 import Z.Layer
 import Z.Do
 import Z.KeyedLayerMake

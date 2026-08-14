@@ -10,6 +10,7 @@ import Tests.Queue
 import Tests.Stream
 import Tests.Primitives
 import Tests.Scope
+import Tests.Http
 import Examples.GithubIssueSync
 import Examples.QueueWorkerPool
 import Examples.StableServiceKeysDemo
@@ -2738,6 +2739,7 @@ def suite : List (String × IO Unit) := [
     |>.append streamTests
     |>.append primitiveTests
     |>.append scopeTests
+    |>.append HttpTests.httpTests
 
 /--
 Run the whole suite, or only the tests named on the command line:

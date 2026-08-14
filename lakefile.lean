@@ -38,6 +38,10 @@ lean_exe queueWorkerPool {
   root := `Examples.QueueWorkerPoolMain
 }
 
+lean_exe httpServer {
+  root := `Examples.HttpServer
+}
+
 lean_exe interpreterBench {
   root := `Benchmarks.Interpreter
 }
@@ -60,6 +64,7 @@ lean_lib TestsLib where
     `Tests.Stream,
     `Tests.Primitives,
     `Tests.Scope,
+    `Tests.Http,
     `Tests.NotationScope,
     `Tests.CoercionScope,
     `Examples.KeyedLayerMakeDiagnostics
