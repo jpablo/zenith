@@ -1,12 +1,15 @@
-import Z.KeyedLayerMake
+import Z
 
 /-!
 A complete command-line application built with Zenith.
 
 The application scans a workspace for `TODO`, `FIXME`, and `HACK` markers and
-writes a Markdown report. Its dependency graph contains configuration, file
-system, scanner, writer, and console services. The live executable and the
-in-memory integration tests use the same program.
+writes a Markdown report. It discovers paths in stable directory order, then
+uses four scoped queue workers to read and scan files. Findings are sorted
+before report generation, so worker completion order does not change output.
+Its dependency graph contains configuration, file system, scanner, writer, and
+console services. The live executable and the in-memory integration tests use
+the same program.
 -/
 
 namespace TodoReport
@@ -74,6 +77,22 @@ namespace ScanResult
 def combine (left right : ScanResult) : ScanResult := {
   filesScanned := left.filesScanned + right.filesScanned
   findings := left.findings ++ right.findings
+}
+
+private def findingBefore (left right : Finding) : Bool :=
+  let leftPath := left.path.toString
+  let rightPath := right.path.toString
+  if leftPath < rightPath then true
+  else if rightPath < leftPath then false
+  else if left.line < right.line then true
+  else if right.line < left.line then false
+  else if left.marker < right.marker then true
+  else if right.marker < left.marker then false
+  else left.text <= right.text
+
+/-- Sort findings so worker completion order does not affect report output. -/
+def normalize (self : ScanResult) : ScanResult := {
+  self with findings := self.findings.mergeSort findingBefore
 }
 
 end ScanResult
@@ -155,25 +174,81 @@ private def sortedEntries (entries : List FileEntry) : List FileEntry :=
   entries.mergeSort fun left right =>
     left.path.toString <= right.path.toString
 
-partial def scanDirectory
+partial def discoverSourceFiles
     (fileSystem : FileSystem)
     (config : AppConfig)
-    (directory : FilePath) : Z Unit FileError ScanResult := zdo
+    (directory : FilePath) : Z Unit FileError (List FilePath) := zdo
   let entries <- fileSystem.listDirectory directory
-  let mut result := {}
+  let mut paths := []
   for entry in sortedEntries entries do
     if entry.isDirectory then
       if !config.excludedDirectories.contains entry.name then
-        let nested <- scanDirectory fileSystem config entry.path
-        result := result.combine nested
+        let nested <- discoverSourceFiles fileSystem config entry.path
+        paths := paths ++ nested
     else if entry.path.toString != config.output.toString &&
         isSourceFile config entry.path then
-      let content <- fileSystem.readFile entry.path
-      result := result.combine {
-        filesScanned := 1
-        findings := scanContent config entry.path content
-      }
-  pure result
+      paths := paths ++ [entry.path]
+  pure paths
+
+private partial def scanWorker
+    (queue : Z.Queue (Option FilePath))
+    (fileSystem : FileSystem)
+    (config : AppConfig)
+    (results : IO.Ref ScanResult) : Z Unit FileError Unit := zdo
+  let next <- queue.take
+  match next with
+  | none => pure ()
+  | some path =>
+      let content <- fileSystem.readFile path
+      let _ <- Z.internal.succeed <| results.modify fun current =>
+        current.combine {
+          filesScanned := 1
+          findings := scanContent config path content
+        }
+      scanWorker queue fileSystem config results
+
+/--
+Scan known source files with up to `workerCount` workers.
+
+The result is normalized so worker completion order does not change it. A zero
+worker count uses one worker.
+-/
+def scanFilesWithWorkers
+    (fileSystem : FileSystem)
+    (config : AppConfig)
+    (paths : List FilePath)
+    (workerCount : Nat) : Z Unit FileError ScanResult :=
+  Z.scoped <| zdo
+    let workerCount := max workerCount 1
+    let queue <- Z.Queue.unbounded
+    let results <- Z.succeed <| IO.mkRef ({} : ScanResult)
+    let workers <- (List.range workerCount).mapM fun index =>
+      (scanWorker queue fileSystem config results).forkScoped
+        s!"todo-scanner-{index}"
+    for path in paths do
+      let accepted <- queue.offer (some path)
+      unless accepted do
+        Z.die (R := Scope) <|
+          IO.userError "TODO scanner queue shut down while producing"
+    for _ in List.range workerCount do
+      let accepted <- queue.offer none
+      unless accepted do
+        Z.die (R := Scope) <|
+          IO.userError "TODO scanner queue shut down while stopping workers"
+    for worker in workers do
+      let _ <- worker.join
+      pure ()
+    let result <- Z.succeed results.get
+    pure result.normalize
+
+private def defaultScannerWorkerCount : Nat := 4
+
+def scanDirectory
+    (fileSystem : FileSystem)
+    (config : AppConfig)
+    (directory : FilePath) : Z Unit FileError ScanResult := zdo
+  let paths <- discoverSourceFiles fileSystem config directory
+  scanFilesWithWorkers fileSystem config paths defaultScannerWorkerCount
 
 def renderReport (config : AppConfig) (result : ScanResult) : String :=
   let summary : String :=
@@ -375,6 +450,39 @@ def test : IO Unit := do
     ]
     writes
   }
+  let activeReads ← IO.mkRef 0
+  let maximumActiveReads ← IO.mkRef 0
+  let parallelFileSystem : FileSystem := {
+    (memoryFileSystem memory) with
+    readFile := fun path =>
+      (zdo
+        let _ <- Z.succeed do
+          let active ← activeReads.modifyGet fun previous =>
+            let next := previous + 1
+            (next, next)
+          maximumActiveReads.modify fun previous => max previous active
+        let _ <- Z.sleep 30
+        (memoryFileSystem memory).readFile path)
+        |>.ensuring (Z.succeed <| activeReads.modify fun active => active - 1)
+  }
+  let parallelConfig := defaultConfig root output
+  let parallelScan := scanFilesWithWorkers
+    parallelFileSystem
+    parallelConfig
+    [root / "src" / "Main.lean", root / "README.md"]
+    2
+  match ← Z.unsafeRunSync parallelScan "todo-report-parallel-scan" with
+  | .success result =>
+      check "TODO report parallel scan counted the wrong files"
+        (result.filesScanned == 2)
+      check "TODO report parallel scan did not normalize finding order"
+        (result.findings.map (·.path.toString) ==
+          ["/workspace/README.md", "/workspace/src/Main.lean",
+            "/workspace/src/Main.lean"])
+      check "TODO report parallel scan did not overlap file reads"
+        ((← maximumActiveReads.get) >= 2)
+  | .failure cause =>
+      throw (IO.userError s!"TODO report parallel scan failed: {cause}")
   let effect := application
     { values := [root.toString, output.toString] }
     (memoryFileSystem memory)

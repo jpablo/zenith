@@ -30,6 +30,11 @@ pool in `Examples/QueueWorkerPool.lean` uses `Option Job`: `some job` is work,
 and one `none` value stops one worker. Reserve `shutdown` for cancellation or
 other abnormal termination.
 
+`Examples/TodoReport.lean` uses this pattern for file scanning. It discovers
+paths first, sends them to four scoped workers, and sorts findings before it
+writes the report. A typed file error ends the scoped scan and interrupts any
+remaining workers.
+
 ## Current boundary
 
 The queue is intentionally unbounded. It does not apply backpressure to
