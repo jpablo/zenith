@@ -16,6 +16,36 @@ def testStreamTransformsAndCollects : IO Unit := do
   | .success [6, 8] => pure ()
   | exit => failTest s!"stream transformations returned {exit}"
 
+/-- Adapted from ZIO `ZStreamSpec`: a stream may run more than once. -/
+def testStreamIsRepeatable : IO Unit := do
+  let stream := Z.Stream.fromList [1, 2, 3]
+  match ← Z.unsafeRunSync stream.runCollect "stream-repeat-first" with
+  | .success [1, 2, 3] => pure ()
+  | exit => failTest s!"the first stream run returned {exit}"
+  match ← Z.unsafeRunSync stream.runCollect "stream-repeat-second" with
+  | .success [1, 2, 3] => pure ()
+  | exit => failTest s!"the second stream run returned {exit}"
+
+/-- Adapted from ZIO `StreamLazinessSpec`: steps run only during consumption. -/
+def testStreamDefersSourceSteps : IO Unit := do
+  let steps ← IO.mkRef 0
+  let source : Z.Stream Unit Empty Nat :=
+    Z.Stream.unfold 0 fun state =>
+      Z.fromIO (steps.modify (· + 1)) *>
+        if state < 2 then pure (some (state, state + 1)) else pure none
+  let stream := source.map fun value => pure (value + 10)
+  assertTrue "constructing a stream ran a source step" ((← steps.get) == 0)
+  match ← Z.unsafeRunSync stream.runCollect "stream-lazy-first" with
+  | .success [10, 11] => pure ()
+  | exit => failTest s!"the lazy stream run returned {exit}"
+  assertTrue "one stream run evaluated the wrong number of source steps"
+    ((← steps.get) == 3)
+  match ← Z.unsafeRunSync stream.runCollect "stream-lazy-second" with
+  | .success [10, 11] => pure ()
+  | exit => failTest s!"the second lazy stream run returned {exit}"
+  assertTrue "the second stream run did not re-evaluate its source"
+    ((← steps.get) == 6)
+
 def testStreamBufferPreservesValues : IO Unit := do
   let program : Z Unit Empty (List Nat) :=
     (Z.Stream.fromList [1, 2, 3, 4]).buffer 1 |>.runCollect
@@ -61,9 +91,42 @@ def testStreamMapParBoundsParallelism : IO Unit := do
   assertTrue "parallel stream mapping did not run two transformations together"
     ((← maximum.get) == 2)
 
+/-- Adapted from ZIO `ZStreamSpec`: `mapPar` keeps source output order. -/
+def testStreamMapParPreservesSourceOrder : IO Unit := do
+  let transform (value : Nat) : Z Unit Empty Nat :=
+    let delay : UInt32 :=
+      match value with
+      | 1 => 40
+      | 2 => 20
+      | _ => 5
+    Z.sleep delay *> pure (value * 10)
+  let program : Z Unit Empty (List Nat) :=
+    (Z.Stream.fromList [1, 2, 3]).mapPar 3 transform |>.runCollect
+  match ← Z.unsafeRunSync program "stream-map-par-order" with
+  | .success [10, 20, 30] => pure ()
+  | exit => failTest s!"parallel stream mapping changed source order: {exit}"
+
+/-- Adapted from ZIO `ZStreamSpec`: buffered streams keep a source failure. -/
+def testBufferedStreamPropagatesSourceFailure : IO Unit := do
+  let source : Z.Stream Unit String Nat :=
+    Z.Stream.unfold 0 fun state =>
+      if state == 0 then
+        pure (some (1, 1))
+      else
+        Z.fail "source failure"
+  let program : Z Unit String (List Nat) := (source.buffer 1).runCollect
+  match ← Z.unsafeRunSync program "stream-buffer-source-failure" with
+  | .failure (.fail "source failure") => pure ()
+  | exit => failTest s!"buffered stream changed its source failure: {exit}"
+
 def streamTests : List (String × IO Unit) := [
   ("testStreamTransformsAndCollects", testStreamTransformsAndCollects),
+  ("testStreamIsRepeatable", testStreamIsRepeatable),
+  ("testStreamDefersSourceSteps", testStreamDefersSourceSteps),
   ("testStreamBufferPreservesValues", testStreamBufferPreservesValues),
   ("testStoppingBufferedStreamStopsProducer", testStoppingBufferedStreamStopsProducer),
-  ("testStreamMapParBoundsParallelism", testStreamMapParBoundsParallelism)
+  ("testStreamMapParBoundsParallelism", testStreamMapParBoundsParallelism),
+  ("testStreamMapParPreservesSourceOrder", testStreamMapParPreservesSourceOrder),
+  ("testBufferedStreamPropagatesSourceFailure",
+    testBufferedStreamPropagatesSourceFailure)
 ]

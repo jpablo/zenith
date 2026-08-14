@@ -26,6 +26,32 @@ def testDeferredCompletesWaitingFiber : IO Unit := do
   | .success 42 => pure ()
   | _ => failTest "Deferred.await did not receive the completion value"
 
+/-- Adapted from ZIO `PromiseSpec`: every pending awaiter receives one result. -/
+def testDeferredCompletesAllWaitingFibers : IO Unit := do
+  let deferred ← makeDeferred
+  let waiterCount := 128
+  let entered ← IO.mkRef 0
+  let ready ← IO.mkRef false
+  let markEntered : Z Unit String Unit :=
+    (Z.fromIO do
+      let count ← entered.modifyGet fun current =>
+        let next := current + 1
+        (next, next)
+      if count == waiterCount then
+        ready.set true).widenError
+  let fibers ← (List.range waiterCount).mapM fun index =>
+    Z.unsafeFork (markEntered *> deferred.await) s!"deferred-many-awaiters-{index}"
+  waitForFlag "all Deferred awaiters" ready
+  IO.sleep 10
+  match ← Z.unsafeRunSync (deferred.succeed 42) "deferred-many-succeed" with
+  | .success true => pure ()
+  | _ => failTest "Deferred did not accept the shared completion"
+  for fiber in fibers do
+    match ← fiberExitWithin fiber with
+    | some (.success 42) => pure ()
+    | some exit => failTest s!"a Deferred awaiter returned {exit}"
+    | none => failTest "a Deferred awaiter did not complete"
+
 def testDeferredKeepsFirstCompletion : IO Unit := do
   let deferred ← makeDeferred
   match ← Z.unsafeRunSync (deferred.succeed 1) "deferred-first" with
@@ -60,6 +86,25 @@ def testDeferredCompleteUsesEffectExit : IO Unit := do
   | .failure (.fail "from-effect") => pure ()
   | _ => failTest "Deferred.complete did not preserve the source failure"
 
+/-- Adapted from ZIO `PromiseSpec` polling cases. -/
+def testDeferredPollsEachTerminalExit : IO Unit := do
+  let pending ← makeDeferred
+  match ← Z.unsafeRunSync pending.poll "deferred-poll-pending" with
+  | .success none => pure ()
+  | _ => failTest "Deferred.poll did not report an unresolved cell"
+
+  let failed ← makeDeferred
+  let _ ← Z.unsafeRunSync (failed.fail "expected") "deferred-poll-fail"
+  match ← Z.unsafeRunSync failed.poll "deferred-poll-failed" with
+  | .success (some (.failure (.fail "expected"))) => pure ()
+  | _ => failTest "Deferred.poll did not preserve a typed failure"
+
+  let interrupted ← makeDeferred
+  let _ ← Z.unsafeRunSync interrupted.interrupt "deferred-poll-interrupt"
+  match ← Z.unsafeRunSync interrupted.poll "deferred-poll-interrupted" with
+  | .success (some (.failure .interrupt)) => pure ()
+  | _ => failTest "Deferred.poll did not preserve interruption"
+
 def testDeferredInterruptsAwaiter : IO Unit := do
   let deferred ← makeDeferred
   let finalized ← IO.mkRef 0
@@ -87,8 +132,11 @@ def testDeferredInterruptsAwaiter : IO Unit := do
 
 def deferredTests : List (String × IO Unit) := [
   ("testDeferredCompletesWaitingFiber", testDeferredCompletesWaitingFiber),
+  ("testDeferredCompletesAllWaitingFibers",
+    testDeferredCompletesAllWaitingFibers),
   ("testDeferredKeepsFirstCompletion", testDeferredKeepsFirstCompletion),
   ("testDeferredPreservesFailure", testDeferredPreservesFailure),
   ("testDeferredCompleteUsesEffectExit", testDeferredCompleteUsesEffectExit),
+  ("testDeferredPollsEachTerminalExit", testDeferredPollsEachTerminalExit),
   ("testDeferredInterruptsAwaiter", testDeferredInterruptsAwaiter)
 ]

@@ -248,6 +248,36 @@ def testRandomBoundariesAndAccessor : IO Unit := do
           (5 ≤ value && value ≤ 10)
     | _ => failTest "Random.live failed while checking its bounds"
 
+/-- Adapted from ZIO `ZIOLazinessSpec`: lifted `IO` runs only at execution. -/
+def testFromIOIsLazyAndRepeatable : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit Empty Nat :=
+    Z.fromIO <| runs.modifyGet fun current =>
+      let next := current + 1
+      (next, next)
+  assertTrue "Z.fromIO ran while constructing an effect" ((← runs.get) == 0)
+  match ← runProgram "from-io-lazy-first" effect with
+  | .success 1 => pure ()
+  | exit => failTest s!"the first Z.fromIO run returned {exit}"
+  match ← runProgram "from-io-lazy-second" effect with
+  | .success 2 => pure ()
+  | exit => failTest s!"the second Z.fromIO run returned {exit}"
+
+/-- Adapted from ZIO `ZIOLazinessSpec`: `attempt` also defers its raw `IO`. -/
+def testAttemptIsLazyAndRepeatable : IO Unit := do
+  let runs ← IO.mkRef 0
+  let effect : Z Unit IO.Error Nat :=
+    Z.attempt <| runs.modifyGet fun current =>
+      let next := current + 1
+      (next, next)
+  assertTrue "Z.attempt ran while constructing an effect" ((← runs.get) == 0)
+  match ← runProgram "attempt-lazy-first" effect with
+  | .success 1 => pure ()
+  | exit => failTest s!"the first Z.attempt run returned {exit}"
+  match ← runProgram "attempt-lazy-second" effect with
+  | .success 2 => pure ()
+  | exit => failTest s!"the second Z.attempt run returned {exit}"
+
 def primitiveTests : List (String × IO Unit) := [
   ("testCauseUtilities", testCauseUtilities),
   ("testExitUtilities", testExitUtilities),
@@ -257,5 +287,7 @@ def primitiveTests : List (String × IO Unit) := [
   ("testFiberStateUtilities", testFiberStateUtilities),
   ("testFiberInterruptionBridge", testFiberInterruptionBridge),
   ("testConsoleAccessors", testConsoleAccessors),
-  ("testRandomBoundariesAndAccessor", testRandomBoundariesAndAccessor)
+  ("testRandomBoundariesAndAccessor", testRandomBoundariesAndAccessor),
+  ("testFromIOIsLazyAndRepeatable", testFromIOIsLazyAndRepeatable),
+  ("testAttemptIsLazyAndRepeatable", testAttemptIsLazyAndRepeatable)
 ]

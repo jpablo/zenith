@@ -33,6 +33,86 @@ def testQueuePreservesFIFOOrder : IO Unit := do
   | .success none => pure ()
   | _ => failTest "Queue.poll did not report an empty queue"
 
+/-- Adapted from ZIO `QueueSpec`: a pending take receives later offers. -/
+def testQueueTransfersToWaitingTaker : IO Unit := do
+  let queue ← makeQueue
+  let started ← IO.mkRef false
+  let taker ← Z.unsafeFork
+    ((Z.fromIO (started.set true)) *> queue.take) "queue-waiting-taker"
+  waitForFlag "waiting queue taker" started
+  IO.sleep 10
+  match ← Z.unsafeRunSync (queue.offer 42) "queue-offer-waiting-taker" with
+  | .success true => pure ()
+  | _ => failTest "Queue.offer did not accept a waiting taker"
+  match ← fiberExitWithin taker with
+  | some (.success 42) => pure ()
+  | some exit => failTest s!"waiting Queue.take returned {exit}"
+  | none => failTest "Queue.offer did not resume its waiting taker"
+  match ← Z.unsafeRunSync queue.poll "queue-poll-after-handoff" with
+  | .success none => pure ()
+  | _ => failTest "Queue handoff left an unexpected queued value"
+
+/-- Adapted from ZIO `QueueSpec`: blocked offers resume in FIFO order. -/
+def testBoundedQueuePreservesWaitingOfferOrder : IO Unit := do
+  let queue ← makeBoundedQueue 1
+  let _ ← Z.unsafeRunSync (queue.offer 0) "waiting-offers-initial"
+  let firstStarted ← IO.mkRef false
+  let first ← Z.unsafeFork
+    ((Z.fromIO (firstStarted.set true)) *> queue.offer 1)
+    "queue-first-waiting-offer"
+  waitForFlag "first waiting queue offer" firstStarted
+  IO.sleep 10
+  let secondStarted ← IO.mkRef false
+  let second ← Z.unsafeFork
+    ((Z.fromIO (secondStarted.set true)) *> queue.offer 2)
+    "queue-second-waiting-offer"
+  waitForFlag "second waiting queue offer" secondStarted
+  IO.sleep 10
+
+  match ← Z.unsafeRunSync queue.take "waiting-offers-take-initial" with
+  | .success 0 => pure ()
+  | _ => failTest "Queue.take did not return the initial bounded value"
+  match ← fiberExitWithin first with
+  | some (.success true) => pure ()
+  | some exit => failTest s!"first waiting Queue.offer returned {exit}"
+  | none => failTest "the first waiting Queue.offer did not resume"
+  match ← Z.unsafeRunSync queue.take "waiting-offers-take-first" with
+  | .success 1 => pure ()
+  | _ => failTest "Queue did not preserve the first blocked offer"
+  match ← fiberExitWithin second with
+  | some (.success true) => pure ()
+  | some exit => failTest s!"second waiting Queue.offer returned {exit}"
+  | none => failTest "the second waiting Queue.offer did not resume"
+  match ← Z.unsafeRunSync queue.take "waiting-offers-take-second" with
+  | .success 2 => pure ()
+  | _ => failTest "Queue did not preserve the second blocked offer"
+
+/-- Adapted from ZIO `QueueSpec`: pending takers receive offers in FIFO order. -/
+def testQueuePreservesWaitingTakerOrder : IO Unit := do
+  let queue ← makeQueue
+  let firstStarted ← IO.mkRef false
+  let first ← Z.unsafeFork
+    ((Z.fromIO (firstStarted.set true)) *> queue.take)
+    "queue-first-waiting-taker"
+  waitForFlag "first waiting queue taker" firstStarted
+  IO.sleep 10
+  let secondStarted ← IO.mkRef false
+  let second ← Z.unsafeFork
+    ((Z.fromIO (secondStarted.set true)) *> queue.take)
+    "queue-second-waiting-taker"
+  waitForFlag "second waiting queue taker" secondStarted
+  IO.sleep 10
+  let _ ← Z.unsafeRunSync (queue.offer 10) "waiting-takers-offer-first"
+  let _ ← Z.unsafeRunSync (queue.offer 20) "waiting-takers-offer-second"
+  match ← fiberExitWithin first with
+  | some (.success 10) => pure ()
+  | some exit => failTest s!"first waiting Queue.take returned {exit}"
+  | none => failTest "the first waiting Queue.take did not resume"
+  match ← fiberExitWithin second with
+  | some (.success 20) => pure ()
+  | some exit => failTest s!"second waiting Queue.take returned {exit}"
+  | none => failTest "the second waiting Queue.take did not resume"
+
 def testQueueRemovesInterruptedTaker : IO Unit := do
   let queue ← makeQueue
   let firstStarted ← IO.mkRef false
@@ -174,6 +254,10 @@ def testBoundedQueueShutdownRejectsBlockedOffer : IO Unit := do
 
 def queueTests : List (String × IO Unit) := [
   ("testQueuePreservesFIFOOrder", testQueuePreservesFIFOOrder),
+  ("testQueueTransfersToWaitingTaker", testQueueTransfersToWaitingTaker),
+  ("testBoundedQueuePreservesWaitingOfferOrder",
+    testBoundedQueuePreservesWaitingOfferOrder),
+  ("testQueuePreservesWaitingTakerOrder", testQueuePreservesWaitingTakerOrder),
   ("testQueueRemovesInterruptedTaker", testQueueRemovesInterruptedTaker),
   ("testQueueShutdownInterruptsTakers", testQueueShutdownInterruptsTakers),
   ("testBoundedQueueBackpressuresOffers", testBoundedQueueBackpressuresOffers),
