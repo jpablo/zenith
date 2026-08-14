@@ -20,6 +20,9 @@ This folder contains optional machine-checked statements about Zenith.
   nodes. It is the first interpreter-correctness boundary.
 * `SequentialMachine.lean` defines the corresponding typed stack machine and
   proves that each direct model evaluation reaches the same final machine exit.
+* `SequentialRuntimeStack.lean` connects verified pure continuation stacks to
+  the production `Stack` representation and proves exact frame-count
+  preservation.
 
 This is a separate optional library. Application programs do not need to
 import it.

@@ -60,6 +60,7 @@ Scala and Lean use the same runtime representation.
 | `Zenith/Formalization/VarianceLaws.lean` | Production `Z` variance and composition signatures |
 | `Zenith/Formalization/SequentialCore.lean` | Pure sequential interpreter model and evaluation laws |
 | `Zenith/Formalization/SequentialMachine.lean` | Pure typed stack machine and model-to-machine proof |
+| `Zenith/Formalization/SequentialRuntimeStack.lean` | Pure-to-production stack correspondence |
 | `docs/intersection-types.md` | User-facing specification and final status |
 
 Keep the abstract model in the optional `ZenithFormalization` library. Do not
@@ -358,7 +359,18 @@ reaches the same final exit through the stack transitions. The stack frames
 correspond to the success and error continuation frames in the production
 interpreter.
 
+[`SequentialRuntimeStack.lean`](../Zenith/Formalization/SequentialRuntimeStack.lean)
+connects these verified frames to the production `Stack` type. It proves that
+every pure continuation stack has a corresponding production stack and that
+the frame count is preserved exactly. This is a structural bridge only; it
+does not run `IO` or establish a theorem about `runLoop` execution.
+
 This is not yet a proof of the executable interpreter. The next step is a
 refinement proof for the matching branches of `runLoop`. Raw `IO`, callbacks,
 fibers, interruption, logging, diagrams, clocks, promises, and mutable
 references remain outside this first proof boundary.
+
+The matching runtime-refactor and benchmark constraints are in
+[`interpreter-refactor-plan.md`](interpreter-refactor-plan.md). They are not
+formal proof obligations, but they protect the execution behavior that the
+refinement must preserve.

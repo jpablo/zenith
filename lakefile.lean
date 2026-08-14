@@ -69,7 +69,8 @@ lean_lib ZenithFormalization where
     `Zenith.Formalization.ErrorShape,
     `Zenith.Formalization.VarianceLaws,
     `Zenith.Formalization.SequentialCore,
-    `Zenith.Formalization.SequentialMachine
+    `Zenith.Formalization.SequentialMachine,
+    `Zenith.Formalization.SequentialRuntimeStack
   ]
 
 -- Helpers and regression cases for the `tests` executable.
