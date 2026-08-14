@@ -15,51 +15,62 @@ environment closes a `Z` value into a `ZCore Unit` tree.
 
 /-- The low-level executable instruction tree for a closed Zenith effect. -/
 inductive ZCore : Type -> Type -> Type -> Type 1 where
+  /-- Finish immediately with the supplied success or structured failure exit. -/
   | private internal.done
       (exit : Exit E A)
       (md := mempty) : ZCore R E A
 
+  /-- Run a synchronous Lean `IO` action and use its value as the next result. -/
   | private internal.sync
       (io : IO A)
       (md := mempty) : ZCore R E A
 
+  /-- Suspend until `registerCallback` supplies the one final effect exit. -/
   | private internal.async
       (registerCallback : Observer E A -> IO Unit)
       (md := mempty) : ZCore R E A
 
+  /-- Suspend asynchronously and retain the cancellation action from registration. -/
   | private internal.asyncInterrupt
       (registerCallback : Observer E A -> IO (IO Unit))
       (md := mempty) : ZCore R E A
 
+  /-- On success, evaluate `next`; propagate a failure without calling it. -/
   | private internal.onSuccess
       (effect : ZCore R E A)
       (next : A -> ZCore R E A₁)
       (md := mempty) : ZCore R E A₁
 
+  /-- Handle a complete failure cause or continue from a successful result. -/
   | private internal.onSuccessAndFailure
       (effect : ZCore R E A)
       (errorHandler : Cause E -> ZCore R E₁ A₁)
       (next : A -> ZCore R E₁ A₁)
       (md : Metadata) : ZCore R E₁ A₁
 
+  /-- Start `effect` in a child fiber and return its handle to the parent. -/
   | private internal.fork
       (effect : ZCore R E A)
       (name : String)
       (md : Metadata) : ZCore R Empty (Fiber E A)
 
+  /-- Run `effect` under a temporary interruption-delivery status. -/
   | private internal.setInterruptStatus
       (effect : ZCore R E A)
       (interruptStatus : InterruptStatus)
       (md := mempty) : ZCore R E A
 
+  /-- Adapt the required environment with `f` before evaluating `effect`. -/
   | private internal.contramap
       (f : R₀ -> R)
       (effect : ZCore R E A)
       (md := mempty) : ZCore R₀ E A
 
+  /-- Return the full environment that is currently available to the effect. -/
   | private internal.currentEnvironment
       (md := mempty) : ZCore R Empty (Environment R)
 
+  /-- Run `effect` with a fixed environment, closing its external requirement. -/
   | private internal.provideEnvironment
       (effect : ZCore R E A)
       (env : Environment R)
