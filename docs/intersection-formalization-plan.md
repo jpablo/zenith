@@ -310,8 +310,14 @@ Use one reviewable commit for each completed proof boundary:
 5. Select and verify the error representation.
 6. Connect the model to `Z` variance and update the documentation.
 
+## Current status
+
+Phases 1 and 2 are complete in `docs/intersection-types.lean`. The file now
+defines the two abstract syntax trees and proves their preorder, equivalence,
+GLB, and LUB laws. This work is independent of the production runtime.
+
 ## Immediate next change
 
-Start with Phases 1 and 2 in `docs/intersection-types.lean`. These phases need
-no production refactor and no representation decision. They give a stable
-semantic base for all later work.
+Start Phase 3 in `docs/intersection-types.lean`: add canonical normal forms
+for both syntax trees. This phase needs a lawful total order for leaves, but
+it does not require a production representation decision.

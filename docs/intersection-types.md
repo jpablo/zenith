@@ -239,6 +239,18 @@ An implementation of the core profile must establish these properties:
 Items 1 through 6 define the type algebra. Items 7 and 8 connect that algebra
 to runtime values.
 
+### Checked status
+
+The companion Lean file now proves obligations 1 through 4 for the abstract
+`Requirement` and `ErrorType` syntax. In particular, it proves the two
+subtyping preorders, equivalence from mutual subtyping, requirement
+intersection as a greatest lower bound, and error union as a least upper
+bound.
+
+These are semantic proofs over abstract leaves. They do not yet prove that
+production service rows, nested `Sum` error types, or `Z` adaptations implement
+the same relations. Those obligations remain separate work.
+
 ### Mapping to the current Zenith implementation
 
 | Core-profile concept | Current Zenith representation |
