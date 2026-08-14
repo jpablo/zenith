@@ -88,6 +88,7 @@ private partial def keySyntaxForType
   let localName := Syntax.mkStrLit localName
   `(Key.named $owner $localName [$argumentKeys,*])
 
+/-- Elaborate `serviceKey[Service]` into the stable key for `Service`. -/
 @[term_elab serviceKeyTerm]
 def elabServiceKeyTerm : TermElab := fun stx expectedType? => do
   let `(serviceKey[$serviceType]) := stx | throwUnsupportedSyntax
@@ -340,12 +341,14 @@ private def expectedSingleServiceLayer?
     service
   }
 
+/-- Elaborate `ServiceRow[...]` into a normalized row of stable service keys. -/
 @[term_elab serviceRowType]
 def elabServiceRowType : TermElab := fun stx expectedType? => do
   let `(ServiceRow[$serviceTypes,*]) := stx | throwUnsupportedSyntax
   let row ← elaborateServiceRow stx serviceTypes.getElems
   ensureExpectedType expectedType? row
 
+/-- Elaborate `Services[...]` into its typed keyed environment. -/
 @[term_elab servicesType]
 def elabServicesType : TermElab := fun stx expectedType? => do
   let `(Services[$serviceTypes,*]) := stx | throwUnsupportedSyntax
@@ -353,6 +356,7 @@ def elabServicesType : TermElab := fun stx expectedType? => do
   let environment ← mkAppM ``Environment #[row]
   ensureExpectedType expectedType? environment
 
+/-- Elaborate a one-service `KeyedLayer.fromLayer` expression. -/
 @[term_elab keyedLayerFromLayerType]
 def elabKeyedLayerFromLayerType : TermElab := fun stx expectedType? => do
   let `(KeyedLayer.fromLayer $layer) := stx |
@@ -371,6 +375,7 @@ def elabKeyedLayerFromLayerType : TermElab := fun stx expectedType? => do
   let result ← mkAppM ``KeyedLayer.singleton #[entry, layer]
   ensureExpectedType expectedType? result
 
+/-- Elaborate a one-service `KeyedLayer.succeed` expression. -/
 @[term_elab keyedLayerSucceedType]
 def elabKeyedLayerSucceedType : TermElab := fun stx expectedType? => do
   let `(KeyedLayer.succeed $value) := stx |
@@ -383,6 +388,7 @@ def elabKeyedLayerSucceedType : TermElab := fun stx expectedType? => do
   let result ← mkAppM ``KeyedLayer.succeedEntry #[entry, value]
   ensureExpectedType expectedType? result
 
+/-- Elaborate `KeyedLayer.derive` for a constructor or structure type. -/
 @[term_elab keyedLayerDeriveConstructor]
 def elabKeyedLayerDeriveConstructor : TermElab := fun stx expectedType? => do
   let `(KeyedLayer.derive $constructorSyntax) := stx |
@@ -397,6 +403,7 @@ def elabKeyedLayerDeriveConstructor : TermElab := fun stx expectedType? => do
       Term.synthesizeSyntheticMVarsNoPostponing
       elaborateDerivedConstructor stx constructor expectedType?
 
+/-- Elaborate `Z.serviceWith[Service]` with an inferred stable service key. -/
 @[term_elab keyedServiceWithType]
 def elabKeyedServiceWithType : TermElab := fun stx expectedType? => do
   let `(Z.serviceWithType ($serviceType) $operation) := stx |
@@ -411,6 +418,7 @@ def elabKeyedServiceWithType : TermElab := fun stx expectedType? => do
         Term.elabTerm generated expectedType?
   | none => Term.elabTerm generated none
 
+/-- Elaborate `Z.serviceWithM[Service]` with an inferred stable service key. -/
 @[term_elab keyedServiceWithMType]
 def elabKeyedServiceWithMType : TermElab := fun stx expectedType? => do
   let `(Z.serviceWithMType ($serviceType) $operation) := stx |
@@ -425,6 +433,7 @@ def elabKeyedServiceWithMType : TermElab := fun stx expectedType? => do
         Term.elabTerm generated expectedType?
   | none => Term.elabTerm generated none
 
+/-- Elaborate `Services.get[Service]` with an inferred stable service key. -/
 @[term_elab servicesGetType]
 def elabServicesGetType : TermElab := fun stx expectedType? => do
   let `(Services.get[$serviceType] $environment) := stx |
@@ -434,6 +443,7 @@ def elabServicesGetType : TermElab := fun stx expectedType? => do
     `(Contains.get (target := $entry) $environment)
   Term.elabTerm generated expectedType?
 
+/-- Elaborate `service_key name : Service` into a stable entry abbreviation. -/
 @[command_elab serviceKeyDecl]
 meta def elabServiceKeyDecl : CommandElab
   | `(service_key $entryName:ident : $serviceType:term) => do

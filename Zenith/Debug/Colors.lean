@@ -1,8 +1,10 @@
 
 namespace Zenith.Debug.Colors
 
+  /-- The name of one Graphviz color. -/
   def Color := String deriving Inhabited
 
+  /-- The deterministic palette used to assign colors to execution diagrams. -/
   def all: Array Color := #[
     "antiquewhite",
     "antiquewhite2",
@@ -203,6 +205,7 @@ namespace Zenith.Debug.Colors
     "yellowgreen"
   ]
 
+  /-- Select one palette color deterministically from `base`. -/
   def get (base: String): Color := 
     let i := base.hash % all.size
     all[i.toNat]!

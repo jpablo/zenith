@@ -563,6 +563,7 @@ private def renderAnalysis (analysis : Analysis) : MetaM MessageData := do
 
 end KeyedLayerMake
 
+/-- Elaborate `KeyedLayer.make` when the expected keyed-layer type is known. -/
 @[term_elab keyedLayerMake]
 def elabKeyedLayerMake : TermElab := fun stx expectedType? => do
   let `(KeyedLayer.make [$layers,*]) := stx | throwUnsupportedSyntax
@@ -578,6 +579,7 @@ def elabKeyedLayerMake : TermElab := fun stx expectedType? => do
     analysis.provider
   Term.elabTerm generated expectedType
 
+/-- Elaborate `KeyedLayer.make (Output) [...]` with an inferred layer type. -/
 @[term_elab keyedLayerMakeInferred]
 def elabKeyedLayerMakeInferred : TermElab := fun stx expectedType? => do
   let `(KeyedLayer.make ($output) [$layers,*]) := stx |
@@ -604,6 +606,7 @@ def elabKeyedLayerMakeInferred : TermElab := fun stx expectedType? => do
   | some expectedType => Term.ensureHasType expectedType expression
   | none => pure expression
 
+/-- Elaborate `#keyed_layer_graph` and report the derived dependency graph. -/
 @[command_elab keyedLayerGraph]
 meta def elabKeyedLayerGraph : CommandElab
   | stx@`(#keyed_layer_graph ($target) [$layers,*]) =>
@@ -625,6 +628,7 @@ meta def elabKeyedLayerGraph : CommandElab
         logInfoAt stx (← KeyedLayerMake.renderAnalysis analysis)
   | _ => throwUnsupportedSyntax
 
+/-- Elaborate `Z.provide` by deriving and applying its keyed-layer graph. -/
 @[term_elab zProvide]
 def elabZProvide : TermElab := fun stx expectedType? => do
   let `(Z.provide $program [$layers,*]) := stx | throwUnsupportedSyntax

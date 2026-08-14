@@ -5,24 +5,30 @@ namespace ZCore
 
   variable (self : _root_.ZCore R E A)
 
+  /-- Return the trace-node identifier stored on the outer instruction. -/
   def nodeId : NodeId :=
     self.metadata.nodeId
 
+  /-- Replace the trace-node identifier stored on the outer instruction. -/
   def setNodeId (nodeId : NodeId) : _root_.ZCore R E A :=
     self.updateMetadata fun md => {md with nodeId := nodeId}
 
+  /-- Remove the trace-node identifier from the outer instruction. -/
   def resetNodeId : _root_.ZCore R E A :=
     self.setNodeId ""
 
+  /-- Return the execution label stored on the outer instruction. -/
   def label : String :=
     self.metadata.label
 
+  /-- Set `nodeId` only when the outer instruction does not already have one. -/
   def ensureNodeId (nodeId : NodeId) : _root_.ZCore R E A :=
     if self.metadata.nodeId.isEmpty then
       self.setNodeId nodeId
     else
       self
 
+  /-- Create a completed core instruction that fails with `cause`. -/
   def failCause (cause : Cause E) : _root_.ZCore R E A :=
     ZCore.done' <| .failure cause
 

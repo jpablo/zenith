@@ -39,6 +39,7 @@ namespace Fiber
 
   /- Constructors -/
 
+  /-- Create a fiber handle before the interpreter assigns its runtime task. -/
   protected def empty (fiberId: FiberId): IO (Fiber E A) := do
     let _ : Nonempty (Exit E A) :=
       ⟨.failure .interrupt⟩
@@ -56,6 +57,7 @@ namespace Fiber
 
   variable (self: Fiber E A) 
 
+  /-- Attach the interpreter task and mark a newly created fiber as running. -/
   protected def setTask (task: Task (Except IO.Error Unit)) : IO Unit := do
     self.task.set (some task)
     self.state.modify fun

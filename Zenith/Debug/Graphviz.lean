@@ -6,6 +6,7 @@ open IO
 
 namespace Zenith.Debug.GraphViz
 
+  /-- Escape text for safe inclusion in a Graphviz HTML-like label. -/
   def escapeHtml (value: String) : String :=
     value.replace "&" "&amp;"
       |>.replace "<" "&lt;"
@@ -13,9 +14,11 @@ namespace Zenith.Debug.GraphViz
       |>.replace "\"" "&quot;"
       |>.replace "'" "&#39;"
 
+  /-- Quote one Graphviz node identifier. -/
   def quoteId (value: String) : String :=
     value.quote
   
+  /-- Format one execution node as a Graphviz table label. -/
   def formatNode [ToString A] (nodeId: NodeId) (a: A) (extra: List (String × String) := []) (color: String := "") (opts: String :=""): String :=
     let extras     := extra.map fun (k,v) => s!"<tr><td align='right'>{escapeHtml k}:</td><td align='left'>{escapeHtml v}</td></tr>"
     let colorAttr  := if color.isEmpty then "" else s!"BGCOLOR=\"{escapeHtml color}\""
@@ -23,7 +26,7 @@ namespace Zenith.Debug.GraphViz
     let label      := s!"<table {tableStyle}><tr><td {colorAttr} colspan='2'><b>{escapeHtml (toString a)}</b></td></tr>{String.join extras}</table>"
     s!"{quoteId nodeId} [shape=none, label=<{label}> {opts}]"
 
-/-- Implementation of `ExecutionDiagram` that writes a Graphviz diagram to the specified path. -/
+/-- Build an `ExecutionDiagram` that writes Graphviz DOT text to `handle`. -/
 def graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
 
   let println txt := 

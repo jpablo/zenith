@@ -811,6 +811,7 @@ private def elabZDoInferAll
   | some expectedType => Term.ensureHasType expectedType result
   | none => pure result
 
+/-- Elaborate `zdo`, inferring its environment and error channel when needed. -/
 @[term_elab «zdo»]
 def elabZDo : TermElab := fun stx expectedType? => do
   let `(zdo $sequence) := stx | throwUnsupportedSyntax
@@ -829,6 +830,7 @@ def elabZDo : TermElab := fun stx expectedType? => do
         else
           elabZDoFixed sequence expectedType expected
 
+/-- Elaborate `zdo[E]` with an explicit error channel and inferred environment. -/
 @[term_elab zdoInfer]
 def elabZDoInfer : TermElab := fun stx expectedType? => do
   let `(zdo[$errorSyntax] $sequence) := stx | throwUnsupportedSyntax

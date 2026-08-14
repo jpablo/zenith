@@ -26,6 +26,7 @@ inductive Stack: (E: Type) -> (A: Type) -> (E₁: Type) -> (A₁: Type) -> Type 
 
   | done (complete: Observer E A) : Stack E A Empty Empty
 
+/-- Return the number of continuation frames that are waiting on this stack. -/
 def Stack.size : Stack E A E₁ A₁ -> Nat
   | Stack.more (tail := tail) .. => 1 + Stack.size tail
   | Stack.done .. => 0
