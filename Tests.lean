@@ -6,9 +6,11 @@ import Tests.RegressionsProvide
 import Tests.RegressionsKeyed
 import Tests.HEIO
 import Tests.Deferred
+import Tests.Queue
 import Tests.Primitives
 import Tests.Scope
 import Examples.GithubIssueSync
+import Examples.QueueWorkerPool
 import Examples.StableServiceKeysDemo
 import Examples.TodoReport
 import Std.Data.HashSet
@@ -65,6 +67,11 @@ def testCompositeCauseRecovery : IO Unit := do
   | .failure (.parallel (.die error) .interrupt) =>
       assertTrue "catchAll changed an unhandled defect" (error == defect)
   | _ => failTest "catchAll did not preserve a defect-only cause tree"
+
+def testQueueWorkerPool : IO Unit := do
+  match ← runProgram "queue-worker-pool" (QueueWorkerPool.run [1, 2, 3, 4] 2) with
+  | .success [1, 4, 9, 16] => pure ()
+  | _ => failTest "the queue worker pool did not process each job once"
 
 def testZipParSuccessAndOverlap : IO Unit := do
   let counter ← Std.Mutex.new 0
@@ -2544,6 +2551,7 @@ def suite : List (String × IO Unit) := [
   ("testFinalizerFailure", testFinalizerFailure),
   ("testSequentialFinalizerFailure", testSequentialFinalizerFailure),
   ("testCompositeCauseRecovery", testCompositeCauseRecovery),
+  ("testQueueWorkerPool", testQueueWorkerPool),
   ("testZipParSuccessAndOverlap", testZipParSuccessAndOverlap),
   ("testZipParCancelsFailingSibling", testZipParCancelsFailingSibling),
   ("testZipParCombinesDualFailures", testZipParCombinesDualFailures),
@@ -2725,6 +2733,7 @@ def suite : List (String × IO Unit) := [
     |>.append keyedRegressionTests
     |>.append heioPrimitiveTests
     |>.append deferredTests
+    |>.append queueTests
     |>.append primitiveTests
     |>.append scopeTests
 

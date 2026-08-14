@@ -28,6 +28,7 @@ The main goals are pedagogical:
 * Parallel effect composition ✅
 * Retry and repeat schedules ✅
 * Interruption-aware deferred results ✅
+* Interruption-aware unbounded queues ✅
 
 Pure service constructors can become layers without manual environment
 projection:
@@ -105,6 +106,12 @@ Run the dynamic resource scope demo:
 lake exe scopedResource
 ```
 
+Run the bounded-concurrency queue worker-pool demo:
+
+```bash
+lake exe queueWorkerPool
+```
+
 Generate a Markdown TODO report for a workspace:
 
 ```bash
@@ -135,4 +142,5 @@ This will (re)create a bunch of svg files under `diagrams/*`.
 * [Parallel effect composition](docs/parallelism.md)
 * [Retry and repeat schedules](docs/schedules.md)
 * [Deferred results](docs/deferred.md)
+* [Queues](docs/queues.md)
 * [Execution tracing](docs/debugging.md)

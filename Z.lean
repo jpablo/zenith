@@ -3,6 +3,7 @@ import Z.Parallel
 import Z.Schedule
 import Z.Scope
 import Z.Deferred
+import Z.Queue
 import Z.Console
 import Z.Random
 import Z.Layer
