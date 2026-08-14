@@ -399,24 +399,24 @@ def fromEnvironment
   fromZ effect
 
 /--
-Build a layer, supply its service to a program, and run the resulting deep
-instruction tree.
+Build a layer, supply its service to a program, and send execution events to
+`diagram`.
 -/
-def run.{uin, uout}
+def runWithDiagram.{uin, uout}
     (self : Layer.{uin, uout} RIn E ROut)
     (input : RIn)
     (program : Z ROut E A)
-    (fiberId : FiberId := "main")
-    (useDiagram : Option String := none) : IO (Exit E A) := do
+    (diagram : ExecutionDiagram (IO Unit))
+    (fiberId : FiberId := "main") : IO (Exit E A) := do
   let builtAndRun : HEIO (Cause E) (ULift.{uout} (Exit E A)) :=
     HEIO.bind (self.build input) fun resource =>
       let runProgram :=
         HEIO.bind
           (HEIO.liftIO.{uout} Cause.die <|
-            Z.unsafeRunSync
+            Z.unsafeRunSyncWithDiagram
               (program.provideEnvironment resource.value)
-              fiberId
-              useDiagram)
+              diagram
+              fiberId)
           fun result =>
             match result.down with
             | .success _ => HEIO.pure result
@@ -425,5 +425,16 @@ def run.{uin, uout}
   match <- HEIO.toIOResult builtAndRun with
   | .ok result => pure result
   | .error cause => pure (.failure cause)
+
+/--
+Build a layer, supply its service to a program, and run the resulting deep
+instruction tree without visual tracing.
+-/
+def run.{uin, uout}
+    (self : Layer.{uin, uout} RIn E ROut)
+    (input : RIn)
+    (program : Z ROut E A)
+    (fiberId : FiberId := "main") : IO (Exit E A) :=
+  runWithDiagram self input program ExecutionDiagram.empty fiberId
 
 end Layer

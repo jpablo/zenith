@@ -23,25 +23,3 @@ namespace Console
     Z.serviceWithZ fun console => console.readLine
         
 end Console
-
-/-! A low-universe `IO` service retained for compatibility. -/
-
-structure ConsoleIO where
-  printLine (line : String) : IO Unit
-  readLine : IO String
-
-namespace ConsoleIO
-
-  def consoleLive: ConsoleIO where
-    printLine line := IO.println line
-    readLine := do (<- IO.getStdin).getLine
-
-  /-! accessors -/
-  
-  def printLineZ (line : String) : Z ConsoleIO Empty Unit := do
-    (<- Z.service ConsoleIO).printLine line
-
-  def readLineZ : Z ConsoleIO Empty String := do
-    (<- .service ConsoleIO).readLine
-
-end ConsoleIO

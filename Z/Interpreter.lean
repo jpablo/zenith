@@ -1,6 +1,5 @@
 import Z.Combinators
-import Z.Colors
-import Z.GraphvizDiagram
+import Z.ExecutionDiagram
 import Z.InterpreterModels
 import Init.System.Promise
 
@@ -231,7 +230,7 @@ mutual
     if state.loggingEnabled then
       logRunLoop s!". {self.showHead} ({self.label})"
 
-    let color := if diagram.enabled then Colors.get state.fiberId else ""
+    let color := diagram.color state.fiberId
     let startedAt ←
       if diagram.enabled then IO.monoMsNow.toIO else pure 0
     let shouldInterrupt ← state.interruption.shouldInterrupt
@@ -241,7 +240,7 @@ mutual
         logRunLoop s!"shouldInterrupt: {shouldInterrupt}"
       self.runWithInterruption startedAt state
     else
-      -- Write the Graphviz node for the current effect.
+      -- Send the current effect to the configured execution observer.
       let diagramDefect ← captureDefect do
         if diagram.enabled then
           diagram.currentNode
@@ -557,6 +556,29 @@ open IO
 
 namespace Z
 
+/--
+Run a closed Zenith effect with an explicit execution observer.
+
+The default runner uses `ExecutionDiagram.empty`. Import `Z.Debug` to use
+the Graphviz observer.
+-/
+def unsafeRunSyncWithDiagram
+    (self : Z Unit E A)
+    (diagram : ExecutionDiagram (IO Unit))
+    (fiberId : FiberId := "main") : IO (Exit E A) := do
+  diagram.header
+  let startTime ←
+    if diagram.enabled then IO.monoMsNow.toIO else pure 0
+  let exit ← ZCore.unsafeRunInline
+    diagram
+    (self.close ())
+    Environment.empty
+    ""
+    fiberId
+    startTime
+  diagram.footer
+  pure exit
+
 /-- Start a closed Zenith effect and return its fiber without waiting. -/
 def unsafeFork
     (self : Z Unit E A)
@@ -572,25 +594,7 @@ def unsafeFork
 /-- Run a closed Zenith effect with the fiber interpreter. -/
 def unsafeRunSync
     (self : Z Unit E A)
-    (fiberId : FiberId := "main")
-    (useDiagram : Option String := none) : IO (Exit E A) := do
-  let diagram ←
-    match useDiagram with
-    | some file =>
-        pure <| GraphViz.graphvizIO <|
-          ← FS.Handle.mk file FS.Mode.write
-    | none => pure ExecutionDiagram.empty
-  diagram.header
-  let startTime ←
-    if diagram.enabled then IO.monoMsNow.toIO else pure 0
-  let exit ← ZCore.unsafeRunInline
-    diagram
-    (self.close ())
-    Environment.empty
-    ""
-    fiberId
-    startTime
-  diagram.footer
-  pure exit
+    (fiberId : FiberId := "main") : IO (Exit E A) :=
+  unsafeRunSyncWithDiagram self ExecutionDiagram.empty fiberId
 
 end Z

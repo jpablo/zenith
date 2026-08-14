@@ -1,9 +1,10 @@
 import Examples
+import Z.Debug
 
 def dotFile (name: String) := s!"diagrams/{name}.dot"
 
 def runExample (name : String) (program : Z Unit E A) : IO Unit := do
-  match <- Z.unsafeRunSync program name (some (dotFile name)) with
+  match <- Z.Debug.runWithGraphviz program (dotFile name) name with
   | .success _ => pure ()
   | .failure _ =>
       throw (IO.userError s!"Example '{name}' failed.")

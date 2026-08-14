@@ -1,6 +1,6 @@
 -- import Z.Environment
 import Z.Combinators
-import Z.GraphvizDiagram
+import Z.ExecutionDiagram
 
 open Fiber
 
@@ -42,4 +42,4 @@ structure RunState (Rfiber) (E A E₁ A₁ : Type) where
 
 /-- Generate a new diagram node ID with `fiberId` as its prefix. -/
 def RunState.newId (self : RunState R E A E₁ A₁) : IO NodeId :=
-  GraphViz.newId self.fiberId
+  ExecutionDiagram.newNodeId self.fiberId

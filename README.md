@@ -14,7 +14,7 @@ The main goals are pedagogical:
 * Dependency Injection
 * Error handling
 * Asynchronous and Concurrent programming
-* Program execution diagram
+* Optional program execution diagrams
 
 ## Status
 
@@ -79,6 +79,19 @@ find . -name "*.lean" | entr -s 'lake build'
 lake exe z
 ```
 
+#### Write execution diagrams
+
+Execution diagrams are optional. A program that needs them must import
+`Z.Debug` and run through its Graphviz helper:
+
+```lean
+import Z.Debug
+
+let exit ← Z.Debug.runWithGraphviz program "diagrams/program.dot" "program"
+```
+
+Normal `import Z` programs do not load the Graphviz writer or its color table.
+
 Run the standalone GitHub issue-sync demo:
 
 ```bash
@@ -120,3 +133,4 @@ This will (re)create a bunch of svg files under `diagrams/*`.
 * [Structured failure causes](docs/causes.md)
 * [Parallel effect composition](docs/parallelism.md)
 * [Retry and repeat schedules](docs/schedules.md)
+* [Execution tracing](docs/debugging.md)

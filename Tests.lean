@@ -1,4 +1,5 @@
 import Z
+import Z.Debug
 import Tests.Support
 import Tests.Regressions
 import Tests.RegressionsProvide
@@ -1405,12 +1406,12 @@ def testObserverRace : IO Unit := do
     assertTrue s!"observer race failed at iteration {index}" (<- observerRaceOnce index)
 
 def testGraphVizEscaping : IO Unit := do
-  let escaped := GraphViz.escapeHtml "<unsafe&label>\"'"
+  let escaped := Z.Debug.GraphViz.escapeHtml "<unsafe&label>\"'"
   assertTrue "Graphviz HTML text was not escaped"
     (escaped == "&lt;unsafe&amp;label&gt;&quot;&#39;")
   assertTrue "Graphviz did not quote an identifier"
-    (GraphViz.quoteId "id\"with-quote" == "\"id\\\"with-quote\"")
-  let node := GraphViz.formatNode
+    (Z.Debug.GraphViz.quoteId "id\"with-quote" == "\"id\\\"with-quote\"")
+  let node := Z.Debug.GraphViz.formatNode
     "id\"with-quote"
     "effect<&"
     [("label", "<unsafe&label>")]
@@ -1426,7 +1427,7 @@ def testGraphVizEscaping : IO Unit := do
 
 def testGraphVizDiagramEvents : IO Unit :=
   IO.FS.withTempFile fun handle path => do
-    let diagram := GraphViz.graphvizIO handle
+    let diagram := Z.Debug.GraphViz.graphvizIO handle
     let interruption : Interruption := {
       interrupted := ← IO.mkRef true
       isInterruptible := ← IO.mkRef true
@@ -1474,7 +1475,7 @@ def testChildDiagramLifetime : IO Unit := do
     let _ <- (Z.sleep 50 *> Z.succeedNow ()).fork "child"
     pure ()
   let dotFile := "/tmp/zenith-child-regression.dot"
-  let _ <- Z.unsafeRunSync program "parent" (some dotFile)
+  let _ ← Z.Debug.runWithGraphviz program dotFile "parent"
   IO.sleep 75
   let contents <- IO.FS.readFile dotFile
   assertTrue "a child fiber wrote after the Graphviz footer"

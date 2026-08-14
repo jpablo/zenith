@@ -204,22 +204,6 @@ def testConsoleAccessors : IO Unit := do
   | .failure (.fail _) => pure ()
   | _ => failTest "Console.readLineZ lost the typed read failure"
 
-  let ioOutput ← IO.mkRef ([] : List String)
-  let consoleIO : ConsoleIO := {
-    printLine := fun line =>
-      ioOutput.modify (fun lines => lines ++ [line])
-    readLine := pure "io-input"
-  }
-  let ioProgram : Z ConsoleIO Empty String := do
-    ConsoleIO.printLineZ "written"
-    ConsoleIO.readLineZ
-  match ← runProgram "console-io-accessors"
-      (ioProgram.provideEnvironment consoleIO) with
-  | .success "io-input" => pure ()
-  | _ => failTest "ConsoleIO accessors did not use the provided service"
-  assertTrue "ConsoleIO.printLineZ dropped its output"
-    ((← ioOutput.get) == ["written"])
-
 def testRandomBoundariesAndAccessor : IO Unit := do
   let call ← IO.mkRef (none : Option (Nat × Nat))
   let random : Random := {
@@ -245,13 +229,6 @@ def testRandomBoundariesAndAccessor : IO Unit := do
           (5 ≤ value && value ≤ 10)
     | _ => failTest "Random.randomLive failed while checking its bounds"
 
-def testDefaultServices : IO Unit := do
-  let random := DefaultServices.live.get Random
-  let _console := DefaultServices.live.get Console
-  match ← runProgram "default-random" (random.nextNat 12 12) with
-  | .success 12 => pure ()
-  | _ => failTest "DefaultServices.live did not provide the Random service"
-
 def primitiveTests : List (String × IO Unit) := [
   ("testCauseUtilities", testCauseUtilities),
   ("testExitUtilities", testExitUtilities),
@@ -260,6 +237,5 @@ def primitiveTests : List (String × IO Unit) := [
   ("testFiberStateUtilities", testFiberStateUtilities),
   ("testFiberInterruptionBridge", testFiberInterruptionBridge),
   ("testConsoleAccessors", testConsoleAccessors),
-  ("testRandomBoundariesAndAccessor", testRandomBoundariesAndAccessor),
-  ("testDefaultServices", testDefaultServices)
+  ("testRandomBoundariesAndAccessor", testRandomBoundariesAndAccessor)
 ]

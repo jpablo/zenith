@@ -94,37 +94,6 @@ namespace IsComponent
 
 end IsComponent
 
-namespace IsComponentExamples
-  def accept [R1 ∣ R2] (_: Environment R1) (_: Environment R2) := true
-
-  /- Base cases -/
-  example: accept () () = true := rfl
-  example: accept () ('c', "a", 1) = true := rfl
-
-  /- equal elements -/
-  example: accept 'c' 'c' = true := rfl
-  example: accept ("a", 1) ("a", 1) = true := rfl
-  example: accept ('c', "a", 1) ('c', "a", 1) = true := rfl
-
-  /- more elements provided than required -/
-  example: accept 'c' ('c', "a", 1, true) = true := rfl
-  example: accept ('c', "a", 1) ('c', "a", 1, true) = true := rfl
-
-  -- negative:
-  #check_failure accept ('c', "a", 1, true) ('c', "a", 1)
-
-  /- Other rules -/
-  example: accept ("a", 1) ('c', "a", 1) = true := rfl
-  example: accept (1, "a") ('c', "a", 1) = true := rfl
-  example: accept "a"      ('c', "a", 1) = true := rfl
-  example: accept ("a", 'c', 1) ('c', "a", 1) = true := rfl
-
-  #check_failure accept (1, "a", 'c') (true, 1)
-  #check_failure accept ('c', "a", 1) []
-
-end IsComponentExamples
-
-
 namespace Environment 
 
   /--

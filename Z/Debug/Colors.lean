@@ -1,5 +1,5 @@
 
-namespace Colors
+namespace Z.Debug.Colors
 
   def Color := String deriving Inhabited
 
@@ -207,4 +207,4 @@ namespace Colors
     let i := base.hash % all.size
     all[i.toNat]!
 
-end Colors
+end Z.Debug.Colors

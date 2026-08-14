@@ -14,4 +14,11 @@ This file will import files in the directory `zenith/Z/` , and create other defi
 
 Imports are transitive, so that doing a simple `import Z` in a file will bring all the (top level) definitions and namespaces in the tree into scope.
 
-<img src="Zenith-dependencies.svg" alt="Zenith-dependencies" style="zoom:70%;"/>
+## Import layers
+
+`import Z` loads the effect runtime, service and layer APIs, and the generic
+`ExecutionDiagram` observer interface. It does not load visualization code.
+
+`import Z.Debug` loads `Z` and the Graphviz writer. The writer depends on
+`Z.ExecutionDiagram` and `Z.Debug.Colors`, so only programs that request DOT
+output compile and load that implementation.

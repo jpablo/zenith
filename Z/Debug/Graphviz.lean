@@ -1,7 +1,10 @@
 import Z.ExecutionDiagram
+import Z.Debug.Colors
 
+open System
+open IO
 
-namespace GraphViz
+namespace Z.Debug.GraphViz
 
   def escapeHtml (value: String) : String :=
     value.replace "&" "&amp;"
@@ -20,19 +23,8 @@ namespace GraphViz
     let label      := s!"<table {tableStyle}><tr><td {colorAttr} colspan='2'><b>{escapeHtml (toString a)}</b></td></tr>{String.join extras}</table>"
     s!"{quoteId nodeId} [shape=none, label=<{label}> {opts}]"
 
-
-  def newId (name: String): IO NodeId := do
-    let r <- IO.monoNanosNow.toIO
-    return s!"{name}-{r}"
-
-end GraphViz
-
-
-open System
-open IO
-
-/-- Implementation of `ExecutionDiagram` that writes a Graphviz diagram to the specified path -/
-def GraphViz.graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
+/-- Implementation of `ExecutionDiagram` that writes a Graphviz diagram to the specified path. -/
+def graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
 
   let println txt := 
     FS.Handle.putStrLn handle txt
@@ -46,6 +38,7 @@ def GraphViz.graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
   let diagram: ExecutionDiagram (IO Unit) := {
 
     enabled := true
+    color := Colors.get
 
     header := println "digraph D {  node [shape=box]"
 
@@ -80,13 +73,13 @@ def GraphViz.graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
       printNode currentEffectId currentEffectStr (lbl ++ ex) color
 
     done := fun fiberId currentEffectId color msg => do
-      let exitId <- newId fiberId
+      let exitId <- ExecutionDiagram.newNodeId fiberId
       printNode exitId msg [] color
       printArrow currentEffectId exitId
 
     syncTry := fun fiberId currentEffectId before => do
       let after <- IO.monoMsNow.toIO
-      let resultId <- newId fiberId
+      let resultId <- ExecutionDiagram.newNodeId fiberId
       printNode resultId "IO" [("took", s!"{after - before} ms")] "pink"
       printArrow currentEffectId resultId
 
@@ -95,7 +88,7 @@ def GraphViz.graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
 
     async := fun fiberId effectId before => do
       let after <- IO.monoMsNow.toIO
-      let resultId <- newId fiberId
+      let resultId <- ExecutionDiagram.newNodeId fiberId
       printNode resultId "IO" [("took", s!"{after - before} ms")] "pink"
       printArrow effectId resultId s!"[label = \"λ\"]"
 
@@ -119,10 +112,12 @@ def GraphViz.graphvizIO (handle: FS.Handle): ExecutionDiagram (IO Unit) :=
       printArrow e1 e2
 
     provideEnvironment := fun fiberId (currentEffectId effectId: String) color => do
-      let envId <- newId fiberId
+      let envId <- ExecutionDiagram.newNodeId fiberId
       printNode envId "Environment" [] color
       printArrow currentEffectId envId
       printArrow currentEffectId effectId
   }
 
   diagram
+
+end Z.Debug.GraphViz

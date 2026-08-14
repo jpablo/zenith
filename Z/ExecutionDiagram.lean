@@ -4,6 +4,8 @@ import Z.Interruption
 structure ExecutionDiagram (A : Type) where
   /-- Whether the interpreter must prepare and record diagram data. -/
   enabled : Bool
+  /-- Select a display color for one fiber. -/
+  color : FiberId → String
   header : A
   footer : A
   errorHandler : Option NodeId → NodeId → A
@@ -21,22 +23,29 @@ structure ExecutionDiagram (A : Type) where
   widenEnv : NodeId → NodeId → A
   provideEnvironment : String → String → String → String → A
 namespace ExecutionDiagram
-  def empty : ExecutionDiagram (IO Unit) where
-    enabled := false
-    header := IO.unit
-    footer := IO.unit
-    errorHandler _ _ := IO.unit
-    continue_ _ _ := IO.unit
-    interruption _ _ _ _ := IO.unit
-    currentNode _ _ _ _ _ _ _ _ := IO.unit
-    done _ _ _ _ := IO.unit
-    syncTry _ _ _ := IO.unit
-    onSuccess _ _ := IO.unit
-    async _ _ _ := IO.unit
-    fork _ _ _ _ _ _ := IO.unit
-    onSuccessAndFailure _ _ := IO.unit
-    setInterruptStatus _ _ _ := IO.unit
-    widenEnv _ _ := IO.unit
-    provideEnvironment _ _ _ _ := IO.unit
+
+/-- Generate an identifier for one execution-trace node. -/
+def newNodeId (fiberId : FiberId) : IO NodeId := do
+  let time ← IO.monoNanosNow.toIO
+  pure s!"{fiberId}-{time}"
+
+def empty : ExecutionDiagram (IO Unit) where
+  enabled := false
+  color _ := ""
+  header := IO.unit
+  footer := IO.unit
+  errorHandler _ _ := IO.unit
+  continue_ _ _ := IO.unit
+  interruption _ _ _ _ := IO.unit
+  currentNode _ _ _ _ _ _ _ _ := IO.unit
+  done _ _ _ _ := IO.unit
+  syncTry _ _ _ := IO.unit
+  onSuccess _ _ := IO.unit
+  async _ _ _ := IO.unit
+  fork _ _ _ _ _ _ := IO.unit
+  onSuccessAndFailure _ _ := IO.unit
+  setInterruptStatus _ _ _ := IO.unit
+  widenEnv _ _ := IO.unit
+  provideEnvironment _ _ _ _ := IO.unit
 
 end ExecutionDiagram
