@@ -17,5 +17,9 @@ The Markdown files explain the current implementation:
 * `formalization-study-guide.md` gives a guided reading order for the type
   algebra and interpreter formalization.
 
+The [formalization blueprint](../blueprint/README.md) is the project-wide
+status map. It shows the formalization dependencies, the current proof
+boundary, and the next planned boundaries.
+
 Checked formalizations are in `Zenith/Formalization`; compile-time regression
 cases are in `Tests`; and executable examples are in `Examples`.

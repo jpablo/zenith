@@ -4,6 +4,11 @@ This document defines the next formalization steps for the Zenith core type
 algebra. The source specification is in
 [`core-type-algebra.md`](core-type-algebra.md).
 
+For the current status of every formalization track, use the
+[formalization blueprint](../blueprint/README.md). This plan gives the
+historical phase order and the detailed design decisions for the type-algebra
+track.
+
 ## Goal
 
 Create a checked Lean model for this effect type:

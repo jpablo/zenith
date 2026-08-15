@@ -9,3 +9,9 @@
 
 .DS_Store
 .claude/worktrees/
+
+# Generated Lean Blueprint output.
+/blueprint/print/
+/blueprint/web/
+/blueprint/lean_decls
+/blueprint/src/*.paux

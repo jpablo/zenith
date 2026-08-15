@@ -17,6 +17,8 @@ The main goals are pedagogical:
 * [`Tests/`](Tests/README.md) contains the regression suite.
 * [`Benchmarks/`](Benchmarks/README.md) contains interpreter measurements.
 * [`docs/`](docs/README.md) contains design notes and formalization work.
+* [`blueprint/`](blueprint/README.md) contains the whole formalization status
+  map and its generated dependency graph source.
 * [`diagrams/`](diagrams/README.md) contains Graphviz execution diagrams.
 
 ## Features

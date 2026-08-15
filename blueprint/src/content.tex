@@ -1,0 +1,296 @@
+% This file is the shared source for the browser and PDF blueprints.
+
+\chapter{Purpose and current position}
+
+Zenith is an effect library written in Lean. Its formalization does not try to
+prove every runtime feature at once. It formalizes one small boundary, proves
+the model, relates the model to a production representation, and then extends
+the boundary. This blueprint is the single status map for that work.
+
+\section{How to read this blueprint}
+
+Each completed item has a Lean declaration name. A green check means that the
+named declaration exists and Lean's kernel checked it. The browser buttons
+become public source links after an optional API-documentation deployment.
+This does \emph{not} automatically mean that all production behavior is
+proved. The evidence label states the exact scope:
+
+\begin{description}
+  \item[Kernel-proved] A theorem in \texttt{Prop} holds for every value in its
+    stated Lean domain.
+  \item[Production-connected] A checked relation connects an abstract model
+    to an existing Zenith representation.
+  \item[Fixture-checked] A regression program must elaborate, or must fail to
+    elaborate. This checks representative elaborator behavior.
+  \item[Planned] The property is a design target. It is not yet a theorem or a
+    complete production connection.
+\end{description}
+
+The browser version also draws the dependencies declared with \texttt{uses}.
+The formalization study guide gives the detailed method and reading order.
+
+\section{Status board}
+
+\begin{center}
+\begin{tabular}{p{0.27\textwidth}p{0.18\textwidth}p{0.45\textwidth}}
+\textbf{Track} & \textbf{Status} & \textbf{Current boundary} \\
+\hline
+Type algebra & Complete & Requirements as intersections and errors as unions,
+  including canonical normal forms. \\
+Production type connection & Complete with stated limits & Stable service rows,
+  nested error shapes, and variance connect to production values. Arbitrary
+  Lean error-type canonicalization remains fixture-checked. \\
+Sequential semantics & Complete & A pure evaluator, a typed stack machine,
+  and finite-step refinement cover six sequential instructions. \\
+Executable sequential routing & Complete & The extracted dispatcher has
+  reduction and conformance theorems for instruction and continuation routing.
+  \\
+Interpreter driver and async protocol & Active next boundary & Preserve the
+  same-task and immediate-callback fast paths while specifying one resume-gate
+  protocol or a one-loop driver. \\
+Whole-runtime correctness & Planned & Fibers, interruption, scheduling,
+  external IO, logging, diagrams, clocks, promises, references, and queues
+  are outside the present theorem. \\
+\end{tabular}
+\end{center}
+
+\section{Method: model, connect, refine}
+
+The formalization has four repeated stages:
+
+\begin{enumerate}
+  \item Select a behavior small enough to state without unrelated runtime
+    details.
+  \item Define a semantic model and prove its internal laws.
+  \item State a correspondence between the model and a production
+    representation.
+  \item Prove that a production transition simulates the model transition,
+    then link that transition to executable code when possible.
+\end{enumerate}
+
+This sequence avoids a common error: treating a theorem about a convenient
+model as a theorem about the executable interpreter. Each new connection
+reduces that gap, but the blueprint keeps the remaining gap visible.
+
+\chapter{Type-level effect algebra}
+
+\section{Abstract requirements and errors}
+
+\begin{definition}[Requirement intersection]
+\label{def:requirement-intersection}
+\lean{Zenith.Formalization.TypeAlgebra.Requirement.and_isGreatestLowerBound}
+\leanok
+For a service type, \texttt{Requirement} has \texttt{any}, \texttt{service},
+and \texttt{and} forms. Its subtyping order uses reverse service-set
+inclusion. Therefore \texttt{and} is a greatest lower bound: a requirement
+for both services is below either requirement.
+\end{definition}
+
+\begin{theorem}[Requirement canonical forms]
+\label{thm:requirement-normal-forms}
+\uses{def:requirement-intersection}
+\lean{Zenith.Formalization.TypeAlgebra.Requirement.normalForm_eq_of_equivalent}
+\leanok
+For ordered service leaves, semantically equivalent requirements have exactly
+equal sorted, duplicate-free normal forms. This moves associativity,
+commutativity, and idempotence from equivalence to exact equality of the
+canonical representation.
+\end{theorem}
+
+\begin{definition}[Error union]
+\label{def:error-union}
+\lean{Zenith.Formalization.TypeAlgebra.ErrorType.or_isLeastUpperBound}
+\leanok
+For a failure type, \texttt{ErrorType} has \texttt{nothing}, \texttt{failure},
+and \texttt{or} forms. Its subtyping order uses ordinary failure-set
+inclusion. Therefore \texttt{or} is a least upper bound.
+\end{definition}
+
+\begin{theorem}[Error canonical forms]
+\label{thm:error-normal-forms}
+\uses{def:error-union}
+\lean{Zenith.Formalization.TypeAlgebra.ErrorType.normalForm_eq_of_equivalent}
+\leanok
+For ordered failure leaves, semantically equivalent errors have exactly equal
+canonical normal forms.
+\end{theorem}
+
+\section{Connections to Zenith values}
+
+\begin{theorem}[Service-row provision]
+\label{thm:service-row-provision}
+\uses{def:requirement-intersection,thm:requirement-normal-forms}
+\lean{Zenith.Formalization.ServiceRows.canProvide_provides, Zenith.Formalization.ServiceRows.canProvide_nonempty_of_provides}
+\leanok
+Typed \texttt{Environment.CanProvide} evidence implies the abstract
+provision relation for stable keyed service rows. Conversely, provision plus
+row coherence gives nonempty typed projection evidence. The coherence
+condition prevents incompatible entries with the same key from being treated
+as one service.
+\end{theorem}
+
+\begin{theorem}[Nested error-shape injection]
+\label{thm:error-shape-injection}
+\uses{def:error-union,thm:error-normal-forms}
+\lean{Zenith.Formalization.ErrorShape.joinUpperBound}
+\leanok
+The selected production representation is nested \texttt{Sum}. A checked
+syntax describes its shapes and proves branch-injection evidence for their
+join. The automatic flattening, ordering, and duplicate removal of arbitrary
+Lean error types remains fixture-checked because arbitrary \texttt{Type}
+values have no stable public error key.
+\end{theorem}
+
+\begin{theorem}[Effect variance and composition]
+\label{thm:effect-variance}
+\uses{thm:service-row-provision,thm:error-shape-injection}
+\lean{Zenith.Formalization.VarianceLaws.flatMapMeetJoin}
+\leanok
+The production API checks the ZIO-shaped rule: environment requirements meet,
+while error channels join during heterogeneous sequential composition. The
+focused coercions and adaptation functions are checked by the accompanying
+variance laws and compile-time tests.
+\end{theorem}
+
+\chapter{Sequential interpreter correctness}
+
+\section{Semantic model}
+
+\begin{definition}[Deterministic pure evaluation]
+\label{def:sequential-evaluation}
+\lean{Zenith.Formalization.SequentialCore.evaluates_deterministic}
+\leanok
+\texttt{SequentialCore.Program} contains the first six sequential
+instructions: completed exits, \texttt{flatMap}, \texttt{foldCauseM},
+environment adaptation, environment reads, and supplied environments.
+\texttt{Evaluates} gives their big-step meaning and has deterministic final
+exits.
+\end{definition}
+
+\begin{theorem}[Evaluation reaches the typed machine]
+\label{thm:evaluation-machine}
+\uses{def:sequential-evaluation}
+\lean{Zenith.Formalization.SequentialMachine.evaluation_runs_to_halt}
+\leanok
+Every direct evaluation of the model reaches the same final exit through a
+typed continuation-stack machine. This establishes the operational model for
+the next refinement steps.
+\end{theorem}
+
+\begin{theorem}[Production stack correspondence]
+\label{thm:stack-correspondence}
+\uses{thm:evaluation-machine}
+\lean{Zenith.Formalization.SequentialRuntimeStack.corresponding_size}
+\leanok
+Every pure continuation stack has a corresponding production \texttt{Stack},
+and the correspondence preserves the frame count exactly. It also records the
+saved environments and projection evidence that the runtime stack carries.
+\end{theorem}
+
+\section{Production-shaped transitions}
+
+\begin{theorem}[One production transition refines one machine transition]
+\label{thm:sequential-step-refinement}
+\uses{thm:evaluation-machine,thm:stack-correspondence}
+\lean{Zenith.Formalization.SequentialRuntime.step_refines}
+\leanok
+For each model-machine step, a corresponding pure production transition
+exists. The relation uses lowered production \texttt{ZCore} instructions,
+the real production continuation stack, and saved environment evidence.
+\end{theorem}
+
+\begin{theorem}[Finite sequential refinement]
+\label{thm:sequential-steps-refinement}
+\uses{thm:sequential-step-refinement}
+\lean{Zenith.Formalization.SequentialRuntime.steps_refine}
+\leanok
+The one-step simulation extends to every finite execution of the selected
+sequential model.
+\end{theorem}
+
+\section{Executable dispatcher connection}
+
+\begin{theorem}[Executable instruction routing conforms]
+\label{thm:dispatcher-run}
+\uses{thm:sequential-step-refinement}
+\lean{Zenith.Formalization.SequentialDispatcher.run_models_step}
+\leanok
+\texttt{Z.Runtime.Sequential.run} is the extracted executable dispatcher.
+For each lowered model instruction, its routing result corresponds to one
+production transition.
+\end{theorem}
+
+\begin{theorem}[Executable continuation routing conforms]
+\label{thm:dispatcher-resume}
+\uses{thm:dispatcher-run,thm:stack-correspondence}
+\lean{Zenith.Formalization.SequentialDispatcher.success_models_step, Zenith.Formalization.SequentialDispatcher.failure_models_step}
+\leanok
+The executable success and failure routing functions make the same choices as
+the production transition relation for lowered continuation frames.
+\end{theorem}
+
+\chapter{Next proof boundaries}
+
+\section{Interpreter driver and asynchronous registration}
+
+\begin{definition}[Resume-gate protocol]
+\label{def:resume-gate}
+\uses{thm:dispatcher-run,thm:dispatcher-resume}
+\notready
+The next recommended boundary specifies one asynchronous registration and
+resume-gate protocol. It must distinguish completion during registration from
+completion after registration. The former must continue on the current task;
+the latter may need a task hop. This is a planned model and proof, not a
+completed theorem.
+\end{definition}
+
+\begin{definition}[One-loop interpreter driver]
+\label{def:interpreter-driver}
+\uses{thm:dispatcher-run,thm:dispatcher-resume}
+\notready
+An alternative next boundary extracts a small driver around the present
+dispatcher. The goal is to make the decision part total where possible. The
+complete driver can still need \texttt{partial}, because an effect can wait
+for a callback or run forever. This item needs a design decision before work
+starts.
+\end{definition}
+
+\section{Runtime work outside the current theorem}
+
+\begin{definition}[Whole-runtime extension]
+\label{def:whole-runtime-extension}
+\uses{def:resume-gate,def:interpreter-driver}
+\notready
+Later boundaries can cover interruption, fibers, scheduling, external IO,
+logging, diagrams, clocks, promises, mutable references, queues, streams, and
+scopes. They should enter one behavior at a time. They are not implied by the
+current sequential proofs.
+\end{definition}
+
+\section{Performance obligations}
+
+Formal proofs in \texttt{Prop} are erased, but an interpreter refactor can
+still add allocations, closures, queue operations, or task creation. Every
+driver or async change must preserve these measured behavior requirements:
+
+\begin{enumerate}
+  \item Ordinary synchronous steps continue on the caller task.
+  \item A callback that completes during registration resumes inline.
+  \item Sequential steps do not pass through a queue.
+  \item The synchronous and immediate-async benchmark paths do not gain task
+    creation.
+  \item The benchmark comparison covers \texttt{flatMap}, \texttt{sync},
+    error recovery, immediate async completion, and fork/join.
+\end{enumerate}
+
+These are engineering acceptance conditions, not kernel theorems. The exact
+baseline and commands are in \texttt{docs/interpreter-refactor-plan.md} and
+\texttt{Benchmarks/README.md}.
+
+\chapter{Maintenance rule}
+
+Update this blueprint in the same change as a proof-boundary change. A new
+theorem needs a declaration link, dependencies, a status label, and a clear
+statement of what remains outside its domain. Run the checked-formalization
+build and the declaration-check file before claiming that a status item is
+complete.
