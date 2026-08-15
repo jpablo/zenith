@@ -21,7 +21,9 @@ def runtimeStackSize : RuntimeStack E A -> Nat
 
 /--
 The pure stack corresponds to a production stack when it has the same
-continuation frames, compiled through `SequentialCore.toZCore`.
+continuation frames, compiled through `SequentialCore.toZCore`. Each frame
+also records that the production environment and its `CanProvide` evidence
+recover the exact environment stored by the pure machine.
 
 The production stack indexes only its immediate continuation. `RuntimeStack`
 therefore hides that index while retaining the complete stack value.
@@ -37,15 +39,19 @@ inductive Corresponds
       (tail : SequentialMachine.Stack E B E₁ A₁)
       (runtimeTail : _root_.Stack E B E₂ A₂) :
       Corresponds complete tail (.pack runtimeTail) ->
+      (parentId : Option NodeId) ->
+      (validEnv : Environment.CanProvide Rfiber R) ->
+      (runtimeEnvironment : Environment Rfiber) ->
+      validEnv.provide runtimeEnvironment = environment ->
       Corresponds complete (.flatMap next environment tail)
         (.pack (.more
           (fun value => toZCore (next value))
           none
           (some (.up rfl))
           runtimeTail
-          none
-          inferInstance
-          environment))
+          parentId
+          validEnv
+          runtimeEnvironment))
   | foldCauseM
       (errorHandler : Cause E -> Program R EHandler B)
       (next : A -> Program R EHandler B)
@@ -53,15 +59,19 @@ inductive Corresponds
       (tail : SequentialMachine.Stack EHandler B E₁ A₁)
       (runtimeTail : _root_.Stack EHandler B E₃ A₃) :
       Corresponds complete tail (.pack runtimeTail) ->
+      (parentId : Option NodeId) ->
+      (validEnv : Environment.CanProvide Rfiber R) ->
+      (runtimeEnvironment : Environment Rfiber) ->
+      validEnv.provide runtimeEnvironment = environment ->
       Corresponds complete (.foldCauseM errorHandler next environment tail)
         (.pack (.more
           (fun value => toZCore (next value))
           (some fun cause => toZCore (errorHandler cause))
           none
           runtimeTail
-          none
-          inferInstance
-          environment))
+          parentId
+          validEnv
+          runtimeEnvironment))
 
 /-- Count continuation frames in the verified pure stack. -/
 def stackSize : SequentialMachine.Stack E A E₁ A₁ -> Nat
@@ -76,9 +86,10 @@ theorem exists_corresponding_runtimeStack
     ∃ runtimeStack, Corresponds complete stack runtimeStack := by
   induction stack with
   | done => exact ⟨.pack (.done complete), .done⟩
-  | flatMap next environment tail inductionHypothesis =>
+  | @flatMap A R E B E₁ A₁ next environment tail inductionHypothesis =>
       obtain ⟨runtimeTail, correspondence⟩ := inductionHypothesis complete
       rcases runtimeTail with ⟨runtimeTail⟩
+      let validEnv : Environment.CanProvide R R := ⟨id⟩
       exact ⟨
         .pack (.more
           (fun value => toZCore (next value))
@@ -86,13 +97,14 @@ theorem exists_corresponding_runtimeStack
           (some (.up rfl))
           runtimeTail
           none
-          inferInstance
+          validEnv
           environment),
-        .flatMap next environment tail runtimeTail correspondence
+        .flatMap next environment tail runtimeTail correspondence none validEnv environment rfl
       ⟩
-  | foldCauseM errorHandler next environment tail inductionHypothesis =>
+  | @foldCauseM E R EHandler B A E₁ A₁ errorHandler next environment tail inductionHypothesis =>
       obtain ⟨runtimeTail, correspondence⟩ := inductionHypothesis complete
       rcases runtimeTail with ⟨runtimeTail⟩
+      let validEnv : Environment.CanProvide R R := ⟨id⟩
       exact ⟨
         .pack (.more
           (fun value => toZCore (next value))
@@ -100,9 +112,10 @@ theorem exists_corresponding_runtimeStack
           none
           runtimeTail
           none
-          inferInstance
+          validEnv
           environment),
         .foldCauseM errorHandler next environment tail runtimeTail correspondence
+          none validEnv environment rfl
       ⟩
 
 /-- Corresponding stacks have exactly the same continuation-frame count. -/
@@ -111,13 +124,14 @@ theorem corresponding_size
     runtimeStackSize runtimeStack = stackSize stack := by
   induction correspondence with
   | done => rfl
-  | flatMap next environment tail runtimeTail tailCorrespondence tailInductionHypothesis =>
+  | flatMap next environment tail runtimeTail tailCorrespondence parentId validEnv
+      runtimeEnvironment environmentMatches tailInductionHypothesis =>
       change 1 + _root_.Stack.size runtimeTail = 1 + stackSize tail
       have tailSize : _root_.Stack.size runtimeTail = stackSize tail := by
         simpa [runtimeStackSize] using tailInductionHypothesis
       exact congrArg (fun count => 1 + count) tailSize
-  | foldCauseM errorHandler next environment tail runtimeTail tailCorrespondence
-      tailInductionHypothesis =>
+  | foldCauseM errorHandler next environment tail runtimeTail tailCorrespondence parentId
+      validEnv runtimeEnvironment environmentMatches tailInductionHypothesis =>
       change 1 + _root_.Stack.size runtimeTail = 1 + stackSize tail
       have tailSize : _root_.Stack.size runtimeTail = stackSize tail := by
         simpa [runtimeStackSize] using tailInductionHypothesis

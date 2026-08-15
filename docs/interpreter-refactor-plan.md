@@ -100,6 +100,23 @@ The refactor must preserve these properties:
 6. Add fibers, interruption, diagrams, logging, and defect handling in
    separate changes.
 
+## Formalization status
+
+The semantic preparation for steps 2 and 3 is complete:
+
+* `SequentialCore.lean` defines the pure sequential instruction subset.
+* `SequentialMachine.lean` proves its typed stack-machine behavior.
+* `SequentialRuntimeStack.lean` relates model frames to production `Stack`
+  frames, including their saved environment evidence.
+* `SequentialRuntime.lean` defines a production-shaped pure transition
+  relation and proves that every finite model execution has a matching
+  transition sequence.
+
+This is a specification and refinement result, not yet a theorem about the
+private executable `runLoop`. Step 2 remains open: extract a module-visible
+pure dispatcher from `runLoop`, make it implement this relation, and then
+measure the runtime before replacing any recursive driver calls.
+
 Every step must run:
 
 ```sh

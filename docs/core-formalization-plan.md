@@ -61,6 +61,7 @@ Scala and Lean use the same runtime representation.
 | `Zenith/Formalization/SequentialCore.lean` | Pure sequential interpreter model and evaluation laws |
 | `Zenith/Formalization/SequentialMachine.lean` | Pure typed stack machine and model-to-machine proof |
 | `Zenith/Formalization/SequentialRuntimeStack.lean` | Pure-to-production stack correspondence |
+| `Zenith/Formalization/SequentialRuntime.lean` | Production-shaped sequential transition relation and refinement proof |
 | `docs/core-type-algebra.md` | User-facing specification and final status |
 
 Keep the abstract model in the optional `ZenithFormalization` library. Do not
@@ -362,13 +363,24 @@ interpreter.
 [`SequentialRuntimeStack.lean`](../Zenith/Formalization/SequentialRuntimeStack.lean)
 connects these verified frames to the production `Stack` type. It proves that
 every pure continuation stack has a corresponding production stack and that
-the frame count is preserved exactly. This is a structural bridge only; it
-does not run `IO` or establish a theorem about `runLoop` execution.
+the frame count is preserved exactly. It also records each frame's available
+environment and `CanProvide` evidence, with a proof that they recover the
+model environment.
 
-This is not yet a proof of the executable interpreter. The next step is a
-refinement proof for the matching branches of `runLoop`. Raw `IO`, callbacks,
-fibers, interruption, logging, diagrams, clocks, promises, and mutable
-references remain outside this first proof boundary.
+[`SequentialRuntime.lean`](../Zenith/Formalization/SequentialRuntime.lean)
+defines a production-shaped pure transition relation for all eleven branches
+in this sequential subset. Its `step_refines` theorem proves that every
+machine step has a matching transition using the lowered production `ZCore`,
+the real production `Stack`, and the saved environment evidence.
+`steps_refine` extends this result to every finite machine execution.
+
+This is not yet a proof of the executable interpreter. `SequentialRuntime`
+is a pure relation that mirrors the relevant branches of the private
+`runLoop`; it does not execute the `IO` bookkeeping in that function. The
+next step is to extract a module-visible pure dispatcher from `runLoop` and
+connect its result directly to this relation. Raw `IO`, callbacks, fibers,
+interruption, logging, diagrams, clocks, promises, and mutable references
+remain outside this first proof boundary.
 
 The matching runtime-refactor and benchmark constraints are in
 [`interpreter-refactor-plan.md`](interpreter-refactor-plan.md). They are not

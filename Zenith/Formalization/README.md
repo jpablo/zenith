@@ -23,6 +23,10 @@ This folder contains optional machine-checked statements about Zenith.
 * `SequentialRuntimeStack.lean` connects verified pure continuation stacks to
   the production `Stack` representation and proves exact frame-count
   preservation.
+* `SequentialRuntime.lean` defines a pure transition relation for the
+  sequential production interpreter branches. It records the available
+  environment and `CanProvide` evidence that `runLoop` saves in each frame,
+  and proves one-step and finite-sequence refinement from the pure machine.
 
 This is a separate optional library. Application programs do not need to
 import it.
