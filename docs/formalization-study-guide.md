@@ -53,6 +53,68 @@ Run these commands from the project root:
 Some test output reports intentional failed elaboration checks. The final
 result must say that all regression tests passed.
 
+## Methodology: formalize by refinement
+
+We do not try to prove the whole existing project correct in one step. That
+would combine typed effects, mutable state, Lean IO, callbacks, concurrency,
+interruption, logging, and diagrams in one large statement. Such a statement
+would be difficult to define, test, and maintain.
+
+Instead, we use **incremental refinement**. We define a small model of one
+behavior, prove facts about the model, and connect the model to progressively
+more of the production implementation. Each connection reduces the gap
+between what is proved and what executes.
+
+The method has these stages:
+
+| Stage | Question | Zenith artifact | Why it exists |
+|---|---|---|---|
+| 1. Select a boundary | Which behavior is small enough to state exactly? | The type algebra; then the pure sequential interpreter subset. | It prevents unrelated runtime features from hiding the core behavior. |
+| 2. Specify behavior | What should that boundary mean without implementation details? | `Requirement`, `ErrorType`, `SequentialCore.Program`, and `Evaluates`. | A specification gives the proof a stable target. |
+| 3. Prove the model | Is the specification internally consistent and deterministic? | GLB/LUB, normal-form, and evaluation-determinism theorems. | It finds errors in the design before it is connected to production code. |
+| 4. Relate representations | How does a production value represent the model value? | Service-row, error-shape, and runtime-stack correspondence relations. | It prevents a proof about a toy model from being mistaken for a proof about Zenith data. |
+| 5. Prove simulation | Does each abstract transition have a matching concrete transition? | `step_refines` and `steps_refine`. | It shows that the concrete shape can preserve the model behavior. |
+| 6. Link executable code | Does the function that runs in production use the checked transition? | The planned pure dispatcher extracted from `runLoop`. | This turns the production-shaped relation into a theorem about executable code. |
+| 7. Extend the boundary | Which excluded feature should enter next? | Raw IO, callbacks, interruption, fibers, and observability. | Small extensions keep failures and performance changes understandable. |
+
+Stages 1 through 5 are complete for the current pure sequential subset.
+Stage 6 is the main open interpreter task. The current
+`SequentialRuntime.Step` relation mirrors `runLoop`, but `runLoop` does not
+yet call an extracted dispatcher that implements the relation. Therefore, it
+is a checked specification and simulation result, not yet a correctness
+theorem for the executable interpreter.
+
+### Why this method is useful
+
+It separates three kinds of mistakes that would otherwise be mixed together:
+
+* A **design mistake** means the intended algebra or effect semantics is
+  inconsistent. Model proofs expose this early.
+* A **representation mistake** means the production rows, errors, stacks, or
+  environments do not carry enough information to represent the model.
+  Correspondence relations expose this.
+* An **implementation mistake** means the runtime driver does not follow the
+  checked transition. The dispatcher-to-`runLoop` proof will expose this.
+
+The method also keeps runtime performance under control. The current model
+and its proofs are in `Prop`, so they are erased. A runtime refactor can still
+be slower if it adds allocations, queues, closures, or task creation. That is
+why each change to the executable interpreter must also run the benchmarks.
+
+### What a completed proof will mean
+
+For a selected boundary, the intended final statement has this form:
+
+    If a model program evaluates to an exit,
+    and a production program represents that model program,
+    then the production interpreter reaches the corresponding exit.
+
+This statement needs qualifications. It only covers the selected instruction
+set and stated assumptions. It does not prove the Lean runtime, the operating
+system, or an unmodeled callback. The value is precise: it documents exactly
+which behavior is checked and exactly which behavior remains outside the
+proof.
+
 ## Map of the work
 
 Read the modules in this order:
