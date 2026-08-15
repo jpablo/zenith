@@ -16,6 +16,7 @@ structure Config where
   errorSteps : Nat := 5000
   asyncSteps : Nat := 2000
   forkSteps : Nat := 1000
+  sequentialSteps : Nat := 10000
 
 def Config.default : Config := {}
 
@@ -28,6 +29,7 @@ def Config.quick : Config where
   errorSteps := 250
   asyncSteps := 100
   forkSteps := 50
+  sequentialSteps := 500
 
 private partial def flatMapProgram : Nat -> Nat -> Z Unit Empty Nat
   | 0, total => Z.succeed total
@@ -50,6 +52,16 @@ private partial def syncProgram : Nat -> Nat -> Z Unit Empty Nat
       (Z.fromIO (pure total)).flatMap fun value =>
         syncProgram steps (value + 1)
 
+private partial def contramapProgram : Nat -> Nat -> Z Unit Empty Nat
+  | 0, total => Z.succeed total
+  | steps + 1, total =>
+      (contramapProgram steps (total + 1)).contramap fun environment : Unit => environment
+
+private partial def provideEnvironmentProgram : Nat -> Nat -> Z Unit Empty Nat
+  | 0, total => Z.succeed total
+  | steps + 1, total =>
+      (provideEnvironmentProgram steps (total + 1)).provideEnvironment ()
+
 private partial def errorProgram : Nat -> Nat -> Z Unit Empty Nat
   | 0, total => Z.succeed total
   | steps + 1, total =>
@@ -59,11 +71,27 @@ private partial def errorProgram : Nat -> Nat -> Z Unit Empty Nat
 private def immediateAsync (value : Nat) : Z Unit Empty Nat :=
   Z.async fun callback => callback (.success value)
 
+private def immediateAsyncInterrupt (value : Nat) : Z Unit Empty Nat :=
+  Z.asyncInterrupt fun callback => do
+    callback (.success value)
+    pure IO.unit
+
 private partial def asyncProgram : Nat -> Nat -> Z Unit Empty Nat
   | 0, total => Z.succeed total
   | steps + 1, total =>
       (immediateAsync total).flatMap fun value =>
         asyncProgram steps (value + 1)
+
+private partial def asyncInterruptProgram : Nat -> Nat -> Z Unit Empty Nat
+  | 0, total => Z.succeed total
+  | steps + 1, total =>
+      (immediateAsyncInterrupt total).flatMap fun value =>
+        asyncInterruptProgram steps (value + 1)
+
+private partial def uninterruptibleProgram : Nat -> Nat -> Z Unit Empty Nat
+  | 0, total => Z.succeed total
+  | steps + 1, total =>
+      (uninterruptibleProgram steps (total + 1)).uninterruptible
 
 private partial def forkProgram : Nat -> Nat -> Z Unit Empty Nat
   | 0, total => Z.succeed total
@@ -145,7 +173,11 @@ private def cases (config : Config) : IO (List Case) := do
   let sync := syncProgram config.syncSteps 0
   let errors := errorProgram config.errorSteps 0
   let async := asyncProgram config.asyncSteps 0
+  let asyncInterrupt := asyncInterruptProgram config.asyncSteps 0
   let forks := forkProgram config.forkSteps 0
+  let contramaps := contramapProgram config.sequentialSteps 0
+  let provides := provideEnvironmentProgram config.sequentialSteps 0
+  let uninterruptible := uninterruptibleProgram config.sequentialSteps 0
   pure [
     {
       name := "baseline/io-bind"
@@ -197,6 +229,16 @@ private def cases (config : Config) : IO (List Case) := do
       action := runExpected "benchmark-sync" config.syncSteps sync
     },
     {
+      name := "run/contramap"
+      operations := config.sequentialSteps
+      action := runExpected "benchmark-contramap" config.sequentialSteps contramaps
+    },
+    {
+      name := "run/provide-environment"
+      operations := config.sequentialSteps
+      action := runExpected "benchmark-provide-environment" config.sequentialSteps provides
+    },
+    {
       name := "run/error-recovery"
       operations := config.errorSteps
       action := runExpected "benchmark-error" config.errorSteps errors
@@ -205,6 +247,16 @@ private def cases (config : Config) : IO (List Case) := do
       name := "run/immediate-async"
       operations := config.asyncSteps
       action := runExpected "benchmark-async" config.asyncSteps async
+    },
+    {
+      name := "run/immediate-async-interrupt"
+      operations := config.asyncSteps
+      action := runExpected "benchmark-async-interrupt" config.asyncSteps asyncInterrupt
+    },
+    {
+      name := "run/uninterruptible"
+      operations := config.sequentialSteps
+      action := runExpected "benchmark-uninterruptible" config.sequentialSteps uninterruptible
     },
     {
       name := "run/fork-join"

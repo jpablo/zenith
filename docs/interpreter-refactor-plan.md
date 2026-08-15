@@ -111,11 +111,21 @@ The semantic preparation for steps 2 and 3 is complete:
 * `SequentialRuntime.lean` defines a production-shaped pure transition
   relation and proves that every finite model execution has a matching
   transition sequence.
+* `Z.Runtime.Sequential` is the extracted executable dispatcher. It owns the
+  six instruction-routing transitions and the two continuation-routing
+  transitions. The interpreter now calls it for `runLoop`,
+  `continueOrComplete`, and `runWithErrorHandler`.
+* `SequentialDispatcher.lean` proves constructor reduction laws that connect
+  the dispatcher to the lowered model and production stack shapes.
 
-This is a specification and refinement result, not yet a theorem about the
-private executable `runLoop`. Step 2 remains open: extract a module-visible
-pure dispatcher from `runLoop`, make it implement this relation, and then
-measure the runtime before replacing any recursive driver calls.
+This is a specification, refinement result, and executable dispatcher link.
+`SequentialDispatcher.run_models_step` proves the general instruction-routing
+conformance theorem. `success_models_step` and `failure_models_step` prove
+the analogous general result for continuation delivery through lowered stack
+frames. The next runtime change, if needed, is a driver-loop refactor. It must
+first preserve the current task and same-task async-resume behavior, then pass
+the benchmark comparison. Another valid next proof boundary is one
+asynchronous registration and resume-gate path.
 
 Every step must run:
 

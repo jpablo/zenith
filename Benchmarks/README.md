@@ -99,3 +99,31 @@ ns/op in the same row order. The two runs give the same overall result.
 A later style refactor extracted inline diagram helpers and a typed async
 resume gate. Its verification run measured 316, 171, 186, 388, 301, and
 12,293 ns/op in the same row order. The refactor caused no performance loss.
+
+## Sequential dispatcher extraction
+
+Measured on 2026-08-15 on the same machine and with the default benchmark
+profile. The pre-dispatcher run was taken immediately before extracting
+`Z.Runtime.Sequential`. The post-dispatcher run uses the executable routing
+functions from `runLoop`, `continueOrComplete`, and `runWithErrorHandler`.
+
+| Case | Pre-dispatcher | Post-dispatcher | Change |
+| --- | ---: | ---: | ---: |
+| `baseline/io-bind` | 1 ns/op | <1 ns/op | reference |
+| `baseline/io-task` | 5,623 ns/op | 5,575 ns/op | reference |
+| `baseline/io-ref` | 7 ns/op | 7 ns/op | reference |
+| `run/succeed` | 358 ns/op | 316 ns/op | 1.13× faster |
+| `run/flatMap` | 253 ns/op | 152 ns/op | 1.66× faster |
+| `run/sync` | 266 ns/op | 173 ns/op | 1.54× faster |
+| `run/contramap` | 106 ns/op | 64 ns/op | 1.66× faster |
+| `run/provide-environment` | 106 ns/op | 64 ns/op | 1.66× faster |
+| `run/error-recovery` | 519 ns/op | 362 ns/op | 1.43× faster |
+| `run/immediate-async` | 375 ns/op | 303 ns/op | 1.24× faster |
+| `run/immediate-async-interrupt` | 508 ns/op | 429 ns/op | 1.18× faster |
+| `run/uninterruptible` | 675 ns/op | 429 ns/op | 1.57× faster |
+| `run/fork-join` | 12,272 ns/op | 12,350 ns/op | 1% slower |
+
+The task baseline is unchanged. The small fork/join difference is within one
+benchmark run's normal machine variation. The sequential paths show no
+regression, and the same-task asynchronous-resume path remains below the
+task baseline.

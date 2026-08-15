@@ -27,6 +27,10 @@ This folder contains optional machine-checked statements about Zenith.
   sequential production interpreter branches. It records the available
   environment and `CanProvide` evidence that `runLoop` saves in each frame,
   and proves one-step and finite-sequence refinement from the pure machine.
+* `SequentialDispatcher.lean` checks reduction laws for the executable
+  sequential dispatcher. Its general instruction and continuation theorems
+  show that lowered model instructions and lowered continuation frames make
+  the same routing choices as the pure production transition relation.
 
 This is a separate optional library. Application programs do not need to
 import it.

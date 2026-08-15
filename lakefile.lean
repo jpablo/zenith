@@ -71,7 +71,8 @@ lean_lib ZenithFormalization where
     `Zenith.Formalization.SequentialCore,
     `Zenith.Formalization.SequentialMachine,
     `Zenith.Formalization.SequentialRuntimeStack,
-    `Zenith.Formalization.SequentialRuntime
+    `Zenith.Formalization.SequentialRuntime,
+    `Zenith.Formalization.SequentialDispatcher
   ]
 
 -- Helpers and regression cases for the `tests` executable.

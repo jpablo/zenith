@@ -62,6 +62,7 @@ Scala and Lean use the same runtime representation.
 | `Zenith/Formalization/SequentialMachine.lean` | Pure typed stack machine and model-to-machine proof |
 | `Zenith/Formalization/SequentialRuntimeStack.lean` | Pure-to-production stack correspondence |
 | `Zenith/Formalization/SequentialRuntime.lean` | Production-shaped sequential transition relation and refinement proof |
+| `Zenith/Formalization/SequentialDispatcher.lean` | Reduction laws for the executable sequential dispatcher |
 | `docs/core-type-algebra.md` | User-facing specification and final status |
 
 Keep the abstract model in the optional `ZenithFormalization` library. Do not
@@ -374,13 +375,24 @@ machine step has a matching transition using the lowered production `ZCore`,
 the real production `Stack`, and the saved environment evidence.
 `steps_refine` extends this result to every finite machine execution.
 
-This is not yet a proof of the executable interpreter. `SequentialRuntime`
-is a pure relation that mirrors the relevant branches of the private
-`runLoop`; it does not execute the `IO` bookkeeping in that function. The
-next step is to extract a module-visible pure dispatcher from `runLoop` and
-connect its result directly to this relation. Raw `IO`, callbacks, fibers,
-interruption, logging, diagrams, clocks, promises, and mutable references
-remain outside this first proof boundary.
+`Z.Runtime.Sequential` now contains the module-visible executable dispatcher.
+`runLoop`, `continueOrComplete`, and `runWithErrorHandler` use its three pure
+routing functions. [`SequentialDispatcher.lean`](../Zenith/Formalization/SequentialDispatcher.lean)
+proves reduction laws for all six lowered instructions and the completed,
+success-continuation, and error-handler stack cases. These laws are direct
+links from the executable routing code to the eleven rules in
+`SequentialRuntime.Production.Step`. Its `run_models_step` theorem packages
+the six instruction cases as one conformance theorem. Its
+`success_models_step` and `failure_models_step` theorems do the same for
+continuation delivery through all lowered stack frames.
+
+This is not yet a full proof of the executable interpreter. The proof boundary
+still excludes raw `IO`, callbacks, fibers, interruption, logging, diagrams,
+clocks, promises, mutable references, and the task scheduler. The next step
+is to choose the next proof boundary: either preserve this sequential result
+while introducing a one-loop driver, or formalize one asynchronous branch and
+its resume-gate protocol. Both changes must retain the benchmark constraints
+in `interpreter-refactor-plan.md`.
 
 The matching runtime-refactor and benchmark constraints are in
 [`interpreter-refactor-plan.md`](interpreter-refactor-plan.md). They are not

@@ -1,6 +1,7 @@
 import Z.Combinators
 import Z.Runtime.Trace
 import Z.Runtime.Models
+import Z.Runtime.Sequential
 import Init.System.Promise
 
 open IO (userError)
@@ -72,6 +73,9 @@ interruption reaching a fiber whose registration blocks.
     pure none
   catch ioError =>
     pure (some ioError)
+
+@[inline] private def invalidRuntimeInstruction (message : String) : IO Unit :=
+  throw (userError message)
 
 private def freshFiberId (parentFiberId : FiberId) (name : String) : IO FiberId := do
   let serial ← nextFiberSerial.modifyGet fun current =>
@@ -250,185 +254,203 @@ mutual
         runWithErrorHandler (.die ioError) state
         return
 
-      /-
-      Match on `validEnv` to propagate the instance into each GADT branch.
-      See https://leanprover.zulipchat.com/#narrow/stream/270676-lean4/topic/Help.20understanding.20GADTs
-      -/
-      (match self, validEnv with
+      self.runDispatched startedAt state
 
-        | .done' (Exit.success value) _, _ => do
-          if diagram.enabled then
-            diagram.done state.fiberId self.nodeId color "Exit.success"
-          continueOrComplete value state
 
-        | .done' (Exit.failure cause) _, _ => do
-          if diagram.enabled then
-            diagram.done state.fiberId self.nodeId color "Exit.failure"
-          runWithErrorHandler cause state
-
-        | .succeed' io _, _ => do
-          try
-            let result ← io
+  /--
+  Execute the `IO` and observability work around one instruction routing
+  decision. The state transition for sequential instructions is defined in
+  `Sequential.run`.
+  -/
+  private partial def runDispatched
+      (self : ZCore R E A)
+      [validEnv : Environment.CanProvide Rfiber R]
+      (startedAt : Nat)
+      (state : RunState Rfiber E A E₁ A₁) : IO Unit := do
+    let color := diagram.color state.fiberId
+    match Sequential.run self state (diagramParentId diagram self.nodeId) with
+    | .resume source exit nextState =>
+        match source, exit with
+        | .done, .success value =>
             if diagram.enabled then
-              diagram.syncTry state.fiberId self.nodeId startedAt
-            continueOrComplete result state
-          catch ioError =>
-            let nextEffect := ZCore.done <| .failure <| .die ioError
-            nextEffect.runLoop state
-        | .flatMap effect next _, validEnv' => do
-          let effectNodeId ← freshDiagramNodeId diagram state
-          let effect := prepareDiagramNode diagram effect effectNodeId
-          if diagram.enabled then
-            diagram.onSuccess self.nodeId effect.nodeId
-          /-
-          An `onSuccess` node does not change the error type. Store `E = E₁`
-          so that error-handler lookup can use it later.
-          -/
-          effect.runLoop { state with
-            stack :=
-              .more (E₁ := E) next none (eq_E_E₁? := some (.up rfl))
-                state.stack
-                (parentId := diagramParentId diagram self.nodeId)
-                (validEnv := validEnv') (env := state.environment)
-          }
+              diagram.done state.fiberId self.nodeId color "Exit.success"
+            continueOrComplete value nextState
+        | .done, .failure cause =>
+            if diagram.enabled then
+              diagram.done state.fiberId self.nodeId color "Exit.failure"
+            runWithErrorHandler cause nextState
+        | .environment, .success value =>
+            continueOrComplete value nextState
+        | .environment, .failure cause =>
+            runWithErrorHandler cause nextState
 
-        -- Important special case: `registerCallback` can be `Fiber.await`.
-        | .async register _, _ => do
-          let resumeGate ← AsyncResumeGate.create
-          let deliver (exit : Exit E A) : IO Unit :=
-            completeAsyncExit self.nodeId startedAt exit state
-          let deliverInterrupt : IO Unit := do
-            let interruption ← state.interruption.beginUnwind
-            completeAsyncExit self.nodeId startedAt (.failure .interrupt)
-              { state with interruption }
-          let interrupt := do
-            if ← state.interruption.shouldInterrupt then
-              resumeGate.resumeNow deliverInterrupt
-          let callback (exit : Exit E A) := do
-            if ← state.interruption.shouldInterrupt then
-              resumeGate.resume deliverInterrupt
-            else
-              resumeGate.resume (deliver exit)
-          state.interruption.interruptHandler.set interrupt
+    | .evaluate effect nextState nextValidEnv edge => do
+        let effectNodeId ← freshDiagramNodeId diagram state
+        let effect := prepareDiagramNode diagram effect effectNodeId
+        if diagram.enabled then
+          match edge with
+          | .flatMap _ => diagram.onSuccess self.nodeId effect.nodeId
+          | .foldCauseM _ => diagram.onSuccessAndFailure self.nodeId effect.nodeId
+          | .contramap => diagram.widenEnv self.nodeId effect.nodeId
+          | .provideEnvironment =>
+              diagram.provideEnvironment state.fiberId self.nodeId effect.nodeId color
+        effect.runLoop (validEnv := nextValidEnv) nextState
+
+    | .unsupported => self.runRuntimeInstruction startedAt state
+
+
+  /-- Execute the instruction forms that require direct `IO` runtime work. -/
+  private partial def runRuntimeInstruction
+      (self : ZCore R E A)
+      [validEnv : Environment.CanProvide Rfiber R]
+      (startedAt : Nat)
+      (state : RunState Rfiber E A E₁ A₁) : IO Unit := do
+    /-
+    This dependent eliminator retains the exact indices required by the raw
+    `IO` and fiber branches. The sequential branches are rejected here because
+    `runDispatched` already routed them through `Sequential.run`.
+    -/
+    self.casesOn
+      (motive := fun R E A _ =>
+        Environment.CanProvide Rfiber R ->
+        RunState Rfiber E A E₁ A₁ ->
+        IO Unit)
+      (fun {_ _ _} _ _ _ _ =>
+        throw <| userError
+          "Internal defect: the runtime dispatcher received a completed instruction")
+      (fun {_ R _} io _ validEnv state => do
+        let _ : Environment.CanProvide Rfiber R := validEnv
+        try
+          let result ← io
+          if diagram.enabled then
+            diagram.syncTry state.fiberId self.nodeId startedAt
+          continueOrComplete result state
+        catch ioError =>
+          let nextEffect := ZCore.done <| .failure <| .die ioError
+          nextEffect.runLoop state)
+      (fun {E A _} register _ _ state => do
+        let resumeGate ← AsyncResumeGate.create
+        let deliver (exit : Exit E A) : IO Unit :=
+          completeAsyncExit self.nodeId startedAt exit state
+        let deliverInterrupt : IO Unit := do
+          let interruption ← state.interruption.beginUnwind
+          completeAsyncExit self.nodeId startedAt (.failure .interrupt)
+            { state with interruption }
+        let interrupt := do
+          if ← state.interruption.shouldInterrupt then
+            resumeGate.resumeNow deliverInterrupt
+        let callback (exit : Exit E A) := do
           if ← state.interruption.shouldInterrupt then
             resumeGate.resume deliverInterrupt
           else
-            try register callback
-            catch ioError =>
-              resumeGate.resume (deliver (.failure (.die ioError)))
-          resumeGate.finishRegistration
-
-        | .asyncInterrupt register _, _ => do
-          let resumeGate ← AsyncResumeGate.create
-          let cancelReady ← IO.Promise.new (α := IO Unit)
-          let cancelClaimed ← IO.mkRef false
-          -- Only the first claimant may run the user cancellation action.
-          let claimCancel : IO Bool :=
-            cancelClaimed.modifyGet fun claimed => (!claimed, true)
-          let deliver (exit : Exit E A) : IO Unit :=
-            completeAsyncExit self.nodeId startedAt exit state
-          let deliverUnwind (exit : Exit E A) : IO Unit := do
-            let interruption ← state.interruption.beginUnwind
-            completeAsyncExit self.nodeId startedAt exit
-              { state with interruption }
-          let runCancel : IO Unit := do
-            match ← IO.wait cancelReady.result? with
-            | some cancel =>
-                try
-                  cancel
-                  resumeGate.resumeNow (deliverUnwind (.failure .interrupt))
-                catch ioError =>
-                  resumeGate.resumeNow (deliverUnwind (.failure (.die ioError)))
-            | none =>
+            resumeGate.resume (deliver exit)
+        state.interruption.interruptHandler.set interrupt
+        if ← state.interruption.shouldInterrupt then
+          resumeGate.resume deliverInterrupt
+        else
+          try register callback
+          catch ioError =>
+            resumeGate.resume (deliver (.failure (.die ioError)))
+        resumeGate.finishRegistration)
+      (fun {E A _} register _ _ state => do
+        let resumeGate ← AsyncResumeGate.create
+        let cancelReady ← IO.Promise.new (α := IO Unit)
+        let cancelClaimed ← IO.mkRef false
+        -- Only the first claimant may run the user cancellation action.
+        let claimCancel : IO Bool :=
+          cancelClaimed.modifyGet fun claimed => (!claimed, true)
+        let deliver (exit : Exit E A) : IO Unit :=
+          completeAsyncExit self.nodeId startedAt exit state
+        let deliverUnwind (exit : Exit E A) : IO Unit := do
+          let interruption ← state.interruption.beginUnwind
+          completeAsyncExit self.nodeId startedAt exit
+            { state with interruption }
+        let runCancel : IO Unit := do
+          match ← IO.wait cancelReady.result? with
+          | some cancel =>
+              try
+                cancel
                 resumeGate.resumeNow (deliverUnwind (.failure .interrupt))
-          let interrupt := do
+              catch ioError =>
+                resumeGate.resumeNow (deliverUnwind (.failure (.die ioError)))
+          | none =>
+              resumeGate.resumeNow (deliverUnwind (.failure .interrupt))
+        let interrupt := do
+          if ← state.interruption.shouldInterrupt then
+            if ← claimCancel then
+              -- `runCancel` waits for a registration that may still block.
+              let _ ← IO.asTask runCancel
+              pure ()
+        let callback (exit : Exit E A) := do
+          if ← state.interruption.shouldInterrupt then
+            pure ()
+          else if ← claimCancel then
+            resumeGate.resume (deliver exit)
+        state.interruption.interruptHandler.set interrupt
+        if ← state.interruption.shouldInterrupt then
+          cancelReady.resolve IO.unit
+          if ← claimCancel then
+            resumeGate.resume (deliverUnwind (.failure .interrupt))
+        else
+          try
+            let cancel ← register callback
+            cancelReady.resolve cancel
+            if ← state.interruption.shouldInterrupt then
+              interrupt
+          catch ioError =>
+            cancelReady.resolve IO.unit
             if ← state.interruption.shouldInterrupt then
               if ← claimCancel then
-                -- `runCancel` waits for a registration that may still block.
-                let _ ← IO.asTask runCancel
-                pure ()
-          let callback (exit : Exit E A) := do
-            if ← state.interruption.shouldInterrupt then
-              pure ()
+                resumeGate.resume (deliverUnwind (.failure .interrupt))
             else if ← claimCancel then
-              resumeGate.resume (deliver exit)
-          state.interruption.interruptHandler.set interrupt
-          if ← state.interruption.shouldInterrupt then
-            cancelReady.resolve IO.unit
-            if ← claimCancel then
-              resumeGate.resume (deliverUnwind (.failure .interrupt))
-          else
-            try
-              let cancel ← register callback
-              cancelReady.resolve cancel
-              if ← state.interruption.shouldInterrupt then
-                interrupt
-            catch ioError =>
-              cancelReady.resolve IO.unit
-              if ← state.interruption.shouldInterrupt then
-                if ← claimCancel then
-                  resumeGate.resume (deliverUnwind (.failure .interrupt))
-              else if ← claimCancel then
-                resumeGate.resume (deliver (.failure (.die ioError)))
-          resumeGate.finishRegistration
-
-        | ZCore.fork effect name _, _ => do
-          let newFiberBoxId ← freshDiagramNodeId diagram state
-          let effectId ← freshDiagramNodeId diagram state
-          let effect := prepareDiagramNode diagram effect newFiberBoxId
-          let effect :=
-            if diagram.enabled then effect.setNodeId effectId else effect
-          let fiber ← effect.unsafeRunFiber
-            state.environment state.fiberId name state.initialTime
-          if diagram.enabled then
-            diagram.fork fiber.fiberId self.nodeId effectId startedAt
-              state.initialTime newFiberBoxId
-          state.fiberInfos.modify (fiber.toFiberInfo :: ·)
-          continueOrComplete fiber state
-        | .foldCauseM effect errorHandler next _, validEnv' => do
-          let effectNodeId ← freshDiagramNodeId diagram state
-          let effect := prepareDiagramNode diagram effect effectNodeId
-          if diagram.enabled then
-            diagram.onSuccessAndFailure self.nodeId effect.nodeId
-          effect.runLoop { state with
-            stack :=
-              .more next errorHandler none state.stack
-                (parentId := diagramParentId diagram self.nodeId)
-                (validEnv := validEnv') (env := state.environment)
-          }
-        | .setInterruptStatus effect status _, _ => do
-          let isInterruptible := state.interruption.isInterruptible
-          let oldIsInterruptible ← isInterruptible.get
-          isInterruptible.set status.toBool
-          let restore := isInterruptible.set oldIsInterruptible
-          let effectNodeId ← freshDiagramNodeId diagram state
-          let effect := prepareDiagramNode diagram effect effectNodeId
-          let nextEffect := effect.ensuringUnmasked
-            (.succeed' restore {label := s!"isInterruptible ← {oldIsInterruptible}"})
-          let nextEffectNodeId ← freshDiagramNodeId diagram state
-          let nextEffect :=
-            prepareDiagramNode diagram nextEffect nextEffectNodeId
-          if diagram.enabled then
-            diagram.setInterruptStatus self.nodeId effect.nodeId nextEffect.nodeId
-          nextEffect.runLoop state
-
-        | .contramap f effect _, validEnv' => do
-          let effectNodeId ← freshDiagramNodeId diagram state
-          let effect := prepareDiagramNode diagram effect effectNodeId
-          if diagram.enabled then
-            diagram.widenEnv self.nodeId effect.nodeId
-          effect.runLoop (validEnv := validEnv'.map f) state
-
-        | .environment _ _ , validEnv' => do
-          continueOrComplete (validEnv'.provide state.environment) state
-
-        | .provideEnvironment effect env _ , _ => do
-          let effectNodeId ← freshDiagramNodeId diagram state
-          let effect := prepareDiagramNode diagram effect effectNodeId
-          if diagram.enabled then
-            diagram.provideEnvironment state.fiberId self.nodeId effect.nodeId color
-          effect.runLoop { state with
-            environment := Environment.concat state.environment env })
+              resumeGate.resume (deliver (.failure (.die ioError)))
+        resumeGate.finishRegistration)
+      (fun {_ _ _ _} _ _ _ _ _ =>
+        invalidRuntimeInstruction
+          "Internal defect: the runtime dispatcher received a flatMap instruction")
+      (fun {_ _ _ _ _} _ _ _ _ _ _ =>
+        invalidRuntimeInstruction
+          "Internal defect: the runtime dispatcher received a foldCauseM instruction")
+      (fun {R _ _} effect name _ validEnv state => do
+        let _ : Environment.CanProvide Rfiber R := validEnv
+        let newFiberBoxId ← freshDiagramNodeId diagram state
+        let effectId ← freshDiagramNodeId diagram state
+        let effect := prepareDiagramNode diagram effect newFiberBoxId
+        let effect :=
+          if diagram.enabled then effect.setNodeId effectId else effect
+        let fiber ← effect.unsafeRunFiber
+          state.environment state.fiberId name state.initialTime
+        if diagram.enabled then
+          diagram.fork fiber.fiberId self.nodeId effectId startedAt
+            state.initialTime newFiberBoxId
+        state.fiberInfos.modify (fiber.toFiberInfo :: ·)
+        continueOrComplete fiber state)
+      (fun {R _ _} effect status _ validEnv state => do
+        let _ : Environment.CanProvide Rfiber R := validEnv
+        let isInterruptible := state.interruption.isInterruptible
+        let oldIsInterruptible ← isInterruptible.get
+        isInterruptible.set status.toBool
+        let restore := isInterruptible.set oldIsInterruptible
+        let effectNodeId ← freshDiagramNodeId diagram state
+        let effect := prepareDiagramNode diagram effect effectNodeId
+        let nextEffect := effect.ensuringUnmasked
+          (.succeed' restore {label := s!"isInterruptible ← {oldIsInterruptible}"})
+        let nextEffectNodeId ← freshDiagramNodeId diagram state
+        let nextEffect :=
+          prepareDiagramNode diagram nextEffect nextEffectNodeId
+        if diagram.enabled then
+          diagram.setInterruptStatus self.nodeId effect.nodeId nextEffect.nodeId
+        nextEffect.runLoop state)
+      (fun {_ _ _ _} _ _ _ _ _ =>
+        invalidRuntimeInstruction
+          "Internal defect: the runtime dispatcher received a contramap instruction")
+      (fun {_} _ _ _ =>
+        invalidRuntimeInstruction
+          "Internal defect: the runtime dispatcher received an environment instruction")
+      (fun {_ _ _} _ _ _ _ _ =>
+        invalidRuntimeInstruction
+          "Internal defect: the runtime dispatcher received a provideEnvironment instruction")
+      validEnv state
 
 
   private partial def completeAsyncExit
@@ -457,60 +479,52 @@ mutual
     if state.loggingEnabled then
       RuntimeLog.write state.fiberId
         s!"[runWithErrorHandler] [stack: {Stack.size state.stack}]"
-    -- Search the stack for the next error handler.
-    (match state.stack with
-      -- Use the first error handler to produce the next effect.
-      | .more _ (some errorHandler) _ tail parentId? validEnv env => do
-        let nextEffect := errorHandler cause
+    match Sequential.failure cause state with
+    | .evaluate nextEffect nextState nextValidEnv edge => do
         let nextEffectNodeId ← freshDiagramNodeId diagram state
-        let nextEffect :=
-          prepareDiagramNode diagram nextEffect nextEffectNodeId
+        let nextEffect := prepareDiagramNode diagram nextEffect nextEffectNodeId
         if diagram.enabled then
-          diagram.errorHandler parentId? nextEffect.nodeId
-        nextEffect.runLoop (validEnv := validEnv)
-          { state with
-            interruption := state.interruption.endUnwind
-            stack := tail
-            environment := env }
-
-      -- The error type is unchanged, so continue with the stack tail.
-      | .more _ none (some (.up eq_E_E₁)) tail .. => do
-        let mappedCause : Cause E₁ := cause.map (cast eq_E_E₁)
-        runWithErrorHandler mappedCause { state with stack := tail }
-
-      | .more _ none none .. => do
+          match edge with
+          | .failure parentId => diagram.errorHandler parentId nextEffect.nodeId
+          | .success _ =>
+              throw <| userError "Internal defect: failure resumed through a success edge"
+        nextEffect.runLoop (validEnv := nextValidEnv) nextState
+    | .finish exit fiberInfos complete => do
+        interruptChildren fiberInfos
+        complete exit
+    | .resumeFailure mappedCause nextState =>
+        runWithErrorHandler mappedCause nextState
+    | .invalid =>
         throw <| userError
           "Internal defect: stack entry has no error handler or error-type proof"
-
-      -- Return the unhandled failure to the caller.
-      | .done complete => do
-        interruptChildren state.fiberInfos
-        complete (.failure cause))
 
   /-- Pass a value to the first continuation, or complete the fiber. -/
   private partial def continueOrComplete
       (value : A)
       (state : RunState Rfiber E A E₁ A₁) : IO Unit := do
-    (match state.stack with
-      | .done complete => do
+    match Sequential.success value state with
+    | .finish exit fiberInfos complete => do
         if state.loggingEnabled then
           RuntimeLog.write state.fiberId
             s!"[continueOrComplete] [stack: {Stack.size state.stack}] .done"
-        interruptChildren state.fiberInfos
-        complete (.success value)
-
-      | .more next _ _ tail parentId? validEnv env => do
+        interruptChildren fiberInfos
+        complete exit
+    | .evaluate nextEffect nextState nextValidEnv edge => do
         if state.loggingEnabled then
           RuntimeLog.write state.fiberId
             s!"[continueOrComplete] [stack: {Stack.size state.stack}] .more"
-        let nextEffect := next value
         let nextEffectNodeId ← freshDiagramNodeId diagram state
-        let nextEffect :=
-          prepareDiagramNode diagram nextEffect nextEffectNodeId
+        let nextEffect := prepareDiagramNode diagram nextEffect nextEffectNodeId
         if diagram.enabled then
-          diagram.continue_ parentId? nextEffect.nodeId
-        nextEffect.runLoop (validEnv := validEnv)
-          { state with stack := tail, environment := env })
+          match edge with
+          | .success parentId => diagram.continue_ parentId nextEffect.nodeId
+          | .failure _ =>
+              throw <| userError "Internal defect: success resumed through a failure edge"
+        nextEffect.runLoop (validEnv := nextValidEnv) nextState
+    | .resumeFailure cause nextState =>
+        runWithErrorHandler cause nextState
+    | .invalid =>
+        throw <| userError "Internal defect: invalid success-resume action"
 
   private partial def runWithInterruption
       (self : ZCore R E A)
